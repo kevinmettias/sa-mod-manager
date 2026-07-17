@@ -1,7 +1,10 @@
 use crate::prelude::*;
 use eframe::egui;
 
-use super::san_andreas_mod_ui::{ROW_HEIGHT, ReadmeProposal, ReadmeProposalState, SanAndreasModUi};
+use super::san_andreas_mod_ui::{
+    ModTelemetry, PendingRunStatus, ROW_HEIGHT, ReadmeProposal, ReadmeProposalState,
+    SanAndreasModUi, TelemetryEvent,
+};
 use super::state::{ModConfigItem, UiTab};
 use super::widgets::{
     infrastructure_grid, profile_grid_header, selected_profile_entries, should_add_mod_to_profile,
@@ -27,6 +30,9 @@ impl SanAndreasModUi {
                 // literal: allow external interface text or file-format spelling
                 self.initialize_state();
             }
+            if ui.button("Start").clicked() {
+                self.tab = UiTab::Home;
+            }
         });
         if let Some(summary) = self.pending_cleanup_summary() {
             ui.separator();
@@ -47,11 +53,17 @@ impl SanAndreasModUi {
     pub(super) fn navigation(&mut self, ui: &mut egui::Ui) {
         ui.add_space(8.0);
         ui.selectable_value(&mut self.tab, UiTab::Home, "Start"); // literal: allow external interface text or file-format spelling
+        ui.small("overview and next action");
         ui.selectable_value(&mut self.tab, UiTab::Profiles, "Profiles"); // literal: allow external interface text or file-format spelling
+        ui.small("load order and toggles");
         ui.selectable_value(&mut self.tab, UiTab::Mods, "Library"); // literal: allow external interface text or file-format spelling
+        ui.small("installed packages");
         ui.selectable_value(&mut self.tab, UiTab::Import, "Import Mod"); // literal: allow external interface text or file-format spelling
+        ui.small("readme review");
         ui.selectable_value(&mut self.tab, UiTab::Run, "Play & Cleanup"); // literal: allow external interface text or file-format spelling
+        ui.small("temporary run safety");
         ui.selectable_value(&mut self.tab, UiTab::Telemetry, "Telemetry"); // literal: allow external interface text or file-format spelling
+        ui.small("history and export");
         ui.separator();
         ui.label("Profile"); // literal: allow external interface text or file-format spelling
         let mut changed_profile = false;
@@ -88,6 +100,8 @@ impl SanAndreasModUi {
 impl SanAndreasModUi {
     pub(super) fn status_bar(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
+            ui.strong(readiness_label(self));
+            ui.separator();
             ui.label(&self.status);
             if let Some(journal) = &self.pending_journal {
                 ui.separator();
@@ -104,6 +118,7 @@ impl SanAndreasModUi {
 impl SanAndreasModUi {
     pub(super) fn home_panel(&mut self, ui: &mut egui::Ui) {
         ui.heading("Start");
+        ui.label("Current setup, next action, and cleanup state in one place.");
         ui.separator();
         ui.horizontal_wrapped(|ui| {
             summary_tile(ui, "Profile", &self.selected_profile);
@@ -125,28 +140,22 @@ impl SanAndreasModUi {
             summary_tile(ui, "Runs", &self.telemetry.run_journals.to_string());
         });
         ui.add_space(8.0);
-        ui.horizontal(|ui| {
-            if ui.button("Import a mod").clicked() {
-                self.tab = UiTab::Import;
-            }
-            if ui.button("Review profile").clicked() {
-                self.tab = UiTab::Profiles;
-            }
-            if ui.button("Play profile").clicked() {
-                self.tab = UiTab::Run;
-            }
-            if !self.pending_runs.is_empty() && ui.button("Clean finished runs").clicked() {
-                self.cleanup_stale_pending_runs();
-            }
-            if ui.button("View telemetry").clicked() {
-                self.tab = UiTab::Telemetry;
-            }
-        });
+        self.next_action_panel(ui);
+        ui.separator();
+        self.workflow_panel(ui);
         ui.separator();
         ui.heading("Current Profile");
         let entries = selected_profile_entries(&self.state, &self.selected_profile);
         if entries.is_empty() {
-            ui.label("No mods selected.");
+            ui.label("No mods selected for this profile.");
+            ui.horizontal(|ui| {
+                if ui.button("Open library").clicked() {
+                    self.tab = UiTab::Mods;
+                }
+                if ui.button("Import first mod").clicked() {
+                    self.tab = UiTab::Import;
+                }
+            });
         } else {
             egui::Grid::new("home_profile_summary")
                 .striped(true)
@@ -163,10 +172,21 @@ impl SanAndreasModUi {
                         ui.end_row();
                     }
                 });
+            if entries.len() > 8 {
+                ui.label(format!(
+                    "{} more profile entries hidden.",
+                    entries.len() - 8
+                ));
+            }
+            if ui.button("Edit profile load order").clicked() {
+                self.tab = UiTab::Profiles;
+            }
         }
         ui.separator();
         ui.heading("Game Setup");
         infrastructure_grid(ui, &self.state.infrastructure);
+        ui.separator();
+        self.recent_signal_panel(ui);
     }
 }
 
@@ -186,15 +206,262 @@ fn enabled_profile_count(ui_state: &SanAndreasModUi) -> usize {
 }
 
 impl SanAndreasModUi {
+    fn next_action_panel(&mut self, ui: &mut egui::Ui) {
+        ui.group(|ui| {
+            ui.heading("Recommended Next Step");
+            let action = recommended_action(self);
+            ui.label(action.detail);
+            ui.horizontal(|ui| {
+                if ui.button(action.primary_label).clicked() {
+                    match action.primary_tab {
+                        Some(tab) => self.tab = tab,
+                        None => self.cleanup_stale_pending_runs(),
+                    }
+                }
+                if let Some((label, tab)) = action.secondary {
+                    if ui.button(label).clicked() {
+                        self.tab = tab;
+                    }
+                }
+            });
+        });
+    }
+
+    fn workflow_panel(&mut self, ui: &mut egui::Ui) {
+        ui.heading("Workflow");
+        egui::Grid::new("home_workflow")
+            .striped(true)
+            .min_col_width(120.0)
+            .show(ui, |ui| {
+                workflow_row(
+                    ui,
+                    "1. Game setup",
+                    setup_status(self),
+                    "Verify executable, Mod Loader, CLEO, and ASI loader paths.",
+                );
+                workflow_row(
+                    ui,
+                    "2. Import",
+                    import_status(self),
+                    "Review archive contents and readme-driven install proposals.",
+                );
+                workflow_row(
+                    ui,
+                    "3. Profile",
+                    profile_status(self),
+                    "Choose enabled mods and load order for this profile.",
+                );
+                workflow_row(
+                    ui,
+                    "4. Play",
+                    run_status(self),
+                    "Launch temporarily, then clean the game folder back to vanilla.",
+                );
+            });
+    }
+
+    fn recent_signal_panel(&mut self, ui: &mut egui::Ui) {
+        ui.heading("Recent Signals");
+        let issues = self.telemetry.missing_sources + self.telemetry.blocked_bootstrap;
+        ui.horizontal_wrapped(|ui| {
+            summary_tile(
+                ui,
+                "Readme proposals",
+                &self.readme_proposals.len().to_string(),
+            );
+            summary_tile(ui, "Pending cleanup", &self.pending_runs.len().to_string());
+            summary_tile(
+                ui,
+                "Overwrites tracked",
+                &self.telemetry.overwritten_files.to_string(),
+            );
+            summary_tile(ui, "Issues tracked", &issues.to_string());
+        });
+        ui.horizontal(|ui| {
+            if ui.button("Review telemetry").clicked() {
+                self.tab = UiTab::Telemetry;
+            }
+            if ui.button("Check cleanup").clicked() {
+                self.tab = UiTab::Run;
+            }
+        });
+    }
+}
+
+struct RecommendedAction {
+    detail: &'static str,
+    primary_label: &'static str,
+    primary_tab: Option<UiTab>,
+    secondary: Option<(&'static str, UiTab)>,
+}
+
+fn recommended_action(ui_state: &SanAndreasModUi) -> RecommendedAction {
+    if has_cleanable_pending_run(ui_state) {
+        return RecommendedAction {
+            detail: "Finished temporary files are still materialized. Clean them before launching another profile.",
+            primary_label: "Clean finished runs",
+            primary_tab: None,
+            secondary: Some(("Review cleanup", UiTab::Run)),
+        };
+    }
+    if !game_executable_present(ui_state) {
+        return RecommendedAction {
+            detail: "The game executable was not detected in the configured folder.",
+            primary_label: "Review setup",
+            primary_tab: Some(UiTab::Home),
+            secondary: None,
+        };
+    }
+    if ui_state.state.mods.is_empty() {
+        return RecommendedAction {
+            detail: "Import a package, review its readme hints, then add it to a profile.",
+            primary_label: "Import a mod",
+            primary_tab: Some(UiTab::Import),
+            secondary: None,
+        };
+    }
+    if enabled_profile_count(ui_state) == 0 {
+        return RecommendedAction {
+            detail: "The selected profile has no enabled mods yet.",
+            primary_label: "Build profile",
+            primary_tab: Some(UiTab::Profiles),
+            secondary: Some(("Open library", UiTab::Mods)),
+        };
+    }
+    RecommendedAction {
+        detail: "This profile is ready for an ephemeral launch.",
+        primary_label: "Play profile",
+        primary_tab: Some(UiTab::Run),
+        secondary: Some(("View telemetry", UiTab::Telemetry)),
+    }
+}
+
+fn workflow_row(ui: &mut egui::Ui, stage: &str, status: WorkflowStatus, detail: &str) {
+    ui.strong(stage);
+    ui.label(status.label());
+    ui.label(detail);
+    ui.end_row();
+}
+
+#[derive(Clone, Copy)]
+enum WorkflowStatus {
+    Ready,
+    Review,
+    Waiting,
+}
+
+impl WorkflowStatus {
+    fn label(self) -> &'static str {
+        match self {
+            WorkflowStatus::Ready => "ready",
+            WorkflowStatus::Review => "needs review",
+            WorkflowStatus::Waiting => "waiting",
+        }
+    }
+}
+
+fn setup_status(ui_state: &SanAndreasModUi) -> WorkflowStatus {
+    if game_executable_present(ui_state) {
+        WorkflowStatus::Ready
+    } else {
+        WorkflowStatus::Review
+    }
+}
+
+fn import_status(ui_state: &SanAndreasModUi) -> WorkflowStatus {
+    if !ui_state.readme_proposals.is_empty() {
+        WorkflowStatus::Review
+    } else if ui_state.state.mods.is_empty() {
+        WorkflowStatus::Waiting
+    } else {
+        WorkflowStatus::Ready
+    }
+}
+
+fn profile_status(ui_state: &SanAndreasModUi) -> WorkflowStatus {
+    if enabled_profile_count(ui_state) > 0 {
+        WorkflowStatus::Ready
+    } else if ui_state.state.mods.is_empty() {
+        WorkflowStatus::Waiting
+    } else {
+        WorkflowStatus::Review
+    }
+}
+
+fn run_status(ui_state: &SanAndreasModUi) -> WorkflowStatus {
+    if !ui_state.pending_runs.is_empty() {
+        WorkflowStatus::Review
+    } else if enabled_profile_count(ui_state) > 0 {
+        WorkflowStatus::Ready
+    } else {
+        WorkflowStatus::Waiting
+    }
+}
+
+fn readiness_label(ui_state: &SanAndreasModUi) -> &'static str {
+    match run_status(ui_state) {
+        WorkflowStatus::Ready => "Ready",
+        WorkflowStatus::Review => "Needs review",
+        WorkflowStatus::Waiting => "Setup incomplete",
+    }
+}
+
+fn has_cleanable_pending_run(ui_state: &SanAndreasModUi) -> bool {
+    ui_state
+        .pending_runs
+        .iter()
+        .any(|record| record.status != PendingRunStatus::Running)
+}
+
+fn count_pending_status(ui_state: &SanAndreasModUi, status: PendingRunStatus) -> usize {
+    ui_state
+        .pending_runs
+        .iter()
+        .filter(|record| record.status == status)
+        .count()
+}
+
+fn game_executable_present(ui_state: &SanAndreasModUi) -> bool {
+    ui_state.state.infrastructure.iter().any(|item| {
+        item.present && (item.label == "Steam executable" || item.label == "Classic executable")
+    })
+}
+
+impl SanAndreasModUi {
     pub(super) fn profiles_panel(&mut self, ui: &mut egui::Ui) {
         ui.heading("Profile"); // literal: allow external interface text or file-format spelling
         ui.separator();
         let entries = selected_profile_entries(&self.state, &self.selected_profile);
+        let enabled = entries.iter().filter(|entry| entry.enabled).count();
+        ui.horizontal_wrapped(|ui| {
+            summary_tile(ui, "Selected", &self.selected_profile);
+            summary_tile(ui, "Enabled", &enabled.to_string());
+            summary_tile(ui, "Total", &entries.len().to_string());
+            summary_tile(
+                ui,
+                "Load order",
+                if entries
+                    .windows(2)
+                    .all(|pair| pair[0].load_order <= pair[1].load_order)
+                {
+                    "sorted"
+                } else {
+                    "review"
+                },
+            );
+        });
+        ui.label("Toggle mods for this profile and set lower load-order numbers first.");
+        ui.separator();
         if entries.is_empty() {
             ui.label("No mods in this profile."); // literal: allow external interface text or file-format spelling
-            if ui.button("Add imported mods").clicked() {
-                self.tab = UiTab::Mods;
-            }
+            ui.horizontal(|ui| {
+                if ui.button("Add imported mods").clicked() {
+                    self.tab = UiTab::Mods;
+                }
+                if ui.button("Import a mod").clicked() {
+                    self.tab = UiTab::Import;
+                }
+            });
             return;
         }
         egui::Grid::new("profile_mod_grid") // literal: allow external interface text or file-format spelling
@@ -245,6 +512,35 @@ impl SanAndreasModUi {
     pub(super) fn mods_panel(&mut self, ui: &mut egui::Ui) {
         ui.heading("Library"); // literal: allow external interface text or file-format spelling
         ui.separator();
+        ui.horizontal_wrapped(|ui| {
+            summary_tile(ui, "Imported mods", &self.state.mods.len().to_string());
+            summary_tile(
+                ui,
+                "Selected",
+                &self
+                    .state
+                    .mods
+                    .iter()
+                    .filter(|item| item.in_selected_profile)
+                    .count()
+                    .to_string(),
+            );
+            summary_tile(
+                ui,
+                "Install roots",
+                &self
+                    .state
+                    .mods
+                    .iter()
+                    .map(|item| item.config.install_roots.len())
+                    .sum::<usize>()
+                    .to_string(),
+            );
+        });
+        ui.label(
+            "Review imported packages, edit install roots, and select mods for the active profile.",
+        );
+        ui.separator();
         if self.state.mods.is_empty() {
             ui.label("No imported mods."); // literal: allow external interface text or file-format spelling
             if ui.button("Import a mod").clicked() {
@@ -266,13 +562,16 @@ impl SanAndreasModUi {
         ui.group(|ui| {
             self.mod_config_card_header(ui, item);
             let path_display = item.path.display().to_string();
-            ui.label(format!("Config: {path_display}"));
-            ui.label(format!("package: {}", item.config.package.display()));
+            ui.monospace(format!("config: {path_display}"));
+            ui.monospace(format!("package: {}", item.config.package.display()));
             if let Some(source_root) = &item.config.source_root {
-                ui.label(format!("Library files: {}", source_root.display()));
+                ui.monospace(format!("library files: {}", source_root.display()));
             }
             ui.separator();
             ui.strong("Install locations");
+            if item.config.install_roots.is_empty() {
+                ui.label("No install roots were detected. Review this package before running it.");
+            }
             for (idx, root) in item.config.install_roots.iter().enumerate() {
                 self.mod_install_root_editor(ui, item, idx, root);
             }
@@ -361,6 +660,7 @@ impl SanAndreasModUi {
 impl SanAndreasModUi {
     pub(super) fn import_panel(&mut self, ui: &mut egui::Ui) {
         ui.heading("Import Mod"); // literal: allow external interface text or file-format spelling
+        ui.label("Review first, then import. Medium-confidence readme matches stay visible for human judgment.");
         ui.separator();
         ui.horizontal(|ui| {
             ui.label("Package or folder"); // literal: allow external interface text or file-format spelling
@@ -383,6 +683,9 @@ impl SanAndreasModUi {
         });
         ui.separator();
         ui.label("Supported: folders, .zip, .wrap, .7z, .rar."); // literal: allow external interface text or file-format spelling
+        if self.analysis_summary.is_none() {
+            ui.label("Use Review package to inspect files, readmes, and proposed install roots before committing it to the library.");
+        }
         self.readme_proposals_panel(ui);
     }
 }
@@ -398,6 +701,26 @@ impl SanAndreasModUi {
             ui.label("No readme proposals yet.");
             return;
         }
+        let auto_selected = self
+            .readme_proposals
+            .iter()
+            .filter(|proposal| proposal.review_state == ReadmeProposalState::AutoSelected)
+            .count();
+        let needs_review = self
+            .readme_proposals
+            .iter()
+            .filter(|proposal| proposal.review_state == ReadmeProposalState::NeedsReview)
+            .count();
+        let warnings = self
+            .readme_proposals
+            .iter()
+            .filter(|proposal| proposal.review_state == ReadmeProposalState::WarningOnly)
+            .count();
+        ui.horizontal_wrapped(|ui| {
+            summary_tile(ui, "Auto-selected", &auto_selected.to_string());
+            summary_tile(ui, "Needs review", &needs_review.to_string());
+            summary_tile(ui, "Warnings", &warnings.to_string());
+        });
         let proposals = self.readme_proposals.clone();
         egui::ScrollArea::vertical()
             .max_height(360.0)
@@ -419,12 +742,12 @@ fn readme_proposal_panel(ui: &mut egui::Ui, proposal: &ReadmeProposal) {
             ui.separator();
             ui.label(proposal.review_state.to_string());
         });
-        ui.label(format!("Install location: {}", proposal.proposed_install));
+        ui.label(format!("Proposed install: {}", proposal.proposed_install));
         ui.label(format!(
             "Evidence: {} line {}: {}",
             proposal.source_readme, proposal.line_number, proposal.evidence
         ));
-        ui.label(format!("Matched text: {}", proposal.normalized_text));
+        ui.label(format!("Normalized match: {}", proposal.normalized_text));
         if !proposal.reasons.is_empty() {
             ui.label(format!("Why: {}", proposal.reasons.join("; ")));
         }
@@ -447,10 +770,21 @@ impl SanAndreasModUi {
             .iter()
             .filter(|entry| entry.enabled)
             .count();
-        ui.label(format!(
-            "Profile `{}` has {} enabled mods.",
-            self.selected_profile, active_count
-        ));
+        ui.horizontal_wrapped(|ui| {
+            summary_tile(ui, "Profile", &self.selected_profile);
+            summary_tile(ui, "Enabled mods", &active_count.to_string());
+            summary_tile(
+                ui,
+                "Cleanup",
+                if self.pending_runs.is_empty() {
+                    "clear"
+                } else {
+                    "needed"
+                },
+            );
+            summary_tile(ui, "Readiness", readiness_label(self));
+        });
+        ui.label("Play materializes this profile temporarily, launches the game, then watches for cleanup.");
         ui.horizontal(|ui| {
             /* literal: allow external interface text or file-format spelling */
             /* literal: allow external interface text or file-format spelling */
@@ -476,6 +810,17 @@ impl SanAndreasModUi {
         if self.pending_runs.is_empty() {
             ui.label("No temporary mod files are waiting for cleanup.");
         } else {
+            let stale = count_pending_status(self, PendingRunStatus::Stale);
+            let running = count_pending_status(self, PendingRunStatus::Running);
+            let unknown = count_pending_status(self, PendingRunStatus::Unknown);
+            let invalid = count_pending_status(self, PendingRunStatus::Invalid);
+            ui.horizontal_wrapped(|ui| {
+                summary_tile(ui, "Finished", &stale.to_string());
+                summary_tile(ui, "Running", &running.to_string());
+                summary_tile(ui, "Unknown", &unknown.to_string());
+                summary_tile(ui, "Invalid", &invalid.to_string());
+            });
+            ui.label("Running games block cleanup. Finished runs can be cleaned safely from here.");
             let pending_runs = self.pending_runs.clone();
             egui::Grid::new("pending_run_grid")
                 .striped(true)
@@ -545,27 +890,118 @@ impl SanAndreasModUi {
             summary_tile(ui, "Journals", &self.telemetry.journals.to_string());
         });
         ui.separator();
+        ui.horizontal(|ui| {
+            ui.label("Filter");
+            ui.add_sized(
+                [240.0, ROW_HEIGHT],
+                egui::TextEdit::singleline(&mut self.telemetry_search),
+            );
+            egui::ComboBox::from_id_salt("telemetry_kind_filter")
+                .selected_text(&self.telemetry_kind_filter)
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut self.telemetry_kind_filter, "all".to_string(), "all");
+                    ui.selectable_value(
+                        &mut self.telemetry_kind_filter,
+                        "import".to_string(),
+                        "imports",
+                    );
+                    ui.selectable_value(&mut self.telemetry_kind_filter, "run".to_string(), "runs");
+                    ui.selectable_value(
+                        &mut self.telemetry_kind_filter,
+                        "install".to_string(),
+                        "installs",
+                    );
+                });
+            if ui.button("Export JSON").clicked() {
+                self.export_telemetry();
+            }
+        });
+        ui.separator();
         ui.heading("Recent Activity");
-        if self.telemetry.recent_events.is_empty() {
+        let recent_events = filtered_telemetry_events(
+            &self.telemetry.recent_events,
+            &self.telemetry_search,
+            &self.telemetry_kind_filter,
+        );
+        if recent_events.is_empty() {
             ui.label("No telemetry records yet.");
+        } else {
+            egui::Grid::new("telemetry_recent_events")
+                .striped(true)
+                .min_col_width(96.0)
+                .show(ui, |ui| {
+                    ui.strong("Type");
+                    ui.strong("When");
+                    ui.strong("Name");
+                    ui.strong("Details");
+                    ui.end_row();
+                    for event in recent_events.into_iter().take(50) {
+                        ui.label(&event.kind);
+                        ui.monospace(event.created_unix.to_string());
+                        ui.label(&event.title);
+                        ui.label(&event.detail);
+                        ui.end_row();
+                    }
+                });
+        }
+        ui.separator();
+        ui.heading("Per-Mod History");
+        let mod_rows = filtered_mod_history(&self.telemetry.mod_history, &self.telemetry_search);
+        if mod_rows.is_empty() {
+            ui.label("No per-mod telemetry yet.");
             return;
         }
-        egui::Grid::new("telemetry_recent_events")
+        egui::Grid::new("telemetry_mod_history")
             .striped(true)
             .min_col_width(96.0)
             .show(ui, |ui| {
-                ui.strong("Type");
-                ui.strong("When");
-                ui.strong("Name");
-                ui.strong("Details");
+                ui.strong("Mod");
+                ui.strong("Imports");
+                ui.strong("Runs");
+                ui.strong("Installs");
+                ui.strong("Copied");
+                ui.strong("Overwrites");
+                ui.strong("Issues");
+                ui.strong("Last seen");
                 ui.end_row();
-                for event in &self.telemetry.recent_events {
-                    ui.label(&event.kind);
-                    ui.monospace(event.created_unix.to_string());
-                    ui.label(&event.title);
-                    ui.label(&event.detail);
+                for row in mod_rows.into_iter().take(50) {
+                    ui.label(&row.id);
+                    ui.monospace(row.imports.to_string());
+                    ui.monospace(row.runs.to_string());
+                    ui.monospace(row.installs.to_string());
+                    ui.monospace(row.copied_files.to_string());
+                    ui.monospace(row.overwritten_files.to_string());
+                    ui.monospace((row.missing_sources + row.blocked_bootstrap).to_string());
+                    ui.monospace(row.last_seen_unix.to_string());
                     ui.end_row();
                 }
             });
     }
+}
+
+fn filtered_telemetry_events(
+    events: &[TelemetryEvent],
+    search: &str,
+    kind_filter: &str,
+) -> Vec<TelemetryEvent> {
+    let needle = search.trim().to_ascii_lowercase();
+    events
+        .iter()
+        .filter(|event| kind_filter == "all" || event.kind == kind_filter)
+        .filter(|event| {
+            needle.is_empty()
+                || event.title.to_ascii_lowercase().contains(&needle)
+                || event.detail.to_ascii_lowercase().contains(&needle)
+                || event.kind.to_ascii_lowercase().contains(&needle)
+        })
+        .cloned()
+        .collect()
+}
+
+fn filtered_mod_history(rows: &[ModTelemetry], search: &str) -> Vec<ModTelemetry> {
+    let needle = search.trim().to_ascii_lowercase();
+    rows.iter()
+        .filter(|row| needle.is_empty() || row.id.to_ascii_lowercase().contains(&needle))
+        .cloned()
+        .collect()
 }

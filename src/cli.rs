@@ -39,6 +39,7 @@ fn dispatch_command(command: &str, arguments: Vec<String>) -> Result<(), AppErro
         "cleanup-run" => handle_cleanup_run_command(arguments), // literal: allow external interface text or file-format spelling
         "extract-stage" => handle_extract_stage_command(arguments), // literal: allow external interface text or file-format spelling
         "rollback" => handle_rollback_command(arguments), // literal: allow external interface text or file-format spelling
+        "recover" => handle_recover_command(arguments), // literal: allow external interface text or file-format spelling
         "init" => handle_init_command(arguments), // literal: allow external interface text or file-format spelling
         "profiles" => handle_profiles_command(arguments), // literal: allow external interface text or file-format spelling
         "profile-new" => handle_profile_new_command(arguments), // literal: allow external interface text or file-format spelling
@@ -225,6 +226,15 @@ fn handle_extract_stage_command(arguments: Vec<String>) -> Result<(), AppError> 
 
 fn handle_rollback_command(arguments: Vec<String>) -> Result<(), AppError> {
     rollback_from_arguments(arguments, "journal path") // literal: allow external interface text or file-format spelling
+}
+
+fn handle_recover_command(arguments: Vec<String>) -> Result<(), AppError> {
+    let game_root = optional_game_root_from_raw_arguments(arguments);
+    match recover_interrupted_install(&game_root)? {
+        Some(txid) => println!("recovered interrupted install {txid}: game folder restored"),
+        None => println!("no interrupted install to recover under {}", game_root.display()),
+    }
+    Ok(())
 }
 
 fn handle_init_command(arguments: Vec<String>) -> Result<(), AppError> {
@@ -478,6 +488,7 @@ fn print_command_usage() {
     println!("  cleanup-run <journal> [--game]   Remove temporary materialized files");
     println!("  extract-stage <package> [options] Extract package into managed staging only");
     println!("  rollback <journal> [--game path] Restore a recorded install transaction");
+    println!("  recover [game-root]              Roll back an interrupted permanent install");
     println!();
 }
 

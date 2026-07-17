@@ -13,7 +13,9 @@ mod prelude {
     pub(crate) use crate::constants::{
         COMPONENT_RULES, CONTEXT_RULES, DEFAULT_GAME_ROOT, DEFAULT_MOD_ROOTS,
     };
-    pub(crate) use crate::game_launch::{game_executable_path, launch_game_executable};
+    pub(crate) use crate::game_launch::{
+        ensure_gta_install, game_executable_path, launch_game_executable,
+    };
     pub(crate) use crate::model::{
         AppError, ArchiveEntryFields, CandidateDetection, CandidateMetadata, CommandOptions,
         CompletedPlanParts, Component, ComponentRule, ContextRule, CopyJournalContext,
@@ -21,7 +23,8 @@ mod prelude {
         InstallPlan, ManifestInstallRoot, ModConfigJson, ModInstallRootJson, PackageEntry,
         PackageKind, PackageRef, PackageReport, PackageSummary, PlanBuildCollections,
         PlanBuildContext, ProfileJson, ProfileModActivation, ProfileModEntry, ReadmeAction,
-        ReadmeDocument, ReadmeInstruction, RunApplyState, RunInstallContext, TargetKind,
+        ReadmeDocument, ReadmeInsight, ReadmeInsightKind, ReadmeInstruction, RunApplyState,
+        RunInstallContext, TargetKind,
     };
     pub(crate) use crate::parsing::{
         backup_relative_for_destination, classify_component, classify_context, classify_risk,
@@ -32,8 +35,9 @@ mod prelude {
         write_package_manifest,
     };
     pub(crate) use crate::planning::{
-        analyze_package, apply_install_plan, build_install_plan, materialize_profile_for_run,
-        prepare_run, print_install_plan, rollback_journal, sort_operations_for_apply,
+        analyze_package, apply_install_plan, build_install_plan, interrupted_install,
+        materialize_profile_for_run, prepare_run, print_install_plan, recover_interrupted_install,
+        rollback_journal, sort_operations_for_apply,
     };
     pub(crate) use crate::reporting::{
         escape_value, extension_eq, extract_to_staging, file_name, find_seven_zip, human_bytes,

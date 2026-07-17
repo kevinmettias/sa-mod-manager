@@ -41,6 +41,8 @@ pub(super) struct SanAndreasModUi {
     pub(super) analysis_summary: Option<String>,
     pub(super) mod_root_edits: BTreeMap<String, ModInstallRootJson>,
     pub(super) telemetry: TelemetrySummary,
+    pub(super) telemetry_search: String,
+    pub(super) telemetry_kind_filter: String,
 }
 
 #[derive(Clone)]
@@ -92,6 +94,7 @@ pub(super) struct TelemetrySummary {
     pub(super) missing_sources: usize,
     pub(super) pending_cleanup: usize,
     pub(super) recent_events: Vec<TelemetryEvent>,
+    pub(super) mod_history: Vec<ModTelemetry>,
 }
 
 #[derive(Clone)]
@@ -100,6 +103,19 @@ pub(super) struct TelemetryEvent {
     pub(super) kind: String,
     pub(super) title: String,
     pub(super) detail: String,
+}
+
+#[derive(Clone, Default)]
+pub(super) struct ModTelemetry {
+    pub(super) id: String,
+    pub(super) imports: usize,
+    pub(super) runs: usize,
+    pub(super) installs: usize,
+    pub(super) copied_files: usize,
+    pub(super) overwritten_files: usize,
+    pub(super) missing_sources: usize,
+    pub(super) blocked_bootstrap: usize,
+    pub(super) last_seen_unix: u64,
 }
 
 impl fmt::Display for ReadmeProposalState {
@@ -143,6 +159,8 @@ impl SanAndreasModUi {
             analysis_summary: None,
             mod_root_edits: BTreeMap::new(),
             telemetry: TelemetrySummary::default(),
+            telemetry_search: String::new(),
+            telemetry_kind_filter: "all".to_string(),
         };
         ui.refresh();
         ui
@@ -255,7 +273,12 @@ fn load_telemetry_summary(
             .cmp(&a.created_unix)
             .then_with(|| a.title.cmp(&b.title))
     });
-    summary.recent_events.truncate(12);
+    summary.recent_events.truncate(200);
+    summary.mod_history.sort_by(|a, b| {
+        b.last_seen_unix
+            .cmp(&a.last_seen_unix)
+            .then_with(|| a.id.cmp(&b.id))
+    });
     Ok(summary)
 }
 
@@ -274,12 +297,22 @@ fn load_import_telemetry(
         }
         let text = fs::read_to_string(&manifest)?;
         summary.imports += 1;
+        let id = telemetry_value(&text, "id").unwrap_or_else(|| "imported mod".to_string());
+        let created_unix = telemetry_value(&text, "imported_unix")
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(0);
+        let operations = telemetry_value(&text, "operation_count")
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(0);
+        upsert_mod_telemetry(summary, &id, |mod_row| {
+            mod_row.imports += 1;
+            mod_row.copied_files += operations;
+            mod_row.last_seen_unix = mod_row.last_seen_unix.max(created_unix);
+        });
         summary.recent_events.push(TelemetryEvent {
-            created_unix: telemetry_value(&text, "imported_unix")
-                .and_then(|value| value.parse().ok())
-                .unwrap_or(0),
+            created_unix,
             kind: "import".to_string(),
-            title: telemetry_value(&text, "id").unwrap_or_else(|| "imported mod".to_string()),
+            title: id,
             detail: format!(
                 "{} entries, {} operations",
                 telemetry_value(&text, "entry_count").unwrap_or_else(|| "unknown".to_string()),
@@ -306,10 +339,15 @@ fn load_journal_telemetry(
         let text = fs::read_to_string(&path)?;
         summary.journals += 1;
         let mode = telemetry_line_value(&text, "mode").unwrap_or_default();
+        let created_unix = telemetry_line_value(&text, "created_unix")
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(0);
         if mode == "ephemeral-run" {
             summary.run_journals += 1;
+            add_run_mod_telemetry(summary, &text, created_unix);
         } else {
             summary.install_journals += 1;
+            add_install_mod_telemetry(summary, &text, created_unix);
         }
         summary.copied_files += text
             .lines()
@@ -329,9 +367,7 @@ fn load_journal_telemetry(
             .filter(|line| line.starts_with("missing_source="))
             .count();
         summary.recent_events.push(TelemetryEvent {
-            created_unix: telemetry_line_value(&text, "created_unix")
-                .and_then(|value| value.parse().ok())
-                .unwrap_or(0),
+            created_unix,
             kind: if mode == "ephemeral-run" {
                 "run".to_string()
             } else {
@@ -346,27 +382,85 @@ fn load_journal_telemetry(
     Ok(())
 }
 
+fn add_install_mod_telemetry(summary: &mut TelemetrySummary, text: &str, created_unix: u64) {
+    let Some(package_id) = telemetry_line_value(text, "package_id") else {
+        return;
+    };
+    let copies = line_count(text, "copy=");
+    let backups = line_count(text, "backup=");
+    let missing = line_count(text, "missing_source=");
+    let blocked = line_count(text, "blocked_bootstrap=");
+    upsert_mod_telemetry(summary, &package_id, |mod_row| {
+        mod_row.installs += 1;
+        mod_row.copied_files += copies;
+        mod_row.overwritten_files += backups;
+        mod_row.missing_sources += missing;
+        mod_row.blocked_bootstrap += blocked;
+        mod_row.last_seen_unix = mod_row.last_seen_unix.max(created_unix);
+    });
+}
+
+fn add_run_mod_telemetry(summary: &mut TelemetrySummary, text: &str, created_unix: u64) {
+    let mut current_mod = None;
+    for line in text.lines() {
+        if let Some(value) = line.strip_prefix("profile_mod=") {
+            let id = value
+                .split('|')
+                .next()
+                .map(unescape_value)
+                .unwrap_or_default();
+            upsert_mod_telemetry(summary, &id, |mod_row| {
+                mod_row.runs += 1;
+                mod_row.last_seen_unix = mod_row.last_seen_unix.max(created_unix);
+            });
+            current_mod = Some(id);
+            continue;
+        }
+        let Some(id) = current_mod.as_deref() else {
+            continue;
+        };
+        if line.starts_with("copy=") {
+            upsert_mod_telemetry(summary, id, |mod_row| mod_row.copied_files += 1);
+        } else if line.starts_with("backup=") {
+            upsert_mod_telemetry(summary, id, |mod_row| mod_row.overwritten_files += 1);
+        } else if line.starts_with("missing_source=") {
+            upsert_mod_telemetry(summary, id, |mod_row| mod_row.missing_sources += 1);
+        } else if line.starts_with("blocked_bootstrap=") {
+            upsert_mod_telemetry(summary, id, |mod_row| mod_row.blocked_bootstrap += 1);
+        }
+    }
+}
+
+fn upsert_mod_telemetry(
+    summary: &mut TelemetrySummary,
+    id: &str,
+    update: impl FnOnce(&mut ModTelemetry),
+) {
+    if let Some(row) = summary.mod_history.iter_mut().find(|row| row.id == id) {
+        update(row);
+        return;
+    }
+    let mut row = ModTelemetry {
+        id: id.to_string(),
+        ..ModTelemetry::default()
+    };
+    update(&mut row);
+    summary.mod_history.push(row);
+}
+
 fn journal_event_detail(text: &str) -> String {
-    let copies = text
-        .lines()
-        .filter(|line| line.starts_with("copy="))
-        .count();
-    let new_files = text.lines().filter(|line| line.starts_with("new=")).count();
-    let backups = text
-        .lines()
-        .filter(|line| line.starts_with("backup="))
-        .count();
-    let blocked = text
-        .lines()
-        .filter(|line| line.starts_with("blocked_bootstrap="))
-        .count();
-    let missing = text
-        .lines()
-        .filter(|line| line.starts_with("missing_source="))
-        .count();
+    let copies = line_count(text, "copy=");
+    let new_files = line_count(text, "new=");
+    let backups = line_count(text, "backup=");
+    let blocked = line_count(text, "blocked_bootstrap=");
+    let missing = line_count(text, "missing_source=");
     format!(
         "{copies} copied, {new_files} new, {backups} overwritten, {blocked} blocked, {missing} missing"
     )
+}
+
+fn line_count(text: &str, prefix: &str) -> usize {
+    text.lines().filter(|line| line.starts_with(prefix)).count()
 }
 
 fn telemetry_line_value(text: &str, key: &str) -> Option<String> {
@@ -382,6 +476,103 @@ fn telemetry_value(text: &str, key: &str) -> Option<String> {
         let value = value.trim_end_matches(',');
         Some(value.trim_matches('"').to_string())
     })
+}
+
+pub(super) fn export_telemetry_summary(
+    game_root: &Path,
+    summary: &TelemetrySummary,
+) -> Result<PathBuf, AppError> {
+    let export_dir = state_directory(game_root).join("telemetry");
+    fs::create_dir_all(&export_dir)?;
+    let path = export_dir.join(format!("telemetry-{}.json", unix_now()));
+    let mut file = fs::File::create(&path)?;
+    writeln!(file, "{{")?;
+    writeln!(file, "  \"version\": 1,")?;
+    writeln!(file, "  \"exported_unix\": {},", unix_now())?;
+    writeln!(file, "  \"summary\": {{")?;
+    writeln!(file, "    \"imports\": {},", summary.imports)?;
+    writeln!(file, "    \"journals\": {},", summary.journals)?;
+    writeln!(file, "    \"runs\": {},", summary.run_journals)?;
+    writeln!(file, "    \"installs\": {},", summary.install_journals)?;
+    writeln!(file, "    \"copied_files\": {},", summary.copied_files)?;
+    writeln!(file, "    \"new_files\": {},", summary.new_files)?;
+    writeln!(
+        file,
+        "    \"overwritten_files\": {},",
+        summary.overwritten_files
+    )?;
+    writeln!(
+        file,
+        "    \"blocked_bootstrap\": {},",
+        summary.blocked_bootstrap
+    )?;
+    writeln!(
+        file,
+        "    \"missing_sources\": {},",
+        summary.missing_sources
+    )?;
+    writeln!(file, "    \"pending_cleanup\": {}", summary.pending_cleanup)?;
+    writeln!(file, "  }},")?;
+    write_mod_history_json(&mut file, &summary.mod_history)?;
+    writeln!(file, ",")?;
+    write_recent_events_json(&mut file, &summary.recent_events)?;
+    writeln!(file)?;
+    writeln!(file, "}}")?;
+    Ok(path)
+}
+
+fn write_mod_history_json(file: &mut fs::File, rows: &[ModTelemetry]) -> Result<(), AppError> {
+    writeln!(file, "  \"mods\": [")?;
+    for (idx, row) in rows.iter().enumerate() {
+        writeln!(file, "    {{")?;
+        writeln!(file, "      \"id\": \"{}\",", json_escape(&row.id))?;
+        writeln!(file, "      \"imports\": {},", row.imports)?;
+        writeln!(file, "      \"runs\": {},", row.runs)?;
+        writeln!(file, "      \"installs\": {},", row.installs)?;
+        writeln!(file, "      \"copied_files\": {},", row.copied_files)?;
+        writeln!(
+            file,
+            "      \"overwritten_files\": {},",
+            row.overwritten_files
+        )?;
+        writeln!(file, "      \"missing_sources\": {},", row.missing_sources)?;
+        writeln!(
+            file,
+            "      \"blocked_bootstrap\": {},",
+            row.blocked_bootstrap
+        )?;
+        writeln!(file, "      \"last_seen_unix\": {}", row.last_seen_unix)?;
+        write!(file, "    }}")?;
+        if idx + 1 == rows.len() {
+            writeln!(file)?;
+        } else {
+            writeln!(file, ",")?;
+        }
+    }
+    write!(file, "  ]")?;
+    Ok(())
+}
+
+fn write_recent_events_json(
+    file: &mut fs::File,
+    events: &[TelemetryEvent],
+) -> Result<(), AppError> {
+    writeln!(file, "  \"events\": [")?;
+    for (idx, event) in events.iter().enumerate() {
+        writeln!(file, "    {{")?;
+        writeln!(file, "      \"created_unix\": {},", event.created_unix)?;
+        writeln!(file, "      \"kind\": \"{}\",", json_escape(&event.kind))?;
+        writeln!(file, "      \"title\": \"{}\",", json_escape(&event.title))?;
+        writeln!(file, "      \"detail\": \"{}\"", json_escape(&event.detail))?;
+        write!(file, "    }}")?;
+        if idx + 1 == events.len() {
+            writeln!(file)?;
+        } else {
+            writeln!(file, ",")?;
+        }
+    }
+    write!(file, "  ]")?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -417,6 +608,7 @@ mod tests {
                 "profile=default\n",
                 "mode=ephemeral-run\n",
                 "created_unix=200\n",
+                "profile_mod=test_mod|100|mods/test_mod/mod.json\n",
                 "new=CLEO/test.cs\n",
                 "backup=data/file.dat|backup/file.dat|fnv64:1\n",
                 "copy=src|dst|fnv64:2\n",
@@ -437,6 +629,18 @@ mod tests {
         assert_eq!(summary.pending_cleanup, 1);
         assert_eq!(summary.recent_events.len(), 2);
         assert_eq!(summary.recent_events[0].kind, "run");
+        assert_eq!(summary.mod_history.len(), 1);
+        assert_eq!(summary.mod_history[0].id, "test_mod");
+        assert_eq!(summary.mod_history[0].imports, 1);
+        assert_eq!(summary.mod_history[0].runs, 1);
+        assert_eq!(summary.mod_history[0].copied_files, 3);
+        assert_eq!(summary.mod_history[0].overwritten_files, 1);
+        assert_eq!(summary.mod_history[0].missing_sources, 1);
+        let export = export_telemetry_summary(&game_root, &summary).unwrap();
+        let export_text = fs::read_to_string(export).unwrap();
+        assert!(export_text.contains("\"mods\""));
+        assert!(export_text.contains("\"events\""));
+        assert!(export_text.contains("test_mod"));
         remove_dir_if_exists(&game_root).unwrap();
     }
 

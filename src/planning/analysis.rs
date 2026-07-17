@@ -8,6 +8,7 @@ pub(crate) fn analyze_package(package: &Path, game_root: &Path) -> Result<Packag
     collect_readme_documents(&mut report)?;
     collect_readme_instructions(&mut report);
     collect_wrap_manifest_roots(&mut report)?;
+    collect_readme_insights(&mut report);
     Ok(report)
 }
 
@@ -105,6 +106,7 @@ fn empty_package_report(
         readmes: Vec::new(),
         readme_documents: Vec::new(),
         readme_instructions: Vec::new(),
+        readme_insights: Vec::new(),
         manifest_roots: Vec::new(),
         components: BTreeSet::new(),
         install_candidates: Vec::new(),
@@ -151,6 +153,283 @@ fn collect_readme_instructions(report: &mut PackageReport) {
         }
     }
     report.readme_instructions = instructions;
+}
+
+fn collect_readme_insights(report: &mut PackageReport) {
+    let mut insights = Vec::new();
+    add_instruction_insights(report, &mut insights);
+    add_option_set_insights(report, &mut insights);
+    add_layout_insights(report, &mut insights);
+    add_rule_pack_insights(report, &mut insights);
+    add_dry_run_insights(report, &mut insights);
+    add_override_insights(report, &mut insights);
+    add_language_insights(report, &mut insights);
+    report.readme_insights = insights;
+}
+
+fn add_instruction_insights(report: &PackageReport, insights: &mut Vec<ReadmeInsight>) {
+    for instruction in &report.readme_instructions {
+        let kind = match instruction.action {
+            ReadmeAction::Copy => ReadmeInsightKind::Recipe,
+            ReadmeAction::Requires => ReadmeInsightKind::Dependency,
+            ReadmeAction::Conflict | ReadmeAction::DoNotInstall => ReadmeInsightKind::Conflict,
+            ReadmeAction::Optional => ReadmeInsightKind::OptionSet,
+            ReadmeAction::LoadAfter => ReadmeInsightKind::Conflict,
+        };
+        let source = instruction.source.as_deref().unwrap_or("unknown source");
+        let target = instruction.target.as_deref().unwrap_or("unknown target");
+        let detail = match instruction.action {
+            ReadmeAction::Copy => format!("recipe step: copy {source} to {target}"),
+            ReadmeAction::Requires => format!("dependency requirement: {target}"),
+            ReadmeAction::Optional => format!("optional source or compatibility choice: {source}"),
+            ReadmeAction::Conflict => "compatibility warning from readme".to_string(),
+            ReadmeAction::LoadAfter => "load-order or priority warning from readme".to_string(),
+            ReadmeAction::DoNotInstall => "explicit do-not-install warning".to_string(),
+        };
+        insights.push(readme_insight(
+            kind,
+            instruction.action.to_string(),
+            detail,
+            &instruction.source_readme,
+            instruction.line_number,
+            &instruction.text,
+            instruction.confidence,
+            &format!("readme.{}", instruction.action),
+        ));
+    }
+}
+
+fn add_option_set_insights(report: &PackageReport, insights: &mut Vec<ReadmeInsight>) {
+    for option in &report.option_groups {
+        insights.push(readme_insight(
+            ReadmeInsightKind::OptionSet,
+            "package option".to_string(),
+            format!("detected optional or mutually exclusive package folder: {option}"),
+            "package layout",
+            0,
+            option,
+            0.78,
+            "layout.option-folder",
+        ));
+    }
+}
+
+fn add_layout_insights(report: &PackageReport, insights: &mut Vec<ReadmeInsight>) {
+    for layout in detected_layout_templates(report) {
+        insights.push(readme_insight(
+            ReadmeInsightKind::Layout,
+            "layout template".to_string(),
+            layout,
+            "package layout",
+            0,
+            "",
+            0.86,
+            "layout.template",
+        ));
+    }
+}
+
+fn add_rule_pack_insights(report: &PackageReport, insights: &mut Vec<ReadmeInsight>) {
+    if !report.readme_instructions.is_empty() {
+        insights.push(readme_insight(
+            ReadmeInsightKind::Rule,
+            "deterministic parser rules".to_string(),
+            "used command verbs, fuzzy GTA SA targets, package contents, and confidence thresholds"
+                .to_string(),
+            "parser rules",
+            0,
+            "rules are local and human-editable in source/config-ready tables",
+            0.90,
+            "rules.deterministic-readme-v1",
+        ));
+    }
+}
+
+fn add_dry_run_insights(report: &PackageReport, insights: &mut Vec<ReadmeInsight>) {
+    for instruction in &report.readme_instructions {
+        if !matches!(instruction.action, ReadmeAction::Copy) {
+            continue;
+        }
+        let source = instruction.source.as_deref().unwrap_or("unknown source");
+        let target = instruction.target.as_deref().unwrap_or("unknown target");
+        let state = if instruction.confidence >= 0.85 {
+            "will auto-propose"
+        } else if instruction.confidence >= 0.60 {
+            "needs review before use"
+        } else {
+            "warning only"
+        };
+        insights.push(readme_insight(
+            ReadmeInsightKind::DryRun,
+            "install preview".to_string(),
+            format!("{state}: {source} -> {target}"),
+            &instruction.source_readme,
+            instruction.line_number,
+            &instruction.text,
+            instruction.confidence,
+            "dry-run.readme-copy",
+        ));
+    }
+}
+
+fn add_override_insights(report: &PackageReport, insights: &mut Vec<ReadmeInsight>) {
+    let needs_override = report
+        .readme_instructions
+        .iter()
+        .any(|instruction| {
+            matches!(instruction.action, ReadmeAction::Copy)
+                && (instruction.confidence < 0.85
+                    || instruction.source.is_none()
+                    || instruction.target.is_none())
+        });
+    if needs_override || !report.option_groups.is_empty() {
+        insights.push(readme_insight(
+            ReadmeInsightKind::Override,
+            "saved override recommended".to_string(),
+            "user decisions for ambiguous sources, targets, or options should be saved in mod.json install roots/options"
+                .to_string(),
+            "parser policy",
+            0,
+            "",
+            0.80,
+            "override.user-decision",
+        ));
+    }
+}
+
+fn add_language_insights(report: &PackageReport, insights: &mut Vec<ReadmeInsight>) {
+    for document in &report.readme_documents {
+        let normalized = normalize_readme_line(&document.text);
+        for (language, confidence) in detected_language_packs(&normalized) {
+            insights.push(readme_insight(
+                ReadmeInsightKind::Language,
+                format!("{language} keyword pack"),
+                format!("detected {language} install keywords; deterministic multilingual rules were applied"),
+                &document.path,
+                0,
+                "",
+                confidence,
+                &format!("language.{language}"),
+            ));
+        }
+    }
+}
+
+fn readme_insight(
+    kind: ReadmeInsightKind,
+    title: String,
+    detail: String,
+    source_readme: &str,
+    line_number: usize,
+    evidence: &str,
+    confidence: f32,
+    rule_id: &str,
+) -> ReadmeInsight {
+    ReadmeInsight {
+        kind,
+        title,
+        detail,
+        source_readme: source_readme.to_string(),
+        line_number,
+        evidence: evidence.to_string(),
+        confidence,
+        rule_id: rule_id.to_string(),
+    }
+}
+
+fn detected_layout_templates(report: &PackageReport) -> Vec<String> {
+    let mut layouts = Vec::new();
+    let has = |component| report.components.contains(&component);
+    if has(Component::ModLoaderContent)
+        && (has(Component::Data)
+            || has(Component::Models)
+            || has(Component::Text)
+            || has(Component::Anim)
+            || has(Component::Audio))
+    {
+        layouts.push("modloader mirror: package has game-folder structure suitable for modloader".to_string());
+    }
+    if has(Component::Cleo) || has(Component::CleoText) {
+        layouts.push("CLEO script package: .cs/.cleo/.fxt files should map to CLEO/CLEO_TEXT".to_string());
+    }
+    if has(Component::Asi) {
+        layouts.push("ASI root package: .asi/.dll/.ini payload likely belongs in the game root or ASI-supported modloader folder".to_string());
+    }
+    if has(Component::ImgReplacement) {
+        layouts.push("gta3.img payload: loose .dff/.txd/.col files should be isolated under modloader/<mod>/gta3.img".to_string());
+    }
+    if has(Component::Text) {
+        layouts.push("language/text package: .gxt or text assets map to the text folder".to_string());
+    }
+    if report.entries.iter().any(|entry| {
+        let path = normalize_path(&entry.path).to_ascii_lowercase();
+        path.contains("/data/")
+            || path.contains("/models/")
+            || path.contains("/text/")
+            || path.contains("/anim/")
+            || path.contains("/audio/")
+    }) {
+        layouts.push("root mirror: archive contains direct game-folder names".to_string());
+    }
+    layouts.sort();
+    layouts.dedup();
+    layouts
+}
+
+fn detected_language_packs(text: &str) -> Vec<(&'static str, f32)> {
+    let packs = [
+        (
+            "spanish",
+            [
+                "copiar",
+                "copia",
+                "carpeta del juego",
+                "directorio del juego",
+                "instalar",
+            ],
+        ),
+        (
+            "portuguese",
+            [
+                "copie",
+                "copiar",
+                "pasta do jogo",
+                "diretorio do jogo",
+                "instalar",
+            ],
+        ),
+        (
+            "polish",
+            [
+                "skopiuj",
+                "folderu gry",
+                "katalogu gry",
+                "instalacja",
+                "wymaga",
+            ],
+        ),
+        (
+            "russian-translit",
+            [
+                "skopiruyte",
+                "papku s igroy",
+                "papka igry",
+                "ustanovka",
+                "trebuetsya",
+            ],
+        ),
+    ];
+    packs
+        .iter()
+        .filter_map(|(language, words)| {
+            let hits = words.iter().filter(|word| text.contains(**word)).count();
+            if hits >= 2 {
+                Some((*language, (0.62 + (hits as f32 * 0.06)).min(0.86)))
+            } else {
+                None
+            }
+        })
+        .collect()
 }
 
 struct ReadmeLineContext {
@@ -576,6 +855,14 @@ fn requirement_target_from_line(line: &str) -> Option<String> {
         Some("Mod Loader".to_string())
     } else if line.contains("asi loader") {
         Some("ASI Loader".to_string())
+    } else if line.contains("silentpatch") || line.contains("silent patch") {
+        Some("SilentPatch".to_string())
+    } else if line.contains("1 0 exe")
+        || line.contains("original exe")
+        || line.contains("hoodlum exe")
+        || line.contains("us 1 0")
+    {
+        Some("GTA SA 1.0 executable".to_string())
     } else {
         None
     }
@@ -662,6 +949,13 @@ fn contains_install_verb(line: &str) -> bool {
         "transfer",
         "install",
         "installed",
+        "copiar",
+        "copie",
+        "skopiuj",
+        "skopiruyte",
+        "instalar",
+        "instalacja",
+        "ustanovka",
     ]
     .iter()
     .any(|word| line_contains_token(line, word))
@@ -764,6 +1058,14 @@ fn mentions_game_root(line: &str) -> bool {
         || line.contains("directory where gta sa exe")
         || line.contains("folder with gta sa exe")
         || line.contains("gta sa exe")
+        || line.contains("carpeta del juego")
+        || line.contains("directorio del juego")
+        || line.contains("pasta do jogo")
+        || line.contains("diretorio do jogo")
+        || line.contains("folderu gry")
+        || line.contains("katalogu gry")
+        || line.contains("papku s igroy")
+        || line.contains("papka igry")
 }
 
 fn mentions_game_data_folder(line: &str, folder: &str) -> bool {

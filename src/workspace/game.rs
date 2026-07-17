@@ -4,8 +4,20 @@ pub(crate) fn inspect_game(game_root: &Path) -> Result<(), AppError> {
     println!("game: {}", game_root.display());
     println!("exists: {}", game_root.exists());
     println!();
+    print_interrupted_install_notice(game_root)?;
     print_game_infrastructure(game_root);
     print_game_script_inventory(game_root)
+}
+
+fn print_interrupted_install_notice(game_root: &Path) -> Result<(), AppError> {
+    if let Some(lock) = interrupted_install(game_root)? {
+        println!(
+            "WARNING: install {} was interrupted; run `recover` to roll it back",
+            lock.txid
+        );
+        println!();
+    }
+    Ok(())
 }
 
 fn print_game_infrastructure(game_root: &Path) {

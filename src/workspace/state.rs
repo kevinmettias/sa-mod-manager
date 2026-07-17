@@ -1,6 +1,7 @@
 use crate::prelude::*;
 
 pub(crate) fn init_state(game_root: &Path) -> Result<(), AppError> {
+    ensure_gta_install(game_root)?;
     ensure_state(game_root)?;
     println!("initialized: {}", state_directory(game_root).display());
     Ok(())

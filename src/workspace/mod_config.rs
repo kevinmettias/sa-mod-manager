@@ -159,6 +159,20 @@ fn write_mod_config_notes(file: &mut fs::File, report: &PackageReport) -> Result
     notes.extend(context_hints);
     let risks = report.risks.iter().cloned();
     notes.extend(risks);
+    let readme_insights = report.readme_insights.iter().map(|insight| {
+        format!(
+            "readme {} {:.0}% [{}] {} ({}:{}): {} | evidence: {}",
+            insight.kind,
+            insight.confidence * 100.0,
+            insight.rule_id,
+            insight.title,
+            insight.source_readme,
+            insight.line_number,
+            insight.detail,
+            insight.evidence
+        )
+    });
+    notes.extend(readme_insights);
     notes.sort();
     notes.dedup();
     for (idx, note) in notes.iter().enumerate() {

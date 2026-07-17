@@ -13,7 +13,8 @@ pub(crate) use install::{
 };
 pub(crate) use package::{
     ArchiveEntryFields, EntryClassificationState, ManifestInstallRoot, PackageEntry, PackageKind,
-    PackageRef, PackageReport, PackageSummary, ReadmeAction, ReadmeDocument, ReadmeInstruction,
+    PackageRef, PackageReport, PackageSummary, ReadmeAction, ReadmeDocument, ReadmeInsight,
+    ReadmeInsightKind, ReadmeInstruction,
 };
 pub(crate) use profile::{CommandOptions, ProfileJson, ProfileModActivation, ProfileModEntry};
 pub(crate) use rules::{

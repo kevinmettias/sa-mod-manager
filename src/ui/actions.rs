@@ -2,7 +2,17 @@ use crate::prelude::*;
 
 use super::san_andreas_mod_ui::{
     PendingRunRecord, PendingRunStatus, ReadmeProposal, ReadmeProposalState, SanAndreasModUi,
+    export_telemetry_summary,
 };
+
+impl SanAndreasModUi {
+    pub(super) fn export_telemetry(&mut self) {
+        match export_telemetry_summary(&self.game_root(), &self.telemetry) {
+            Ok(path) => self.status = format!("exported telemetry: {}", path.display()),
+            Err(err) => self.status = err.to_string(),
+        }
+    }
+}
 
 impl SanAndreasModUi {
     pub(super) fn initialize_state(&mut self) {
