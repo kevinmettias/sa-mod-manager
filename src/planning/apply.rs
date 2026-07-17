@@ -1,13 +1,28 @@
 use crate::prelude::*;
 
-use super::copy_journal::apply_copy_tree_with_journal;
+use super::copy_journal::{apply_copy_tree_with_journal, sync_journal};
+use super::install_lock::{acquire_install_lock, release_install_lock};
+use super::rollback::rollback_journal;
 
 pub(crate) fn apply_install_plan(package: &Path, plan: &InstallPlan) -> Result<(), AppError> {
+    ensure_gta_install(&plan.game_root)?;
     if plan.operations.is_empty() {
         return Err(usage_error("install plan has no operations")); // literal: allow external interface text or file-format spelling
     }
 
     let install_state = create_install_state(package, plan)?;
+    // Claim the game folder before the destructive copy loop: blocks a second
+    // concurrent install and refuses if a previous install is still unrecovered.
+    acquire_install_lock(&plan.game_root, &install_state.txid, &install_state.journal_path)?;
+    let apply_result = apply_locked_install(package, plan, &install_state);
+    finish_install(&plan.game_root, &install_state, apply_result)
+}
+
+fn apply_locked_install(
+    package: &Path,
+    plan: &InstallPlan,
+    install_state: &InstallApplyState,
+) -> Result<(), AppError> {
     let mut journal = fs::File::create(&install_state.journal_path)?;
     write_install_journal_header(&mut journal, package, plan, &install_state.txid)?;
 
@@ -19,11 +34,49 @@ pub(crate) fn apply_install_plan(package: &Path, plan: &InstallPlan) -> Result<(
         };
         apply_install_operation(operation, &install_state.staging_root, &mut copy_context)?;
     }
+    sync_journal(&mut journal)
+}
 
-    println!("installed transaction: {}", install_state.txid);
-    println!("journal: {}", install_state.journal_path.display());
-    println!("backups: {}", install_state.backup_root.display());
-    Ok(())
+fn finish_install(
+    game_root: &Path,
+    install_state: &InstallApplyState,
+    apply_result: Result<(), AppError>,
+) -> Result<(), AppError> {
+    match apply_result {
+        Ok(()) => {
+            release_install_lock(game_root)?;
+            println!("installed transaction: {}", install_state.txid);
+            println!("journal: {}", install_state.journal_path.display());
+            println!("backups: {}", install_state.backup_root.display());
+            Ok(())
+        }
+        Err(err) => recover_failed_install(game_root, install_state, err),
+    }
+}
+
+fn recover_failed_install(
+    game_root: &Path,
+    install_state: &InstallApplyState,
+    install_error: AppError,
+) -> Result<(), AppError> {
+    // Roll the partial changes back automatically so a failed install leaves a
+    // clean game folder. If rollback itself fails, keep the lock so `recover`
+    // can retry once the underlying problem is resolved.
+    let rollback_result = if install_state.journal_path.exists() {
+        rollback_journal(&install_state.journal_path, game_root)
+    } else {
+        Ok(())
+    };
+    match rollback_result {
+        Ok(()) => {
+            release_install_lock(game_root)?;
+            Err(install_error)
+        }
+        Err(rollback_error) => Err(AppError::Usage(format!(
+            "install failed: {install_error}; automatic rollback also failed: {rollback_error}; run `recover --game {}` after resolving the issue",
+            game_root.display()
+        ))),
+    }
 }
 
 fn create_install_state(package: &Path, plan: &InstallPlan) -> Result<InstallApplyState, AppError> {

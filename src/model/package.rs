@@ -15,7 +15,9 @@ pub(crate) use entry_classification_state::EntryClassificationState;
 pub(crate) use kind::Kind as PackageKind;
 pub(crate) use manifest_root::ManifestInstallRoot;
 pub(crate) use readme::ReadmeDocument;
-pub(crate) use readme_instruction::{ReadmeAction, ReadmeInstruction};
+pub(crate) use readme_instruction::{
+    ReadmeAction, ReadmeInsight, ReadmeInsightKind, ReadmeInstruction,
+};
 pub(crate) use reference::Reference as PackageRef;
 pub(crate) use report::Report as PackageReport;
 pub(crate) use summary::Summary as PackageSummary;

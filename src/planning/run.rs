@@ -1,6 +1,6 @@
 use crate::prelude::*;
 
-use super::copy_journal::apply_copy_tree_with_journal;
+use super::copy_journal::{apply_copy_tree_with_journal, sync_journal};
 use super::rollback::rollback_journal;
 
 pub(crate) fn prepare_run(game_root: &Path, profile_name: &str) -> Result<(), AppError> {
@@ -36,6 +36,7 @@ pub(crate) fn materialize_profile_for_run(
     game_root: &Path,
     profile_name: &str,
 ) -> Result<PathBuf, AppError> {
+    ensure_gta_install(game_root)?;
     ensure_state(game_root)?;
     let profile = read_enabled_profile(game_root, profile_name)?;
     let run_state = create_run_state(game_root, profile_name)?;
@@ -53,7 +54,7 @@ pub(crate) fn materialize_profile_for_run(
         unreachable!("rollback_failed_materialization always returns an error");
     }
 
-    journal.flush()?;
+    sync_journal(&mut journal)?;
     println!("prepared ephemeral run: {profile_name}");
     println!("journal: {}", run_state.journal_path.display());
     Ok(run_state.journal_path)
@@ -544,6 +545,9 @@ mod tests {
         ));
         remove_dir_if_exists(&root).unwrap();
         fs::create_dir_all(&root).unwrap();
+        // Materialization now requires a real-looking GTA install; give the
+        // temp root the executable ensure_gta_install checks for.
+        fs::write(root.join("gta_sa.exe"), b"").unwrap();
         root
     }
 

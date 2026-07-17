@@ -1,6 +1,7 @@
 use crate::prelude::*;
 
 pub(crate) fn import_package(package: &Path, options: &CommandOptions) -> Result<(), AppError> {
+    ensure_gta_install(&options.game_root)?;
     ensure_state(&options.game_root)?;
     let report = analyze_package(package, &options.game_root)?;
     let plan = build_install_plan(&report, options);

@@ -22,6 +22,11 @@ fn apply_copy_file_with_journal(
     let dest = target_root.join(rel);
     ensure_destination_allowed(context.game_root, &dest)?;
     journal_destination_state(&dest, context)?;
+    // Force the backup/new record to durable storage *before* the destructive
+    // copy below. Otherwise a crash or power loss between the copy landing on
+    // disk and the journal line being flushed would leave an overwritten game
+    // file with no recoverable journal entry, silently breaking rollback.
+    sync_journal(context.journal)?;
     if let Some(parent) = dest.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -43,6 +48,9 @@ fn journal_destination_state(
             fs::create_dir_all(parent)?;
         }
         fs::copy(dest, &backup)?;
+        // The backup is the only copy of the original file once we overwrite the
+        // destination, so its contents must be durable before that overwrite.
+        sync_file_contents(&backup)?;
         let backup_hash = file_hash(&backup)?;
         write_backup_line(context.journal, dest, &backup, &backup_hash)?;
     } else {
@@ -85,6 +93,27 @@ fn write_copy_line(
         escape_value(&dest.display().to_string()),
         copied_hash
     )?;
+    Ok(())
+}
+
+/// Flush the journal file's buffered contents through to durable storage.
+///
+/// On Windows this maps to `FlushFileBuffers`; the journal is opened for
+/// writing so the call is permitted.
+pub(super) fn sync_journal(journal: &mut fs::File) -> Result<(), AppError> {
+    journal.flush()?;
+    journal.sync_all()?;
+    Ok(())
+}
+
+/// Force an already-written file's contents to durable storage.
+///
+/// Opens the file with write access because `File::sync_all` -> `FlushFileBuffers`
+/// requires a writable handle on Windows; `write(true)` without `truncate`
+/// leaves the existing contents intact.
+fn sync_file_contents(path: &Path) -> Result<(), AppError> {
+    let file = fs::OpenOptions::new().write(true).open(path)?;
+    file.sync_all()?;
     Ok(())
 }
 
