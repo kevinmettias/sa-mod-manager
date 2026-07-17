@@ -1,0 +1,36 @@
+use crate::prelude::*;
+
+#[derive(Clone, Copy, Eq, PartialEq, Ord, PartialOrd)]
+pub(crate) enum Component {
+    ModLoader,
+    ModLoaderContent,
+    Cleo,
+    CleoText,
+    Asi,
+    ImgReplacement,
+    ScriptData,
+    Data,
+    Models,
+    Text,
+    Anim,
+    Audio,
+}
+
+impl fmt::Display for Component {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Component::ModLoader => write!(f, "modloader runtime"),
+            Component::ModLoaderContent => write!(f, "modloader content"),
+            Component::Cleo => write!(f, "CLEO"),
+            Component::CleoText => write!(f, "CLEO text"),
+            Component::Asi => write!(f, "ASI plugin"),
+            Component::ImgReplacement => write!(f, "IMG/DFF/TXD replacement"),
+            Component::ScriptData => write!(f, "script data"),
+            Component::Data => write!(f, "data files"),
+            Component::Models => write!(f, "models"),
+            Component::Text => write!(f, "text/GXT"),
+            Component::Anim => write!(f, "animation"),
+            Component::Audio => write!(f, "audio"),
+        }
+    }
+}
