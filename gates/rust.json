@@ -1,0 +1,23 @@
+{
+  "banner": "SA Mod Manager focused Rust checks",
+  "success_note": "selected Rust checks passed",
+  "usage_target": "<path-to-rust-source>",
+  "phases": [
+    {
+      "label": "requested checks",
+      "checks": [
+        "check-one-public-type",
+        "check-nested-call",
+        "check-nesting-depth",
+        "check-function-size",
+        "check-field-grouping",
+        "check-intrafile-duplication",
+        "check-parameter-count",
+        "check-naming-clarity",
+        "check-responsibility-extraction",
+        "check-interfile-duplication",
+        "check-class-size"
+      ]
+    }
+  ]
+}
