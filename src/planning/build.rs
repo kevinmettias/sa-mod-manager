@@ -8,9 +8,12 @@ pub(crate) fn build_install_plan(report: &PackageReport, options: &CommandOption
         operations: &mut operations,
         warnings: &mut warnings,
     };
+    // Index the package's files once, shared by whichever operation path runs,
+    // instead of rescanning every entry per source.
+    let index = SourceStatsIndex::new(report);
     if !report.manifest_roots.is_empty() {
-        add_manifest_operations(report, options, &mut collections);
-    } else if add_readme_operations(report, options, &mut collections) == 0 {
+        add_manifest_operations(report, &index, options, &mut collections);
+    } else if add_readme_operations(report, &index, options, &mut collections) == 0 {
         add_candidate_operations(report, options, &package_id, &mut collections);
     }
 
@@ -27,12 +30,13 @@ pub(crate) fn build_install_plan(report: &PackageReport, options: &CommandOption
 
 fn add_readme_operations(
     report: &PackageReport,
+    index: &SourceStatsIndex,
     options: &CommandOptions,
     collections: &mut PlanBuildCollections,
 ) -> usize {
     let mut count = 0;
     for instruction in &report.readme_instructions {
-        if push_readme_operation(instruction, report, options, collections) {
+        if push_readme_operation(instruction, index, options, collections) {
             count += 1;
         }
     }
@@ -41,7 +45,7 @@ fn add_readme_operations(
 
 fn push_readme_operation(
     instruction: &ReadmeInstruction,
-    report: &PackageReport,
+    index: &SourceStatsIndex,
     options: &CommandOptions,
     collections: &mut PlanBuildCollections,
 ) -> bool {
@@ -69,7 +73,7 @@ fn push_readme_operation(
             return false;
         }
     };
-    let stats = manifest_source_stats(report, &source);
+    let stats = index.stats(&source);
     let target_kind = readme_target_kind(&target);
     let mut notes = vec![format!(
         "readme evidence {:.0}%: {} line {}: {}",
@@ -107,17 +111,68 @@ fn readme_target_kind(target: &str) -> TargetKind {
 
 fn add_manifest_operations(
     report: &PackageReport,
+    index: &SourceStatsIndex,
     options: &CommandOptions,
     collections: &mut PlanBuildCollections,
 ) {
     for root in &report.manifest_roots {
-        push_manifest_operation(root, report, options, collections);
+        push_manifest_operation(root, index, options, collections);
+    }
+}
+
+/// Per-source (file count, total bytes) over a package's file entries,
+/// precomputed once and queried by prefix in O(log n + matches).
+struct SourceStatsIndex {
+    /// Normalized file paths with sizes, sorted by path.
+    entries: Vec<(String, u64)>,
+    total: (usize, u64),
+}
+
+impl SourceStatsIndex {
+    fn new(report: &PackageReport) -> Self {
+        let mut entries: Vec<(String, u64)> = report
+            .entries
+            .iter()
+            .filter(|entry| !entry.is_dir)
+            .map(|entry| (normalize_path(&entry.path), entry.size))
+            .collect();
+        entries.sort_by(|a, b| a.0.cmp(&b.0));
+        let total = (entries.len(), entries.iter().map(|(_, size)| size).sum());
+        Self { entries, total }
+    }
+
+    fn stats(&self, source: &str) -> (usize, u64) {
+        let source = normalize_path(source);
+        if source == "." {
+            return self.total;
+        }
+        let mut file_count = 0;
+        let mut total_bytes = 0;
+        // Exact match (a single file whose path equals the source).
+        if let Ok(idx) = self.entries.binary_search_by(|(path, _)| path.as_str().cmp(&source)) {
+            file_count += 1;
+            total_bytes += self.entries[idx].1;
+        }
+        // Files under `source/` form a contiguous sorted range.
+        let prefix = format!("{source}/");
+        let start = self
+            .entries
+            .partition_point(|(path, _)| path.as_str() < prefix.as_str());
+        for (path, size) in &self.entries[start..] {
+            if path.starts_with(&prefix) {
+                file_count += 1;
+                total_bytes += size;
+            } else {
+                break;
+            }
+        }
+        (file_count, total_bytes)
     }
 }
 
 fn push_manifest_operation(
     root: &ManifestInstallRoot,
-    report: &PackageReport,
+    index: &SourceStatsIndex,
     options: &CommandOptions,
     collections: &mut PlanBuildCollections,
 ) {
@@ -141,7 +196,7 @@ fn push_manifest_operation(
             return;
         }
     };
-    let stats = manifest_source_stats(report, &source);
+    let stats = index.stats(&source);
     let target_root = options.game_root.join(target_rel);
     collections.operations.push(InstallOperation {
         source_root: source,
@@ -154,22 +209,6 @@ fn push_manifest_operation(
     });
 }
 
-fn manifest_source_stats(report: &PackageReport, source: &str) -> (usize, u64) {
-    let source = normalize_path(source);
-    let mut file_count = 0;
-    let mut total_bytes = 0;
-    for entry in &report.entries {
-        if entry.is_dir {
-            continue;
-        }
-        let path = normalize_path(&entry.path);
-        if source == "." || path == source || path.starts_with(&(source.clone() + "/")) {
-            file_count += 1;
-            total_bytes += entry.size;
-        }
-    }
-    (file_count, total_bytes)
-}
 
 fn build_plan_warnings(report: &PackageReport) -> Vec<String> {
     let mut warnings = report.risks.iter().cloned().collect::<Vec<_>>();
@@ -310,5 +349,38 @@ fn target_order(kind: &TargetKind) -> u8 {
         TargetKind::Cleo => 2,
         TargetKind::Asi => 3,
         TargetKind::DirectManaged => 4,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn index_of(paths: &[(&str, u64)]) -> SourceStatsIndex {
+        let mut entries: Vec<(String, u64)> = paths
+            .iter()
+            .map(|(path, size)| (normalize_path(path), *size))
+            .collect();
+        entries.sort_by(|a, b| a.0.cmp(&b.0));
+        let total = (entries.len(), entries.iter().map(|(_, size)| size).sum());
+        SourceStatsIndex { entries, total }
+    }
+
+    #[test]
+    fn source_stats_index_matches_exact_and_prefix_but_not_lookalikes() {
+        let index = index_of(&[
+            ("data", 10),
+            ("data.bak", 99), // lookalike: sorts between "data" and "data/" but must not match
+            ("data/handling.cfg", 20),
+            ("data/anim/x", 5),
+            ("models/a.dff", 7),
+        ]);
+
+        // exact ("data") + everything under "data/", excluding "data.bak"
+        assert_eq!(index.stats("data"), (3, 35));
+        assert_eq!(index.stats("data/anim"), (1, 5));
+        assert_eq!(index.stats("models"), (1, 7));
+        assert_eq!(index.stats("missing"), (0, 0));
+        assert_eq!(index.stats("."), (5, 141));
     }
 }
