@@ -1,5 +1,6 @@
 use crate::prelude::*;
 use std::io::Read;
+use std::process::Stdio;
 
 pub(crate) fn extract_archive_to_named_staging(
     package: &Path,
@@ -12,22 +13,72 @@ pub(crate) fn extract_archive_to_named_staging(
 }
 
 pub(crate) fn extract_archive_to_directory(package: &Path, target: &Path) -> Result<(), AppError> {
+    let mut budget = ExtractBudget::new();
+    extract_archive_raw(package, target, &mut budget)?;
+    // Unpack archives nested inside the package so their contents can be
+    // classified and installed instead of being treated as opaque files.
+    // Bounded by MAX_NESTED_DEPTH and the shared extraction budget.
+    extract_nested_archives(target, &mut budget)
+}
+
+fn extract_archive_raw(
+    package: &Path,
+    target: &Path,
+    budget: &mut ExtractBudget,
+) -> Result<(), AppError> {
     match archive_backend(package) {
-        ArchiveBackend::NativeZip => return extract_zip_to_directory(package, target),
-        ArchiveBackend::SevenZip => {}
+        ArchiveBackend::NativeZip => extract_zip_to_directory(package, target, budget),
+        ArchiveBackend::SevenZip => extract_with_seven_zip(package, target),
     }
+}
+
+fn extract_with_seven_zip(package: &Path, target: &Path) -> Result<(), AppError> {
     let seven_zip = find_seven_zip().ok_or_else(|| missing_7zip_error_for_package(package))?;
     fs::create_dir_all(target)?;
     let output = Command::new(seven_zip)
+        .env("LC_ALL", "C") // prefer stable, English tool messages regardless of system locale
         .arg("x") // literal: allow external interface text or file-format spelling
         .arg("-y") // literal: allow external interface text or file-format spelling
         .arg(format!("-o{}", target.display()))
         .arg(package)
         .output()?;
     if !output.status.success() {
-        return Err(extract_failed_error(package));
+        return Err(seven_zip_extract_error(package, &output.stderr));
     }
     Ok(())
+}
+
+fn extract_nested_archives(root: &Path, budget: &mut ExtractBudget) -> Result<(), AppError> {
+    // Each pass unpacks one layer of nesting (merging inner archives into their
+    // parent directory) and removes the consumed archive; a following pass then
+    // finds anything the previous layer revealed.
+    for _ in 0..MAX_NESTED_DEPTH {
+        let inner = find_inner_archives(root)?;
+        if inner.is_empty() {
+            break;
+        }
+        for archive in inner {
+            let parent = archive
+                .parent()
+                .map(Path::to_path_buf)
+                .unwrap_or_else(|| root.to_path_buf());
+            extract_archive_raw(&archive, &parent, budget)?;
+            fs::remove_file(&archive)?;
+        }
+    }
+    Ok(())
+}
+
+fn find_inner_archives(root: &Path) -> Result<Vec<PathBuf>, AppError> {
+    let mut archives = Vec::new();
+    for file in collect_files_recursive(root)? {
+        if let Some(ext) = package_extension(&file) {
+            if NESTED_ARCHIVE_EXTENSIONS.contains(&ext.as_str()) {
+                archives.push(file);
+            }
+        }
+    }
+    Ok(archives)
 }
 
 pub(crate) fn list_archive_entries_native(
@@ -44,7 +95,7 @@ pub(crate) fn list_archive_entries_native(
     for idx in 0..archive.len() {
         let file = archive
             .by_index(idx)
-            .map_err(|err| AppError::Tool(format!("failed to read zip entry: {err}")))?;
+            .map_err(|err| zip_entry_error(package, &err))?;
         let path = file.name().replace('\\', "/");
         if path.is_empty() {
             continue;
@@ -108,6 +159,85 @@ fn extract_failed_error(package: &Path) -> AppError {
     AppError::Tool(message)
 }
 
+fn seven_zip_extract_error(package: &Path, stderr: &[u8]) -> AppError {
+    let text = String::from_utf8_lossy(stderr).to_ascii_lowercase();
+    if text.contains("wrong password") || text.contains("password") || text.contains("encrypted") {
+        return AppError::Tool(format!(
+            "7-Zip could not extract {} because it is password-protected/encrypted, which is not supported",
+            package.display()
+        ));
+    }
+    extract_failed_error(package)
+}
+
+fn zip_entry_error(package: &Path, err: &zip::result::ZipError) -> AppError {
+    let text = err.to_string();
+    if text.to_ascii_lowercase().contains("password") {
+        return AppError::Tool(format!(
+            "{} contains an encrypted entry, which is not supported: {text}",
+            package.display()
+        ));
+    }
+    AppError::Tool(format!("failed to read zip entry: {text}"))
+}
+
+/// Upper bounds on a single package's extraction, shared across nested archives
+/// so an archive-in-archive cannot multiply past these limits.
+const MAX_EXTRACT_BYTES: u64 = 16 * 1024 * 1024 * 1024;
+const MAX_EXTRACT_ENTRIES: usize = 500_000;
+const MAX_NESTED_DEPTH: usize = 3;
+const NESTED_ARCHIVE_EXTENSIONS: [&str; 3] = ["zip", "7z", "rar"];
+
+struct ExtractBudget {
+    remaining_bytes: u64,
+    remaining_entries: usize,
+}
+
+impl ExtractBudget {
+    fn new() -> Self {
+        Self {
+            remaining_bytes: MAX_EXTRACT_BYTES,
+            remaining_entries: MAX_EXTRACT_ENTRIES,
+        }
+    }
+
+    fn take_entry(&mut self, package: &Path) -> Result<(), AppError> {
+        self.remaining_entries = self
+            .remaining_entries
+            .checked_sub(1)
+            .ok_or_else(|| too_many_entries_error(package))?;
+        Ok(())
+    }
+
+    fn take_bytes(&mut self, count: u64, package: &Path) -> Result<(), AppError> {
+        self.remaining_bytes = self
+            .remaining_bytes
+            .checked_sub(count)
+            .ok_or_else(|| archive_too_large_error(package))?;
+        Ok(())
+    }
+}
+
+fn archive_too_large_error(package: &Path) -> AppError {
+    AppError::Tool(format!(
+        "{} expands past the {} GiB extraction limit; refusing to continue",
+        package.display(),
+        MAX_EXTRACT_BYTES / (1024 * 1024 * 1024)
+    ))
+}
+
+fn too_many_entries_error(package: &Path) -> AppError {
+    AppError::Tool(format!(
+        "{} exceeds the {}-entry extraction limit; refusing to continue",
+        package.display(),
+        MAX_EXTRACT_ENTRIES
+    ))
+}
+
+fn is_symlink_mode(mode: Option<u32>) -> bool {
+    mode.map(|value| value & 0o170000 == 0o120000).unwrap_or(false)
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ArchiveBackend {
     NativeZip,
@@ -141,19 +271,29 @@ fn seven_zip_missing_message(package: &str) -> String {
     )
 }
 
-fn extract_zip_to_directory(package: &Path, target: &Path) -> Result<(), AppError> {
+fn extract_zip_to_directory(
+    package: &Path,
+    target: &Path,
+    budget: &mut ExtractBudget,
+) -> Result<(), AppError> {
     fs::create_dir_all(target)?;
     let file = fs::File::open(package)?;
     let mut archive = zip::ZipArchive::new(file).map_err(|err| {
         AppError::Tool(format!("failed to read zip {}: {err}", package.display()))
     })?;
     for idx in 0..archive.len() {
+        budget.take_entry(package)?;
         let mut entry = archive
             .by_index(idx)
-            .map_err(|err| AppError::Tool(format!("failed to read zip entry: {err}")))?;
+            .map_err(|err| zip_entry_error(package, &err))?;
         let Some(enclosed) = entry.enclosed_name() else {
             continue;
         };
+        // Skip symlink entries: materializing one would let a later entry write
+        // through the link to a path outside the extraction target (zip-slip).
+        if is_symlink_mode(entry.unix_mode()) {
+            continue;
+        }
         let dest = target.join(enclosed);
         if entry.is_dir() {
             fs::create_dir_all(dest)?;
@@ -163,7 +303,12 @@ fn extract_zip_to_directory(package: &Path, target: &Path) -> Result<(), AppErro
             fs::create_dir_all(parent)?;
         }
         let mut out = fs::File::create(dest)?;
-        io::copy(&mut entry, &mut out)?;
+        // Bound the *actual* decompressed bytes (not the header-declared size) so a
+        // zip bomb cannot exhaust the disk: read at most one byte past the budget,
+        // then charge what was written, which fails once the limit is crossed.
+        let limit = budget.remaining_bytes.saturating_add(1);
+        let written = io::copy(&mut entry.by_ref().take(limit), &mut out)?;
+        budget.take_bytes(written, package)?;
     }
     Ok(())
 }
@@ -178,7 +323,10 @@ fn read_folder_text_file(
     if !path.exists() || !path.is_file() {
         return Ok(None);
     }
-    let bytes = fs::read(path)?;
+    // Read only up to the cap rather than the whole file, which may be large.
+    let file = fs::File::open(&path)?;
+    let mut bytes = Vec::new();
+    file.take(max_bytes as u64).read_to_end(&mut bytes)?;
     Ok(Some(text_from_bytes(&bytes, max_bytes)))
 }
 
@@ -210,16 +358,33 @@ fn read_external_archive_text_file(
     max_bytes: usize,
 ) -> Result<Option<String>, AppError> {
     let seven_zip = find_seven_zip().ok_or_else(|| missing_7zip_error_for_package(package))?;
-    let output = Command::new(seven_zip)
+    let mut child = Command::new(seven_zip)
         .arg("e")
         .arg("-so")
         .arg(package)
         .arg(entry_path)
-        .output()?;
-    if !output.status.success() {
-        return Ok(None);
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()?;
+
+    // Read only up to the cap; closing the pipe and killing 7-Zip afterward means
+    // we never buffer a whole (possibly multi-MB) extracted file just to keep a
+    // small README window.
+    let mut buffer = Vec::new();
+    if let Some(mut stdout) = child.stdout.take() {
+        stdout
+            .by_ref()
+            .take(max_bytes as u64)
+            .read_to_end(&mut buffer)?;
     }
-    Ok(Some(text_from_bytes(&output.stdout, max_bytes)))
+    let _ = child.kill();
+    let _ = child.wait();
+
+    if buffer.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(text_from_bytes(&buffer, max_bytes)))
+    }
 }
 
 fn text_from_bytes(bytes: &[u8], max_bytes: usize) -> String {
@@ -271,6 +436,90 @@ mod tests {
             fs::read_to_string(target.join("modloader").join("Test").join("file.txt")).unwrap(),
             "payload"
         );
+        remove_dir_if_exists(&root).unwrap();
+    }
+
+    #[test]
+    fn extraction_enforces_total_byte_budget() {
+        let root = test_root("zip_byte_budget");
+        let package = root.join("big.zip");
+        let payload = "x".repeat(64);
+        write_zip_package(&package, &[("data/file.bin", payload.as_str())]);
+
+        let mut budget = ExtractBudget {
+            remaining_bytes: 16,
+            remaining_entries: 100,
+        };
+        let err = extract_zip_to_directory(&package, &root.join("out"), &mut budget)
+            .unwrap_err()
+            .to_string();
+
+        assert!(err.contains("extraction limit"));
+        remove_dir_if_exists(&root).unwrap();
+    }
+
+    #[test]
+    fn extraction_enforces_entry_count_budget() {
+        let root = test_root("zip_entry_budget");
+        let package = root.join("many.zip");
+        write_zip_package(&package, &[("a.txt", "a"), ("b.txt", "b")]);
+
+        let mut budget = ExtractBudget {
+            remaining_bytes: 1 << 20,
+            remaining_entries: 1,
+        };
+        let err = extract_zip_to_directory(&package, &root.join("out"), &mut budget)
+            .unwrap_err()
+            .to_string();
+
+        assert!(err.contains("extraction limit"));
+        remove_dir_if_exists(&root).unwrap();
+    }
+
+    #[test]
+    fn symlink_modes_are_detected_and_regular_modes_are_not() {
+        // Extraction skips any entry whose unix mode marks it a symlink (S_IFLNK),
+        // the bits real unix archivers set on link entries.
+        assert!(is_symlink_mode(Some(0o120777)));
+        assert!(!is_symlink_mode(Some(0o100644))); // regular file
+        assert!(!is_symlink_mode(Some(0o040755))); // directory
+        assert!(!is_symlink_mode(None)); // no unix mode recorded
+    }
+
+    #[test]
+    fn nested_archives_are_recursively_extracted_and_removed() {
+        let root = test_root("zip_nested");
+        let mut inner_bytes = Vec::new();
+        {
+            let mut inner = zip::ZipWriter::new(io::Cursor::new(&mut inner_bytes));
+            inner
+                .start_file("modloader/inner.txt", SimpleFileOptions::default())
+                .unwrap();
+            inner.write_all(b"nested payload").unwrap();
+            inner.finish().unwrap();
+        }
+
+        let package = root.join("outer.zip");
+        {
+            let file = fs::File::create(&package).unwrap();
+            let mut outer = zip::ZipWriter::new(file);
+            outer
+                .start_file("outer.txt", SimpleFileOptions::default())
+                .unwrap();
+            outer.write_all(b"outer payload").unwrap();
+            outer
+                .start_file("inner.zip", SimpleFileOptions::default())
+                .unwrap();
+            outer.write_all(&inner_bytes).unwrap();
+            outer.finish().unwrap();
+        }
+
+        let target = root.join("out");
+        extract_archive_to_directory(&package, &target).unwrap();
+
+        assert!(target.join("outer.txt").exists());
+        assert!(target.join("modloader").join("inner.txt").exists());
+        assert!(!target.join("inner.zip").exists());
         remove_dir_if_exists(&root).unwrap();
     }
 

@@ -14,7 +14,7 @@ pub(crate) fn set_profile_mod_activation(
     };
     entry.enabled = activation.is_enabled();
     normalize_profile_mod_entries(&mut profile.mods);
-    write_profile_json(game_root, &profile.name, &profile.mods)?;
+    write_profile_json(game_root, &profile)?;
     println!(
         "{} `{mod_id}` in profile `{profile_name}`",
         activation.label()
@@ -36,7 +36,7 @@ pub(crate) fn set_profile_mod_order(
     };
     entry.load_order = order;
     normalize_profile_mod_entries(&mut profile.mods);
-    write_profile_json(game_root, &profile.name, &profile.mods)?;
+    write_profile_json(game_root, &profile)?;
     println!("set `{mod_id}` load_order to {order} in profile `{profile_name}`");
     Ok(())
 }
@@ -55,7 +55,7 @@ pub(crate) fn remove_mod_from_profile_json(
         )));
     }
     normalize_profile_mod_entries(&mut profile.mods);
-    write_profile_json(game_root, &profile.name, &profile.mods)?;
+    write_profile_json(game_root, &profile)?;
     println!("removed `{mod_id}` from profile `{profile_name}`");
     Ok(())
 }
@@ -103,6 +103,7 @@ mod tests {
             enabled: true,
             load_order,
             config: PathBuf::from(format!("{id}.json")),
+            ..Default::default()
         }
     }
 }

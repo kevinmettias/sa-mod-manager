@@ -12,7 +12,14 @@ pub(crate) fn read_profile_json(path: &Path) -> Result<ProfileJson, AppError> {
         .into_iter()
         .map(|entry| profile_mod_entry_from_json(entry, &game_root))
         .collect();
-    Ok(ProfileJson { name, mods })
+    let launch_args = raw.launch_args.unwrap_or_default();
+    let launch_env = raw.launch_env.unwrap_or_default();
+    Ok(ProfileJson {
+        name,
+        mods,
+        launch_args,
+        launch_env,
+    })
 }
 
 #[derive(Deserialize)]
@@ -20,6 +27,8 @@ struct ProfileJsonFile {
     name: Option<String>,
     #[serde(default)]
     mods: Vec<ProfileModEntryFile>,
+    launch_args: Option<Vec<String>>,
+    launch_env: Option<BTreeMap<String, String>>,
 }
 
 #[derive(Deserialize)]
@@ -28,6 +37,7 @@ struct ProfileModEntryFile {
     enabled: Option<bool>,
     load_order: Option<i32>,
     config: Option<PathBuf>,
+    root_overrides: Option<BTreeMap<String, bool>>,
 }
 
 fn profile_name_from_path(path: &Path) -> String {
@@ -52,11 +62,13 @@ fn profile_mod_entry_from_json(entry: ProfileModEntryFile, game_root: &Path) -> 
     let config = entry
         .config
         .unwrap_or_else(|| default_mod_config_path(game_root, &id));
+    let root_overrides = entry.root_overrides.unwrap_or_default();
     ProfileModEntry {
         id,
         enabled,
         load_order,
         config,
+        root_overrides,
     }
 }
 

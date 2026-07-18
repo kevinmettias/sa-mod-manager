@@ -1,8 +1,9 @@
 use crate::prelude::*;
+use eframe::egui;
 
 use super::san_andreas_mod_ui::{
-    PendingRunRecord, PendingRunStatus, ReadmeProposal, ReadmeProposalState, SanAndreasModUi,
-    export_telemetry_summary,
+    ConfirmAction, PendingRunRecord, PendingRunStatus, ReadmeProposal, ReadmeProposalState,
+    SanAndreasModUi, TaskResult, export_telemetry_summary,
 };
 
 impl SanAndreasModUi {
@@ -96,7 +97,7 @@ impl SanAndreasModUi {
 }
 
 impl SanAndreasModUi {
-    pub(super) fn launch_selected_profile(&mut self) {
+    pub(super) fn launch_selected_profile(&mut self, ctx: &egui::Context) {
         self.refresh_pending_runs();
         if self.has_unsafe_pending_runs_for_launch() {
             self.tab = crate::ui::state::UiTab::Run;
@@ -109,18 +110,28 @@ impl SanAndreasModUi {
         }
         let game_root = self.game_root();
         let profile = self.selected_profile.clone();
-        let result = materialize_and_launch_profile(&game_root, &profile);
+        // Materialize (extract + copy) can be slow; run it off the UI thread.
+        self.spawn_task(ctx, "preparing and launching", move || {
+            TaskResult::Play(materialize_and_launch_profile(&game_root, &profile))
+        });
+    }
+
+    pub(super) fn apply_play(
+        &mut self,
+        result: Result<(PathBuf, std::process::Child), AppError>,
+    ) {
         match result {
             Ok((journal, child)) => {
                 self.pending_journal = Some(journal.clone());
                 self.game_child = Some(child);
-                self.status = format!("playing `{profile}`; cleanup record {}", journal.display());
+                self.last_error = None;
+                self.status = format!("playing profile; cleanup record {}", journal.display());
                 if let Err(err) = self.reload_state() {
-                    self.status = err.to_string();
+                    self.record_error(err);
                 }
             }
             Err(err) => {
-                self.status = err.to_string();
+                self.record_error(err);
                 self.refresh_pending_runs();
             }
         }
@@ -387,7 +398,7 @@ impl SanAndreasModUi {
 }
 
 impl SanAndreasModUi {
-    pub(super) fn import_package(&mut self) {
+    pub(super) fn import_package(&mut self, ctx: &egui::Context) {
         let trimmed_package = self.import_path_input.trim();
         let package = PathBuf::from(trimmed_package);
         if package.as_os_str().is_empty() {
@@ -395,32 +406,81 @@ impl SanAndreasModUi {
             return;
         }
         let profile = self.selected_profile.clone();
-        /* literal: allow external interface text or file-format spelling */
-        /* literal: allow external interface text or file-format spelling */
-        self.run_action("imported package", |game_root| {
-            // literal: allow external interface text or file-format spelling
+        let game_root = self.game_root();
+        // Extraction + copy into the library can be slow; run it off the UI thread.
+        self.spawn_task(ctx, "importing package", move || {
             let options = CommandOptions {
-                game_root: game_root.to_path_buf(),
+                game_root: game_root.clone(),
                 profile,
                 includes: BTreeSet::new(),
                 excludes: BTreeSet::new(),
                 write_manifest: false,
             };
-            import_package(&package, &options)
+            TaskResult::Import(import_package(&package, &options))
         });
     }
 }
 
 impl SanAndreasModUi {
-    pub(super) fn analyze_package(&mut self) {
+    pub(super) fn request_remove_mod(&mut self, mod_id: &str) {
+        self.request_confirm(
+            "Remove mod",
+            &format!(
+                "Remove `{mod_id}` from profile `{}`? This is not undoable.",
+                self.selected_profile
+            ),
+            "Remove",
+            ConfirmAction::RemoveMod(mod_id.to_string()),
+        );
+    }
+
+    pub(super) fn request_cleanup_selected(&mut self) {
+        self.request_confirm(
+            "Clean temporary files",
+            "Roll back the selected run and delete its materialized files from the game folder?",
+            "Clean",
+            ConfirmAction::CleanSelectedRun,
+        );
+    }
+
+    pub(super) fn request_cleanup_record(&mut self, record: PendingRunRecord) {
+        self.request_confirm(
+            "Clean temporary files",
+            "Roll back this run and delete its materialized files from the game folder?",
+            "Clean",
+            ConfirmAction::CleanRunRecord(record),
+        );
+    }
+
+    pub(super) fn request_cleanup_finished(&mut self) {
+        self.request_confirm(
+            "Clean finished runs",
+            "Roll back every finished run and delete its materialized files from the game folder?",
+            "Clean finished",
+            ConfirmAction::CleanFinishedRuns,
+        );
+    }
+}
+
+impl SanAndreasModUi {
+    pub(super) fn analyze_package(&mut self, ctx: &egui::Context) {
         let trimmed_package = self.import_path_input.trim();
         let package = PathBuf::from(trimmed_package);
         if package.as_os_str().is_empty() {
             self.status = "package path is required".to_string(); // literal: allow external interface text or file-format spelling
             return;
         }
-        match analyze_package(&package, &self.game_root()) {
+        let game_root = self.game_root();
+        // Listing/reading an archive can be slow; run it off the UI thread.
+        self.spawn_task(ctx, "reviewing package", move || {
+            TaskResult::Analyze(analyze_package(&package, &game_root))
+        });
+    }
+
+    pub(super) fn apply_analysis(&mut self, result: Result<PackageReport, AppError>) {
+        match result {
             Ok(report) => {
+                self.last_error = None;
                 self.readme_proposals = readme_proposals_from_report(&report);
                 self.analysis_summary = Some(format!(
                     "{} entries, {} install candidates, {} readmes, {} readme proposals, {} risks",
@@ -441,7 +501,7 @@ impl SanAndreasModUi {
             Err(err) => {
                 self.readme_proposals.clear();
                 self.analysis_summary = None;
-                self.status = err.to_string();
+                self.record_error(err);
             }
         }
     }
@@ -502,9 +562,10 @@ fn materialize_and_launch_profile(
     game_root: &Path,
     profile: &str,
 ) -> Result<(PathBuf, std::process::Child), AppError> {
+    let (launch_args, launch_env) = profile_launch_settings(game_root, profile)?;
     let journal = materialize_profile_for_run(game_root, profile)?;
     remember_pending_run(game_root, &journal, None)?;
-    match launch_game_executable(game_root) {
+    match launch_game_executable(game_root, &launch_args, &launch_env) {
         Ok(child) => {
             remember_pending_run(game_root, &journal, Some(child.id()))?;
             Ok((journal, child))

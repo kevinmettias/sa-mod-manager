@@ -1,6 +1,7 @@
 mod cli;
 mod constants;
 mod game_launch;
+mod logging;
 mod model;
 mod parsing;
 mod planning;
@@ -16,8 +17,10 @@ mod prelude {
     pub(crate) use crate::game_launch::{
         ensure_gta_install, game_executable_path, launch_game_executable,
     };
+    pub(crate) use crate::logging::{log_debug, log_error, log_info, log_warn};
     pub(crate) use crate::model::{
-        AppError, ArchiveEntryFields, CandidateDetection, CandidateMetadata, CommandOptions,
+        AppError, AppErrorKind, ArchiveEntryFields, CandidateDetection, CandidateMetadata,
+        CommandOptions, ErrorContext,
         CompletedPlanParts, Component, ComponentRule, ContextRule, CopyJournalContext,
         EntryClassificationState, InstallApplyState, InstallCandidate, InstallOperation,
         InstallPlan, ManifestInstallRoot, ModConfigJson, ModInstallRootJson, PackageEntry,
@@ -41,15 +44,18 @@ mod prelude {
     };
     pub(crate) use crate::reporting::{
         escape_value, extension_eq, extract_to_staging, file_name, find_seven_zip, human_bytes,
+        human_datetime,
         is_readme_name, json_escape, list_matching, normalize_path, package_id, print_report,
         safe_name, state_directory, unescape_value, unix_now,
     };
     pub(crate) use crate::workspace::{
-        add_mod_to_profile_json, create_profile, ensure_state, import_package, init_state,
-        inspect_game, list_profiles, load_profile_for_edit, remove_mod_from_profile_json,
-        scan_roots, set_profile_mod_activation, set_profile_mod_order, show_profile_json,
-        target_template, update_mod_config_install_root, write_mod_config_json,
-        write_mod_config_json_with_source, write_profile_json, write_profile_json_file,
+        add_mod_to_profile_json, copy_profile, create_profile, delete_profile, ensure_state,
+        import_package, init_state, inspect_game, list_profiles, load_profile_for_edit,
+        profile_launch_settings, read_active_profile, remove_mod_from_profile_json, rename_profile,
+        scan_roots, set_active_profile, set_profile_launch_args, set_profile_mod_activation,
+        set_profile_mod_order, set_profile_root_override, show_profile_json, target_template,
+        update_mod_config_install_root, write_mod_config_json, write_mod_config_json_with_source,
+        write_profile_json, write_profile_json_file,
     };
     pub(crate) use serde::{Deserialize, Serialize};
     pub(crate) use std::collections::{BTreeMap, BTreeSet, VecDeque};

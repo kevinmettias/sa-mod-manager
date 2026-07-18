@@ -4,21 +4,30 @@ use super::copy_journal::{apply_copy_tree_with_journal, sync_journal};
 use super::rollback::rollback_journal;
 
 pub(crate) fn prepare_run(game_root: &Path, profile_name: &str) -> Result<(), AppError> {
+    let (launch_args, launch_env) = profile_launch_settings(game_root, profile_name)?;
     let journal_path = materialize_profile_for_run(game_root, profile_name)?;
-    let launch_result = launch_game_and_wait(game_root);
+    let launch_result = launch_game_and_wait(game_root, &launch_args, &launch_env);
     let rollback_result = rollback_journal(&journal_path, game_root);
     launch_result?;
     rollback_result
 }
 
-fn launch_game_and_wait(game_root: &Path) -> Result<(), AppError> {
+fn launch_game_and_wait(
+    game_root: &Path,
+    args: &[String],
+    env: &BTreeMap<String, String>,
+) -> Result<(), AppError> {
     let exe = game_executable(game_root).ok_or_else(|| {
         AppError::Usage(format!(
             "game executable not found under {}",
             game_root.display()
         ))
     })?;
-    let status = Command::new(&exe).current_dir(game_root).status()?;
+    let status = Command::new(&exe)
+        .current_dir(game_root)
+        .args(args)
+        .envs(env)
+        .status()?;
     if status.success() {
         Ok(())
     } else {
@@ -55,8 +64,8 @@ pub(crate) fn materialize_profile_for_run(
     }
 
     sync_journal(&mut journal)?;
-    println!("prepared ephemeral run: {profile_name}");
-    println!("journal: {}", run_state.journal_path.display());
+    log_info!("prepared ephemeral run: {profile_name}");
+    log_info!("journal: {}", run_state.journal_path.display());
     Ok(run_state.journal_path)
 }
 
@@ -192,7 +201,7 @@ fn apply_profile_mod_for_run(
         return Ok(());
     }
     let staging_root = staging_root_for_mod_config(&config, game_root)?;
-    let roots = enabled_install_roots(config.install_roots);
+    let roots = enabled_install_roots(config.install_roots, &entry.root_overrides);
     let mut run_context = RunInstallContext {
         game_root,
         backup_root,
@@ -217,8 +226,18 @@ fn staging_root_for_mod_config(
     }
 }
 
-fn enabled_install_roots(mut roots: Vec<ModInstallRootJson>) -> Vec<ModInstallRootJson> {
-    roots.retain(|root| root.enabled);
+fn enabled_install_roots(
+    mut roots: Vec<ModInstallRootJson>,
+    overrides: &BTreeMap<String, bool>,
+) -> Vec<ModInstallRootJson> {
+    // A per-profile override for a root's `source` wins over the mod's own
+    // `enabled` flag, letting a profile toggle a shared mod's roots.
+    roots.retain(|root| {
+        overrides
+            .get(&root.source)
+            .copied()
+            .unwrap_or(root.enabled)
+    });
     roots.sort_by(|a, b| a.source.cmp(&b.source));
     roots
 }
@@ -417,6 +436,45 @@ mod tests {
     }
 
     #[test]
+    fn profile_root_override_disables_a_specific_install_root() {
+        let game_root = test_root("root_override");
+        let source = game_root.join("sources").join("mod");
+        let config = game_root
+            .join(".sa-mod-manager")
+            .join("mods")
+            .join("mod")
+            .join("mod.json");
+        fs::create_dir_all(source.join("payload")).unwrap();
+        fs::write(source.join("payload").join("file.txt"), "payload").unwrap();
+
+        ensure_state(&game_root).unwrap();
+        write_test_mod_config(&config, "mod", &source, "payload", "modloader/target");
+
+        let mut overrides = BTreeMap::new();
+        overrides.insert("payload".to_string(), false);
+        let entry = ProfileModEntry {
+            id: "mod".to_string(),
+            enabled: true,
+            load_order: 100,
+            config: config.clone(),
+            root_overrides: overrides,
+        };
+        write_profile_entries(&game_root, &[entry]);
+
+        materialize_profile_for_run(&game_root, "default").unwrap();
+
+        assert!(
+            !game_root
+                .join("modloader")
+                .join("target")
+                .join("file.txt")
+                .exists(),
+            "root disabled by profile override should not materialize"
+        );
+        remove_dir_if_exists(&game_root).unwrap();
+    }
+
+    #[test]
     fn materialize_profile_rejects_duplicate_enabled_mod_ids() {
         let game_root = test_root("materialize_duplicate_profile_id");
         let source = game_root.join("sources").join("dup");
@@ -520,7 +578,12 @@ mod tests {
             .join(".sa-mod-manager")
             .join("profiles")
             .join("default.json");
-        write_profile_json_file(&profile_path, game_root, "default", entries).unwrap();
+        let profile = ProfileJson {
+            name: "default".to_string(),
+            mods: entries.to_vec(),
+            ..Default::default()
+        };
+        write_profile_json_file(&profile_path, game_root, &profile).unwrap();
     }
 
     fn test_profile_entry(
@@ -534,6 +597,7 @@ mod tests {
             enabled,
             load_order,
             config: config.to_path_buf(),
+            ..Default::default()
         }
     }
 

@@ -23,7 +23,8 @@ fn apply_locked_install(
     plan: &InstallPlan,
     install_state: &InstallApplyState,
 ) -> Result<(), AppError> {
-    let mut journal = fs::File::create(&install_state.journal_path)?;
+    let mut journal =
+        fs::File::create(&install_state.journal_path).context("create install journal")?;
     write_install_journal_header(&mut journal, package, plan, &install_state.txid)?;
 
     for operation in &plan.operations {
@@ -45,9 +46,9 @@ fn finish_install(
     match apply_result {
         Ok(()) => {
             release_install_lock(game_root)?;
-            println!("installed transaction: {}", install_state.txid);
-            println!("journal: {}", install_state.journal_path.display());
-            println!("backups: {}", install_state.backup_root.display());
+            log_info!("installed transaction: {}", install_state.txid);
+            log_info!("journal: {}", install_state.journal_path.display());
+            log_info!("backups: {}", install_state.backup_root.display());
             Ok(())
         }
         Err(err) => recover_failed_install(game_root, install_state, err),
@@ -135,7 +136,7 @@ fn apply_install_operation(
             escape_value(&operation.source_root),
             escape_value(&operation.target_root.display().to_string())
         )?;
-        println!("blocked bootstrap operation: {}", operation.source_root);
+        log_warn!("blocked bootstrap operation: {}", operation.source_root);
         return Ok(());
     }
 

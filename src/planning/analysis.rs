@@ -56,6 +56,7 @@ fn list_archive_entries(package: &Path) -> Result<Vec<PackageEntry>, AppError> {
 fn read_archive_listing(package: &Path) -> Result<String, AppError> {
     let seven_zip = find_seven_zip().ok_or_else(|| missing_7zip_error_for_package(package))?;
     let output = Command::new(seven_zip)
+        .env("LC_ALL", "C") // prefer stable tool output regardless of system locale
         .arg("l") // literal: allow external interface text or file-format spelling
         .arg("-slt") // literal: allow external interface text or file-format spelling
         .arg(package)
@@ -73,7 +74,7 @@ fn parse_archive_listing_line(
 ) {
     /* literal: allow external interface text or file-format spelling */
     /* literal: allow external interface text or file-format spelling */
-    if let Some(value) = line.strip_prefix("Path = ") {
+    if let Some(value) = strip_listing_key(line, "Path = ") {
         // literal: allow external interface text or file-format spelling
         fields.flush_into(entries);
         fields.path = Some(value.trim().replace('\\', "/")); // literal: allow external interface text or file-format spelling
@@ -81,14 +82,35 @@ fn parse_archive_listing_line(
         fields.is_dir = false;
     /* literal: allow external interface text or file-format spelling */
     /* literal: allow external interface text or file-format spelling */
-    } else if let Some(value) = line.strip_prefix("Size = ") {
+    } else if let Some(value) = strip_listing_key(line, "Size = ") {
         // literal: allow external interface text or file-format spelling
         fields.size = value.trim().parse().unwrap_or(0);
     /* literal: allow external interface text or file-format spelling */
     /* literal: allow external interface text or file-format spelling */
-    } else if let Some(value) = line.strip_prefix("Attributes = ") {
+    } else if let Some(value) = strip_listing_key(line, "Folder = ") {
+        // 7-Zip marks directory entries with `Folder = +`, independent of the
+        // localized attribute string.
+        if value.trim() == "+" {
+            fields.is_dir = true;
+        }
+    /* literal: allow external interface text or file-format spelling */
+    /* literal: allow external interface text or file-format spelling */
+    } else if let Some(value) = strip_listing_key(line, "Attributes = ") {
         // literal: allow external interface text or file-format spelling
-        fields.is_dir = value.contains('D');
+        if value.contains('D') {
+            fields.is_dir = true;
+        }
+    }
+}
+
+/// Strip a 7-Zip `-slt` property key case-insensitively, tolerant of encoding
+/// quirks, so listing parsing does not depend on the exact key casing.
+fn strip_listing_key<'a>(line: &'a str, key: &str) -> Option<&'a str> {
+    let head = line.get(..key.len())?;
+    if head.eq_ignore_ascii_case(key) {
+        Some(&line[key.len()..])
+    } else {
+        None
     }
 }
 

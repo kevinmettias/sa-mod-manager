@@ -3,13 +3,27 @@ use crate::prelude::*;
 pub(crate) fn main() {
     let result = run();
     if let Err(err) = result {
-        eprintln!("error: {err}");
+        report_error(&err);
         std::process::exit(1);
     }
 }
 
+fn report_error(err: &AppError) {
+    match err.kind() {
+        AppErrorKind::Usage => {
+            log_error!("usage error: {err}");
+            log_error!("run `sa-mod-manager help` for usage");
+        }
+        AppErrorKind::Tool => log_error!("tool error: {err}"),
+        AppErrorKind::Io => log_error!("error: {err}"),
+    }
+}
+
 fn run() -> Result<(), AppError> {
-    let mut shell_arguments = env::args().skip(1);
+    let mut shell_arguments: Vec<String> = env::args().skip(1).collect();
+    crate::logging::set_console_level(extract_verbosity(&mut shell_arguments));
+
+    let mut shell_arguments = shell_arguments.into_iter();
     let Some(command) = shell_arguments.next() else {
         print_usage();
         return Ok(());
@@ -17,6 +31,40 @@ fn run() -> Result<(), AppError> {
 
     let command_arguments: Vec<String> = shell_arguments.collect();
     dispatch_command(&command, command_arguments)
+}
+
+/// Remove global `--verbose`/`--quiet` flags (usable anywhere on the line) and
+/// resolve them to a console log level. Each `-v` raises verbosity, each `-q`
+/// lowers it.
+fn extract_verbosity(arguments: &mut Vec<String>) -> crate::logging::Level {
+    use crate::logging::Level;
+    let mut verbosity: i32 = 0;
+    arguments.retain(|arg| match arg.as_str() {
+        "-v" | "--verbose" => {
+            verbosity += 1;
+            false
+        }
+        "-vv" => {
+            verbosity += 2;
+            false
+        }
+        "-q" | "--quiet" => {
+            verbosity -= 1;
+            false
+        }
+        "-qq" => {
+            verbosity -= 2;
+            false
+        }
+        _ => true,
+    });
+    match verbosity {
+        i if i <= -2 => Level::Error,
+        -1 => Level::Warn,
+        0 => Level::Info,
+        1 => Level::Debug,
+        _ => Level::Trace,
+    }
 }
 
 fn dispatch_command(command: &str, arguments: Vec<String>) -> Result<(), AppError> {
@@ -43,6 +91,12 @@ fn dispatch_command(command: &str, arguments: Vec<String>) -> Result<(), AppErro
         "init" => handle_init_command(arguments), // literal: allow external interface text or file-format spelling
         "profiles" => handle_profiles_command(arguments), // literal: allow external interface text or file-format spelling
         "profile-new" => handle_profile_new_command(arguments), // literal: allow external interface text or file-format spelling
+        "profile-use" => handle_profile_use_command(arguments), // literal: allow external interface text or file-format spelling
+        "profile-copy" => handle_profile_copy_command(arguments), // literal: allow external interface text or file-format spelling
+        "profile-rename" => handle_profile_rename_command(arguments), // literal: allow external interface text or file-format spelling
+        "profile-delete" => handle_profile_delete_command(arguments), // literal: allow external interface text or file-format spelling
+        "profile-args" => handle_profile_args_command(arguments), // literal: allow external interface text or file-format spelling
+        "profile-root" => handle_profile_root_command(arguments), // literal: allow external interface text or file-format spelling
         "game" => handle_game_command(arguments), // literal: allow external interface text or file-format spelling
         /* literal: allow external interface text or file-format spelling */
         /* literal: allow external interface text or file-format spelling */
@@ -146,7 +200,11 @@ fn handle_profile_json_command(arguments: Vec<String>) -> Result<(), AppError> {
     let name = cursor.required("profile name")?; // literal: allow external interface text or file-format spelling
     let game_root = optional_game_root_from_cli_arguments(cursor);
     let profile_name = safe_name(&name);
-    write_profile_json(&game_root, &profile_name, &[])
+    let profile = ProfileJson {
+        name: profile_name,
+        ..Default::default()
+    };
+    write_profile_json(&game_root, &profile)
 }
 
 fn handle_profile_add_command(arguments: Vec<String>) -> Result<(), AppError> {
@@ -205,11 +263,88 @@ fn handle_profile_remove_command(arguments: Vec<String>) -> Result<(), AppError>
 }
 
 fn handle_prepare_run_command(arguments: Vec<String>) -> Result<(), AppError> {
+    // Profile is the first non-flag token; when omitted, use the active profile.
+    let mut profile = None;
+    let mut rest = Vec::new();
+    for arg in arguments {
+        if profile.is_none() && !arg.starts_with("--") {
+            profile = Some(arg);
+        } else {
+            rest.push(arg);
+        }
+    }
+    let game_root = parse_game_root_from_arguments(rest, default_game_root_path())?;
+    let profile_name = match profile {
+        Some(profile) => safe_name(&profile),
+        None => read_active_profile(&game_root),
+    };
+    prepare_run(&game_root, &profile_name)
+}
+
+fn handle_profile_use_command(arguments: Vec<String>) -> Result<(), AppError> {
+    let mut cursor = CliArguments::new(arguments);
+    let name = cursor.required("profile name")?; // literal: allow external interface text or file-format spelling
+    let game_root = game_root_from_cli_arguments(cursor)?;
+    set_active_profile(&game_root, &safe_name(&name))
+}
+
+fn handle_profile_copy_command(arguments: Vec<String>) -> Result<(), AppError> {
+    let mut cursor = CliArguments::new(arguments);
+    let source = cursor.required("source profile name")?; // literal: allow external interface text or file-format spelling
+    let dest = cursor.required("destination profile name")?; // literal: allow external interface text or file-format spelling
+    let game_root = game_root_from_cli_arguments(cursor)?;
+    copy_profile(&game_root, &safe_name(&source), &dest)
+}
+
+fn handle_profile_rename_command(arguments: Vec<String>) -> Result<(), AppError> {
+    let mut cursor = CliArguments::new(arguments);
+    let old_name = cursor.required("current profile name")?; // literal: allow external interface text or file-format spelling
+    let new_name = cursor.required("new profile name")?; // literal: allow external interface text or file-format spelling
+    let game_root = game_root_from_cli_arguments(cursor)?;
+    rename_profile(&game_root, &safe_name(&old_name), &new_name)
+}
+
+fn handle_profile_delete_command(arguments: Vec<String>) -> Result<(), AppError> {
+    let mut cursor = CliArguments::new(arguments);
+    let name = cursor.required("profile name")?; // literal: allow external interface text or file-format spelling
+    let game_root = game_root_from_cli_arguments(cursor)?;
+    delete_profile(&game_root, &safe_name(&name))
+}
+
+fn handle_profile_args_command(arguments: Vec<String>) -> Result<(), AppError> {
+    // Optional `--game <path>` must lead; the profile name follows, then every
+    // remaining token becomes a launch argument (so args may start with `-`).
+    let mut iter = arguments.into_iter();
+    let mut game_root = default_game_root_path();
+    let mut next = iter.next();
+    if next.as_deref() == Some("--game") {
+        // literal: allow external interface text or file-format spelling
+        let value = iter.next().ok_or_else(|| usage_error("--game requires a path"))?; // literal: allow external interface text or file-format spelling
+        game_root = PathBuf::from(value);
+        next = iter.next();
+    }
+    let profile = next.ok_or_else(|| usage_error("missing profile name"))?; // literal: allow external interface text or file-format spelling
+    let launch_args: Vec<String> = iter.collect();
+    set_profile_launch_args(&game_root, &safe_name(&profile), launch_args)
+}
+
+fn handle_profile_root_command(arguments: Vec<String>) -> Result<(), AppError> {
     let mut cursor = CliArguments::new(arguments);
     let profile = cursor.required("profile name")?; // literal: allow external interface text or file-format spelling
+    let mod_id = cursor.required("mod id")?; // literal: allow external interface text or file-format spelling
+    let source = cursor.required("install root source")?; // literal: allow external interface text or file-format spelling
+    let state = cursor.required("on or off")?; // literal: allow external interface text or file-format spelling
+    let enabled = parse_on_off(&state)?;
     let game_root = game_root_from_cli_arguments(cursor)?;
-    let profile_name = safe_name(&profile);
-    prepare_run(&game_root, &profile_name)
+    set_profile_root_override(&game_root, &safe_name(&profile), &safe_name(&mod_id), &source, enabled)
+}
+
+fn parse_on_off(value: &str) -> Result<bool, AppError> {
+    match value.to_ascii_lowercase().as_str() {
+        "on" | "true" | "enable" | "enabled" | "yes" => Ok(true),
+        "off" | "false" | "disable" | "disabled" | "no" => Ok(false),
+        _ => Err(usage_error("expected on or off")),
+    }
 }
 
 fn handle_cleanup_run_command(arguments: Vec<String>) -> Result<(), AppError> {
@@ -457,7 +592,16 @@ fn print_usage() {
     println!();
     print_command_usage();
     print_plan_option_usage();
+    print_global_option_usage();
     print_default_usage();
+}
+
+fn print_global_option_usage() {
+    println!("Global options (any position):");
+    println!("  -v, --verbose                    More diagnostics (repeat/-vv for trace)");
+    println!("  -q, --quiet                      Fewer diagnostics (-qq for errors only)");
+    println!("  Diagnostics also append to <game-root>/.sa-mod-manager/logs/sa-mod-manager.log");
+    println!();
 }
 
 fn print_command_usage() {
@@ -467,6 +611,12 @@ fn print_command_usage() {
     println!("  init [game-root]                 Create manager state folders");
     println!("  profiles [game-root]             List profiles");
     println!("  profile-new <name> [game-root]   Create a profile manifest");
+    println!("  profile-use <name> [--game path] Set the active profile");
+    println!("  profile-copy <src> <dest>        Copy a profile to a new name");
+    println!("  profile-rename <old> <new>       Rename a profile");
+    println!("  profile-delete <name>            Delete a profile");
+    println!("  profile-args [--game p] <name> ..  Set profile launch arguments");
+    println!("  profile-root <name> <mod> <src> on|off  Toggle a mod's install root for a profile");
     println!("  scan [mod-root ...]              Inventory archives and folders");
     println!(
         "  analyze <archive-or-folder>      Detect install roots, options, risks, and compatibility hints"
@@ -484,7 +634,7 @@ fn print_command_usage() {
     println!("  profile-disable <profile> <mod>  Disable a profile mod");
     println!("  profile-order <profile> <mod> N  Set profile load order");
     println!("  profile-remove <profile> <mod>   Remove a mod from a profile");
-    println!("  prepare-run <profile> [--game]   Temporarily materialize profile into game folder");
+    println!("  prepare-run [profile] [--game]   Materialize a profile (default: active) into the game folder");
     println!("  cleanup-run <journal> [--game]   Remove temporary materialized files");
     println!("  extract-stage <package> [options] Extract package into managed staging only");
     println!("  rollback <journal> [--game path] Restore a recorded install transaction");
