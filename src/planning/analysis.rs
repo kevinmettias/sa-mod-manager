@@ -170,17 +170,52 @@ fn empty_package_report(
 fn collect_readme_documents(report: &mut PackageReport) -> Result<(), AppError> {
     const MAX_README_BYTES: usize = 16 * 1024;
     let mut documents = Vec::new();
+    let mut injectable = Vec::new();
     for readme in report.readmes.iter().take(12) {
         if let Some(text) = read_package_text_file(&report.package, readme, MAX_README_BYTES)? {
             add_readme_context_hints(&text, &mut report.context_hints);
+            // ModLoader's std.data claims `.txt` and scans readmes for pasteable
+            // data lines (handling/weapon/carcols/…), so a readme full of data can
+            // silently inject it once the mod is under `modloader/`. Flag it.
+            if readme_has_injectable_data(&text) {
+                injectable.push(readme.clone());
+            }
             documents.push(ReadmeDocument {
                 path: readme.clone(),
                 text,
             });
         }
     }
+    for readme in injectable {
+        report.risks.insert(format!(
+            "readme `{readme}` contains data-table lines; ModLoader's std.data scans .txt files \
+             and may inject them as game data — review before installing as ModLoader content"
+        ));
+    }
     report.readme_documents = documents;
     Ok(())
+}
+
+/// Whether a readme's text carries lines that look like GTA data-table rows (the
+/// kind ModLoader's std.data pastes from `.txt`). Conservative: a non-comment line
+/// with many numeric fields is the signature of handling.cfg / weapon.dat rows and
+/// almost never appears in prose, keeping false positives low.
+fn readme_has_injectable_data(text: &str) -> bool {
+    text.lines().any(|raw| {
+        let line = raw.trim();
+        if line.is_empty() || line.starts_with('#') || line.starts_with(';') || line.starts_with("//")
+        {
+            return false;
+        }
+        let numeric = line
+            .split(|c: char| c.is_whitespace() || c == ',')
+            .filter(|token| {
+                let t = token.trim();
+                !t.is_empty() && t.parse::<f64>().is_ok()
+            })
+            .count();
+        numeric >= 8
+    })
 }
 
 fn collect_readme_instructions(report: &mut PackageReport) {
@@ -388,6 +423,19 @@ fn readme_insight(
     }
 }
 
+/// A `nodes<N>.dat` path-streaming file (nodes0.dat … nodes63.dat), which
+/// ModLoader's std.stream only loads from inside an `*.img` folder.
+fn is_streaming_nodes(path: &str) -> bool {
+    let name = file_name(&path.to_ascii_lowercase()).to_string();
+    let Some(stem) = name.strip_suffix(".dat") else {
+        return false;
+    };
+    let Some(digits) = stem.strip_prefix("nodes") else {
+        return false;
+    };
+    !digits.is_empty() && digits.chars().all(|c| c.is_ascii_digit())
+}
+
 fn detected_layout_templates(report: &PackageReport) -> Vec<String> {
     let mut layouts = Vec::new();
     let has = |component| report.components.contains(&component);
@@ -421,6 +469,16 @@ fn detected_layout_templates(report: &PackageReport) -> Vec<String> {
             || path.contains("/audio/")
     }) {
         layouts.push("root mirror: archive contains direct game-folder names".to_string());
+    }
+    // std.stream layout requirements ModLoader enforces by folder name.
+    if report.entries.iter().any(|entry| is_streaming_nodes(&normalize_path(&entry.path))) {
+        layouts.push("streaming nodes: nodesN.dat load only inside an *.img folder — place under modloader/<mod>/gta3.img/".to_string());
+    }
+    if report.entries.iter().any(|entry| {
+        let lower = normalize_path(&entry.path).to_ascii_lowercase();
+        lower.split('/').any(|seg| seg == "player.img" || seg == "player_img")
+    }) {
+        layouts.push("clothing: new clothes must sit in a folder named player.img — modloader/<mod>/player.img/".to_string());
     }
     layouts.sort();
     layouts.dedup();
@@ -1489,6 +1547,50 @@ fn package_entry_from_folder(root: &Path, path: &Path, metadata: &fs::Metadata) 
 mod tests {
     use super::*;
     use zip::write::SimpleFileOptions;
+
+    #[test]
+    fn readme_with_data_rows_is_flagged_but_prose_is_not() {
+        // A handling.cfg-style row has many numeric fields.
+        let data = "INFERNUS 1000.0 5000.0 2.0 0.0 0.3 -0.1 75 0.8 0.9 27.0 200.0";
+        assert!(readme_has_injectable_data(data));
+        // Ordinary prose (and a couple of version numbers) is not flagged.
+        let prose = "Install v1.2 into your game. Requires CLEO 4.3. Enjoy!";
+        assert!(!readme_has_injectable_data(prose));
+        // Comment lines are ignored.
+        assert!(!readme_has_injectable_data("; 1 2 3 4 5 6 7 8 9 10"));
+    }
+
+    #[test]
+    fn streaming_nodes_files_are_recognized() {
+        assert!(is_streaming_nodes("modloader/x/nodes0.dat"));
+        assert!(is_streaming_nodes("NODES63.DAT"));
+        assert!(!is_streaming_nodes("nodes.dat"));
+        assert!(!is_streaming_nodes("handling.cfg"));
+    }
+
+    #[test]
+    fn readme_data_injection_becomes_a_package_risk() {
+        let root = test_root("readme_injection_risk");
+        let package = root.join("carpack.zip");
+        write_zip_package(
+            &package,
+            &[
+                (
+                    "readme.txt",
+                    "Paste this handling line:\nINFERNUS 1000.0 5000.0 2.0 0.0 0.3 -0.1 75 0.8 0.9 27.0 200.0 10.0",
+                ),
+                ("infernus.dff", "model"),
+            ],
+        );
+
+        let report = analyze_package(&package, &root).unwrap();
+        assert!(
+            report.risks.iter().any(|r| r.contains("std.data scans .txt")),
+            "risks: {:?}",
+            report.risks
+        );
+        remove_dir_if_exists(&root).unwrap();
+    }
 
     #[test]
     fn wrap_manifest_roots_are_parsed_and_preferred_over_heuristics() {

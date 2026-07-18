@@ -609,6 +609,13 @@ pub(crate) struct ModLoaderConflict {
     /// is decided by an unspecified tie-break — the user should set distinct
     /// priorities to make the outcome deterministic.
     pub(crate) ambiguous: bool,
+    /// True when this is a data file ModLoader **merges** entry-by-entry
+    /// (handling.cfg, *.ide, carcols…). Then two mods only truly collide on
+    /// overlapping entries (same vehicle/model id); everything else combines — so
+    /// this is a soft conflict, not winner-take-all. False for override-only files
+    /// (models, textures, .ipl, timecyc…), where the highest-priority folder wins
+    /// the whole file.
+    pub(crate) mergeable: bool,
 }
 
 impl ModLoaderConflict {
@@ -616,6 +623,54 @@ impl ModLoaderConflict {
     pub(crate) fn winner(&self) -> &str {
         self.contenders.first().map(|c| c.folder.as_str()).unwrap_or("")
     }
+}
+
+/// Whether a file is one ModLoader's std.data merges line-by-line, so two mods
+/// providing it only collide on entries sharing a key rather than the whole file.
+/// An allowlist taken from the std.data trait registrations (AddMerger); anything
+/// not listed — including override-only data like timecyc/popcycle/fonts/clothes
+/// and all `.ipl`/`.zon` — is treated as winner-take-all.
+pub(crate) fn is_mergeable_data_file(target: &str) -> bool {
+    let name = target.rsplit('/').next().unwrap_or(target).to_ascii_lowercase();
+    // Every IDE is merged by model id.
+    if name.ends_with(".ide") {
+        return true;
+    }
+    const MERGEABLE: &[&str] = &[
+        "handling.cfg",
+        "carcols.dat",
+        "carmods.dat",
+        "weapon.dat",
+        "water.dat",
+        "plants.dat",
+        "melee.dat",
+        "object.dat",
+        "surface.dat",
+        "surfinfo.dat",
+        "surfaud.dat",
+        "particle.cfg",
+        "procobj.dat",
+        "stream.ini",
+        "ped.dat",
+        "pedstats.dat",
+        "statdisp.dat",
+        "shopping.dat",
+        "cargrp.dat",
+        "pedgrp.dat",
+        "ar_stats.dat",
+        "animgrp.dat",
+        "fistfite.dat",
+        "gta.dat",
+        "default.dat",
+    ];
+    MERGEABLE.contains(&name.as_str())
+}
+
+/// ModLoader-reserved folder names inside `modloader/` — its own state, never a
+/// user mod. Dot-prefixed entries are skipped by ModLoader's own scan, so a
+/// folder like `.data` or `.profiles` must never be treated as a mod.
+fn is_reserved_modloader_folder(folder: &str) -> bool {
+    folder.starts_with('.') || folder == "(root)"
 }
 
 /// One folder contending for a shared ModLoader asset, with the priority
@@ -694,7 +749,7 @@ pub(crate) fn modloader_conflicts(
         ) else {
             continue;
         };
-        if folder == "(root)" {
+        if is_reserved_modloader_folder(&folder) {
             continue;
         }
         by_asset.entry(asset).or_default().insert(folder);
@@ -722,10 +777,12 @@ pub(crate) fn modloader_conflicts(
         let ambiguous = contenders
             .get(1)
             .is_some_and(|second| second.priority == contenders[0].priority);
+        let mergeable = is_mergeable_data_file(&asset);
         conflicts.push(ModLoaderConflict {
             asset,
             contenders,
             ambiguous,
+            mergeable,
         });
     }
     conflicts
@@ -738,7 +795,9 @@ const MODLOADER_DEFAULT_PRIORITY_LIMIT: i32 = 100;
 
 /// The sandbox folder an install-root target lands in: the segment right after
 /// the `modloader` segment (e.g. `modloader/vehicle/gta3.img` → `vehicle`).
-/// Returns `None` for a target that is not inside a named `modloader/<folder>`.
+/// Returns `None` for a target not inside a named `modloader/<folder>`, or one
+/// under a reserved dot-folder (`.data`, `.profiles`) ModLoader would never treat
+/// as a mod — so we never write priority/ignore entries for those.
 pub(crate) fn modloader_folder_from_target(target: &str) -> Option<String> {
     let mut segments = target.split('/').filter(|s| !s.is_empty());
     let mut found_root = false;
@@ -751,7 +810,11 @@ pub(crate) fn modloader_folder_from_target(target: &str) -> Option<String> {
     if !found_root {
         return None;
     }
-    segments.next().map(|s| s.to_string())
+    let folder = segments.next()?.to_string();
+    if is_reserved_modloader_folder(&folder) {
+        return None;
+    }
+    Some(folder)
 }
 
 /// The active ModLoader profile named in `[Folder.Config] Profile = …`,
@@ -957,6 +1020,7 @@ pub(crate) fn render_modloader_managed_profile(
     limit: i32,
     folder_priorities: &BTreeMap<String, i32>,
     ignore_folders: &[String],
+    ignore_files: &[String],
 ) -> Option<String> {
     let base = existing.unwrap_or("");
     let (with_config, config_changed) = ensure_profile_config_section(base, profile, parent);
@@ -965,24 +1029,33 @@ pub(crate) fn render_modloader_managed_profile(
     // `[Folder.Config] Profile =` line — activation is via -modprof only.
     let priority = render_modloader_priority_ini(Some(&with_config), profile, limit, folder_priorities);
     let after_priority = priority.clone().unwrap_or(with_config);
-    // Regenerate our own IgnoreMods block (we fully own this profile's sections).
-    let (after_ignore, ignore_changed) =
-        set_profile_ignore_mods(&after_priority, profile, ignore_folders);
-    if config_changed || priority.is_some() || ignore_changed {
-        Some(after_ignore)
+    // Regenerate our own IgnoreMods / IgnoreFiles blocks (we fully own this
+    // profile's sections): disabled mods, then per-file exclusion globs.
+    let (after_ignore_mods, mods_changed) =
+        set_profile_list_section(&after_priority, profile, "IgnoreMods", ignore_folders);
+    let (after_ignore_files, files_changed) =
+        set_profile_list_section(&after_ignore_mods, profile, "IgnoreFiles", ignore_files);
+    if config_changed || priority.is_some() || mods_changed || files_changed {
+        Some(after_ignore_files)
     } else {
         None
     }
 }
 
-/// Replace this profile's `[Profiles.<profile>.IgnoreMods]` block with one listing
-/// `folders` (one bare glob per line, ModLoader's IgnoreMods format). The block is
-/// dropped entirely when `folders` is empty. Returns the text and whether it
-/// changed. Only this profile's own IgnoreMods section is touched.
-fn set_profile_ignore_mods(text: &str, profile: &str, folders: &[String]) -> (String, bool) {
-    let header = format!("[Profiles.{profile}.IgnoreMods]");
-    // Drop any existing managed IgnoreMods block (header + its body up to the
-    // next section), preserving everything else.
+/// Replace this profile's `[Profiles.<profile>.<section>]` list block (e.g.
+/// `IgnoreMods`, `IgnoreFiles`) with one listing `entries`, one bare glob per line
+/// in ModLoader's list format. The block is dropped entirely when `entries` is
+/// empty. Returns the text and whether it changed. Only this profile's own section
+/// is touched; everything else is preserved verbatim.
+fn set_profile_list_section(
+    text: &str,
+    profile: &str,
+    section: &str,
+    entries: &[String],
+) -> (String, bool) {
+    let header = format!("[Profiles.{profile}.{section}]");
+    // Drop any existing managed block (header + its body up to the next section),
+    // preserving everything else.
     let mut out: Vec<String> = Vec::new();
     let mut skipping = false;
     for line in text.lines() {
@@ -1001,13 +1074,13 @@ fn set_profile_ignore_mods(text: &str, profile: &str, folders: &[String]) -> (St
         }
         out.push(line.to_string());
     }
-    if !folders.is_empty() {
+    if !entries.is_empty() {
         if out.last().map(|l| !l.trim().is_empty()).unwrap_or(false) {
             out.push(String::new());
         }
         out.push(header);
-        for folder in folders {
-            out.push(folder.clone());
+        for entry in entries {
+            out.push(entry.clone());
         }
     }
     let mut result = out.join("\n");
@@ -1554,6 +1627,64 @@ HD_Roads=30   ; inline comment
     }
 
     #[test]
+    fn mergeable_data_files_are_recognized() {
+        for f in [
+            "modloader/x/data/handling.cfg",
+            "modloader/x/vehicles.ide",
+            "carcols.dat",
+            "weapon.dat",
+        ] {
+            assert!(is_mergeable_data_file(f), "{f} should be mergeable");
+        }
+        // Override-only data, models, and map files are winner-take-all.
+        for f in [
+            "modloader/x/data/timecyc.dat",
+            "modloader/x/data/maps/la.ipl",
+            "modloader/x/infernus.dff",
+            "readme.txt",
+        ] {
+            assert!(!is_mergeable_data_file(f), "{f} should not be mergeable");
+        }
+    }
+
+    #[test]
+    fn conflict_marks_merge_vs_override() {
+        let priorities = ModLoaderPriorities {
+            default: 50,
+            by_folder: BTreeMap::new(),
+        };
+        // Two mods both ship handling.cfg -> mergeable (soft).
+        let a = ml_entry("modloader/ModA/data/handling.cfg");
+        let b = ml_entry("modloader/ModB/data/handling.cfg");
+        let merged = modloader_conflicts(&[&a, &b], &priorities);
+        assert_eq!(merged.len(), 1);
+        assert!(merged[0].mergeable, "handling.cfg is merged by ModLoader");
+
+        // Two mods both ship an .ipl -> override (hard).
+        let c = ml_entry("modloader/ModA/data/maps/city.ipl");
+        let d = ml_entry("modloader/ModB/data/maps/city.ipl");
+        let overridden = modloader_conflicts(&[&c, &d], &priorities);
+        assert_eq!(overridden.len(), 1);
+        assert!(!overridden[0].mergeable, ".ipl is override-only");
+    }
+
+    #[test]
+    fn reserved_dot_folders_are_never_treated_as_mods() {
+        let priorities = ModLoaderPriorities::default();
+        // A file under modloader/.data must not become a conflicting "mod folder".
+        let cached = ml_entry("modloader/.data/plugins/x.dff");
+        let real = ml_entry("modloader/RealMod/x.dff");
+        assert!(modloader_conflicts(&[&cached, &real], &priorities).is_empty());
+        // And the priority/ignore writer never targets a reserved folder.
+        assert_eq!(modloader_folder_from_target("modloader/.data/x"), None);
+        assert_eq!(modloader_folder_from_target("modloader/.profiles/y"), None);
+        assert_eq!(
+            modloader_folder_from_target("modloader/RealMod/x").as_deref(),
+            Some("RealMod")
+        );
+    }
+
+    #[test]
     fn folder_from_target_extracts_named_sandbox() {
         assert_eq!(
             modloader_folder_from_target("modloader/vehicle/gta3.img").as_deref(),
@@ -1686,9 +1817,16 @@ PriorityLimit = 200
         let mut priorities = BTreeMap::new();
         priorities.insert("early_mod".to_string(), 1);
         priorities.insert("late_mod".to_string(), 100);
-        let ini =
-            render_modloader_managed_profile(None, "SAMM_default", "Default", 100, &priorities, &[])
-                .unwrap();
+        let ini = render_modloader_managed_profile(
+            None,
+            "SAMM_default",
+            "Default",
+            100,
+            &priorities,
+            &[],
+            &[],
+        )
+        .unwrap();
 
         assert!(ini.contains("[Profiles.SAMM_default.Config]"));
         assert!(ini.contains("Parents = Default"));
@@ -1713,6 +1851,7 @@ PriorityLimit = 200
             100,
             &priorities,
             &ignore,
+            &[],
         )
         .unwrap();
 
@@ -1720,11 +1859,51 @@ PriorityLimit = 200
         assert!(ini.contains("off_mod"));
         assert!(ini.contains("also_off"));
         // Clearing the disabled set removes the IgnoreMods block again.
-        let cleared =
-            render_modloader_managed_profile(Some(&ini), "SAMM_default", "Default", 100, &priorities, &[])
-                .unwrap();
+        let cleared = render_modloader_managed_profile(
+            Some(&ini),
+            "SAMM_default",
+            "Default",
+            100,
+            &priorities,
+            &[],
+            &[],
+        )
+        .unwrap();
         assert!(!cleared.contains("IgnoreMods"), "cleared ini was:\n{cleared}");
         assert!(!cleared.contains("off_mod"));
+    }
+
+    #[test]
+    fn managed_profile_writes_ignorefiles_globs() {
+        let mut priorities = BTreeMap::new();
+        priorities.insert("mod".to_string(), 100);
+        let ignore_files = vec!["*.dff".to_string(), "to_ignore/bad.txd".to_string()];
+        let ini = render_modloader_managed_profile(
+            None,
+            "SAMM_default",
+            "Default",
+            100,
+            &priorities,
+            &[],
+            &ignore_files,
+        )
+        .unwrap();
+
+        assert!(ini.contains("[Profiles.SAMM_default.IgnoreFiles]"), "ini was:\n{ini}");
+        assert!(ini.contains("*.dff"));
+        assert!(ini.contains("to_ignore/bad.txd"));
+        // Clearing the globs drops the IgnoreFiles block.
+        let cleared = render_modloader_managed_profile(
+            Some(&ini),
+            "SAMM_default",
+            "Default",
+            100,
+            &priorities,
+            &[],
+            &[],
+        )
+        .unwrap();
+        assert!(!cleared.contains("IgnoreFiles"), "cleared ini was:\n{cleared}");
     }
 
     #[test]
@@ -1745,6 +1924,7 @@ UserMod = 70
             "Default",
             100,
             &priorities,
+            &[],
             &[],
         )
         .unwrap();
@@ -1777,6 +1957,7 @@ my_mod = 100
                 "Default",
                 100,
                 &priorities,
+                &[],
                 &[]
             )
             .is_none()

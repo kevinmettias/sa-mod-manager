@@ -2,6 +2,68 @@
 //! manager can surface what CLEO actually did and how it is configured, rather
 //! than only inferring statically.
 
+use std::collections::BTreeSet;
+
+// --- legacy plugin blacklist ---------------------------------------------
+
+/// CLEO5's built-in blacklist of legacy CLEO4 plugin files (lowercased). CLEO5
+/// refuses to load these because the bundled `SA.*` plugins supersede them; it
+/// ships them as the default `PluginBlacklist` in `.cleo_config.ini`.
+pub(crate) const DEFAULT_LEGACY_PLUGIN_BLACKLIST: [&str; 4] = [
+    "filesystemoperations.cleo",
+    "gxthook.cleo",
+    "inifiles.cleo",
+    "intoperations.cleo",
+];
+
+/// The effective plugin blacklist (lowercased filenames): the built-in legacy
+/// set plus any names listed in the config's `PluginBlacklist` key.
+pub(crate) fn plugin_blacklist(config_text: Option<&str>) -> BTreeSet<String> {
+    let mut set: BTreeSet<String> = DEFAULT_LEGACY_PLUGIN_BLACKLIST
+        .iter()
+        .map(|name| name.to_string())
+        .collect();
+    let Some(text) = config_text else {
+        return set;
+    };
+    for raw in text.lines() {
+        let line = raw.trim();
+        let Some((key, rest)) = line.split_once('=') else {
+            continue;
+        };
+        if !key.trim().eq_ignore_ascii_case("PluginBlacklist") {
+            continue;
+        }
+        let value = rest.split(';').next().unwrap_or("");
+        for name in value.split(',') {
+            let name = name.trim().to_ascii_lowercase();
+            if !name.is_empty() {
+                set.insert(name);
+            }
+        }
+    }
+    set
+}
+
+// --- .fxt text keys -------------------------------------------------------
+
+/// Extract the GXT keys a `.fxt` file defines. Each non-comment line is
+/// `KEY value`; the key is the first whitespace-delimited token. Lines starting
+/// with `#` or `//` are comments (matching CLEO's `CTextManager` parser).
+pub(crate) fn parse_fxt_keys(text: &str) -> Vec<String> {
+    let mut keys = Vec::new();
+    for raw in text.lines() {
+        let line = raw.trim();
+        if line.is_empty() || line.starts_with('#') || line.starts_with("//") {
+            continue;
+        }
+        if let Some(key) = line.split_whitespace().next() {
+            keys.push(key.to_string());
+        }
+    }
+    keys
+}
+
 // --- cleo.log -------------------------------------------------------------
 
 /// A digest of `cleo.log`: scripts CLEO reported failing to load, plus other
@@ -168,6 +230,31 @@ mod tests {
     fn clean_log_has_no_findings() {
         let summary = parse_cleo_log("01/01/2026 00:00:00.000 Starting CLEO scripts...\n");
         assert!(summary.is_clean());
+    }
+
+    #[test]
+    fn plugin_blacklist_combines_defaults_with_config() {
+        let base = plugin_blacklist(None);
+        assert!(base.contains("inifiles.cleo"));
+        assert_eq!(base.len(), DEFAULT_LEGACY_PLUGIN_BLACKLIST.len());
+
+        let ini = "PluginBlacklist = Custom.cleo, Another.CLEO ; note";
+        let extended = plugin_blacklist(Some(ini));
+        assert!(extended.contains("custom.cleo"));
+        assert!(extended.contains("another.cleo"));
+        assert!(extended.contains("inifiles.cleo")); // defaults still present
+    }
+
+    #[test]
+    fn fxt_keys_skip_comments_and_blanks() {
+        let fxt = "\
+# a comment
+// another comment
+HELLO Hello there
+
+SPEED  Your speed is ~1~
+";
+        assert_eq!(parse_fxt_keys(fxt), vec!["HELLO", "SPEED"]);
     }
 
     #[test]

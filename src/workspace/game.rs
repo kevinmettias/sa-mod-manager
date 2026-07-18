@@ -1,6 +1,6 @@
 use crate::prelude::*;
 use super::cleo_deps::{analyze_script, load_opcode_db};
-use super::cleo_diagnostics::{parse_cleo_config, parse_cleo_log};
+use super::cleo_diagnostics::{parse_cleo_config, parse_cleo_log, parse_fxt_keys, plugin_blacklist};
 use super::game_version::detect_game_version;
 
 pub(crate) fn inspect_game(game_root: &Path) -> Result<(), AppError> {
@@ -126,15 +126,196 @@ fn print_game_script_inventory(game_root: &Path) -> Result<(), AppError> {
     print_cleo_scripts(&cleo_scripts);
     print_cleo_subfolder_scripts(game_root);
     print_cleo_plugins(game_root, &cleo_plugins);
+    print_cleo_blacklisted_plugins(game_root, &cleo_plugins);
     print_cleo_modules(game_root);
     print_cleo_saves(game_root);
     print_cleo_bundled_plugin_checklist(game_root, &cleo_plugins);
     print_cleo_content_validation(&cleo_scripts, &cleo_plugins);
+    print_fxt_key_conflicts(game_root);
     print_cleo_script_dependencies(game_root, &cleo_scripts, &cleo_plugins);
     print_cleo_config(game_root);
     print_cleo_log_diagnostics(game_root);
 
     Ok(())
+}
+
+/// Read `CLEO/.cleo_config.ini` text, if present — shared by the blacklist check
+/// and the config viewer.
+fn read_cleo_config_text(game_root: &Path) -> Option<String> {
+    fs::read_to_string(game_root.join("CLEO").join(".cleo_config.ini")).ok() // literal: allow external interface text or file-format spelling
+}
+
+/// A GXT text key defined by more than one `.fxt` file (last loaded wins).
+#[derive(Clone)]
+pub(crate) struct FxtKeyConflict {
+    pub(crate) key: String,
+    pub(crate) files: Vec<String>,
+}
+
+/// A CLEO script with something worth flagging: bundled plugins it needs that are
+/// not installed, and/or elevated capabilities it exercises.
+#[derive(Clone)]
+pub(crate) struct CleoScriptIssue {
+    pub(crate) script: String,
+    pub(crate) missing_plugins: Vec<String>,
+    pub(crate) capabilities: Vec<String>,
+}
+
+/// The CLEO health findings for an installed game folder, computed once (during a
+/// content scan) so the UI can render them without touching disk per frame.
+#[derive(Clone, Default)]
+pub(crate) struct CleoDiagnostics {
+    pub(crate) blacklisted_plugins: Vec<String>,
+    pub(crate) fxt_conflicts: Vec<FxtKeyConflict>,
+    pub(crate) script_issues: Vec<CleoScriptIssue>,
+}
+
+impl CleoDiagnostics {
+    pub(crate) fn is_empty(&self) -> bool {
+        self.blacklisted_plugins.is_empty()
+            && self.fxt_conflicts.is_empty()
+            && self.script_issues.is_empty()
+    }
+}
+
+/// Gather the CLEO diagnostics for an installed game folder: blacklisted plugins,
+/// FXT text-key conflicts, and per-script missing-plugin / capability issues.
+pub(crate) fn collect_cleo_diagnostics(game_root: &Path) -> CleoDiagnostics {
+    let plugins = collect_cleo_plugins(game_root);
+    let blacklisted_plugins = blacklisted_plugin_paths(game_root, &plugins)
+        .iter()
+        .filter_map(|path| path.file_name().and_then(|n| n.to_str()).map(String::from))
+        .collect();
+    CleoDiagnostics {
+        blacklisted_plugins,
+        fxt_conflicts: collect_fxt_conflicts(game_root),
+        script_issues: collect_script_issues(game_root),
+    }
+}
+
+/// The installed `.cleo` plugins CLEO5 blacklists — superseded legacy CLEO4
+/// modules plus any names in the config's `PluginBlacklist`.
+fn blacklisted_plugin_paths(game_root: &Path, cleo_plugins: &[PathBuf]) -> Vec<PathBuf> {
+    let config = read_cleo_config_text(game_root);
+    let blacklist = plugin_blacklist(config.as_deref());
+    cleo_plugins
+        .iter()
+        .filter(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .map(|name| blacklist.contains(&name.to_ascii_lowercase()))
+                .unwrap_or(false)
+        })
+        .cloned()
+        .collect()
+}
+
+/// GXT keys defined by more than one `.fxt` file in `cleo_text/`.
+fn collect_fxt_conflicts(game_root: &Path) -> Vec<FxtKeyConflict> {
+    let text_dir = game_root.join("CLEO").join("cleo_text"); // literal: allow external interface text or file-format spelling
+    let files = list_matching(&text_dir, |path| extension_eq(path, "fxt")) // literal: allow external interface text or file-format spelling
+        .unwrap_or_default();
+    let mut by_key: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for file in &files {
+        let Ok(text) = fs::read_to_string(file) else {
+            continue;
+        };
+        let name = file
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("<fxt>")
+            .to_string();
+        for key in parse_fxt_keys(&text) {
+            let providers = by_key.entry(key).or_default();
+            if providers.last() != Some(&name) {
+                providers.push(name.clone());
+            }
+        }
+    }
+    by_key
+        .into_iter()
+        .filter(|(_, files)| files.len() > 1)
+        .map(|(key, files)| FxtKeyConflict { key, files })
+        .collect()
+}
+
+/// Per-script issues (missing bundled plugins, elevated capabilities), keyed off
+/// the installed `sa.json` opcode DB. Empty when not CLEO5 or the DB is absent.
+fn collect_script_issues(game_root: &Path) -> Vec<CleoScriptIssue> {
+    if detect_cleo_runtime(game_root) != CleoRuntime::Cleo5 {
+        return Vec::new();
+    }
+    let sa_json = game_root.join("CLEO").join(".config").join("sa.json"); // literal: allow external interface text or file-format spelling
+    let Some(db) = load_opcode_db(&sa_json) else {
+        return Vec::new();
+    };
+    let installed: BTreeSet<String> = collect_cleo_plugins(game_root)
+        .iter()
+        .map(|path| plugin_stem_lower(path))
+        .collect();
+    let mut issues = Vec::new();
+    for script in collect_cleo_scripts(game_root) {
+        let Ok(bytes) = fs::read(&script) else {
+            continue;
+        };
+        let deps = analyze_script(&bytes, &db);
+        let missing: Vec<String> = deps
+            .plugins
+            .iter()
+            .filter(|plugin| !installed.contains(&plugin.to_ascii_lowercase()))
+            .cloned()
+            .collect();
+        let capabilities: Vec<String> =
+            deps.capabilities.iter().map(|cap| cap.to_string()).collect();
+        if missing.is_empty() && capabilities.is_empty() {
+            continue;
+        }
+        let name = script
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("<script>")
+            .to_string();
+        issues.push(CleoScriptIssue {
+            script: name,
+            missing_plugins: missing,
+            capabilities,
+        });
+    }
+    issues
+}
+
+/// Warn about installed `.cleo` plugins that CLEO5 blacklists — the superseded
+/// legacy CLEO4 modules, plus any names in the config's `PluginBlacklist`. These
+/// are present on disk but will not be loaded.
+fn print_cleo_blacklisted_plugins(game_root: &Path, cleo_plugins: &[PathBuf]) {
+    let blocked = blacklisted_plugin_paths(game_root, cleo_plugins);
+    if blocked.is_empty() {
+        return;
+    }
+    println!(
+        "  WARNING: {} installed plugin(s) are blacklisted by CLEO5 (legacy, superseded by SA.* — will not load):",
+        blocked.len()
+    );
+    for path in blocked {
+        println!("    {}", path.display());
+    }
+}
+
+/// Detect GXT text keys defined by more than one `.fxt` file in `cleo_text/`.
+/// Because duplicate keys resolve last-loaded-wins, two mods defining the same
+/// key is a real (file-name-invisible) conflict.
+fn print_fxt_key_conflicts(game_root: &Path) {
+    let conflicts = collect_fxt_conflicts(game_root);
+    if conflicts.is_empty() {
+        return;
+    }
+    println!(
+        "CLEO text key conflicts: {} key(s) defined in more than one .fxt (last loaded wins):",
+        conflicts.len()
+    );
+    for conflict in &conflicts {
+        println!("  {}: {}", conflict.key, conflict.files.join(", "));
+    }
 }
 
 /// The folders directly under `CLEO/` that legitimately hold `.cs*` files which
@@ -306,8 +487,9 @@ fn print_cleo_scripts(cleo_scripts: &[PathBuf]) {
     }
 }
 
-/// Inventory of `CLEO/cleo_modules/` — shared script modules loaded via the
-/// `modules:` path prefix. Only printed when the folder exists.
+/// Inventory of `CLEO/cleo_modules/` — shared script modules (`.s`) loaded via
+/// the `modules:` path prefix. Only printed when the folder exists. `.s` modules
+/// are validated against their header magic.
 fn print_cleo_modules(game_root: &Path) {
     let dir = game_root.join("CLEO").join("cleo_modules"); // literal: allow external interface text or file-format spelling
     if !dir.is_dir() {
@@ -316,8 +498,25 @@ fn print_cleo_modules(game_root: &Path) {
     let files = list_matching(&dir, |_| true).unwrap_or_default();
     println!("CLEO modules   : {}", files.len());
     for path in &files {
-        println!("  {}", path.display());
+        let tag = if extension_eq(path, "s") && !is_cleo_module(path) {
+            "  [invalid module header]" // literal: allow external interface text or file-format spelling
+        } else {
+            ""
+        };
+        println!("  {}{tag}", path.display());
     }
+}
+
+/// A compiled CLEO module (`.s`) begins with the CLEO segment-header magic
+/// `FF 7F FE 00 00` (from `CModuleSystem`). Used to flag mislabeled/corrupt
+/// modules, the way [`is_pe_image`] validates plugins.
+fn is_cleo_module(path: &Path) -> bool {
+    use std::io::Read;
+    let Ok(mut file) = fs::File::open(path) else {
+        return false;
+    };
+    let mut magic = [0u8; 5];
+    file.read_exact(&mut magic).is_ok() && magic == [0xFF, 0x7F, 0xFE, 0x00, 0x00]
 }
 
 /// Inventory of `CLEO/cleo_saves/` — runtime-generated per-script save data, not
@@ -585,6 +784,40 @@ mod tests {
         // Every bundled plugin is accounted for, present or not.
         assert_eq!(status.len(), BUNDLED_CLEO5_PLUGINS.len());
         assert!(status.iter().any(|(name, ok)| *name == "SA.Text" && !ok));
+    }
+
+    #[test]
+    fn collect_cleo_diagnostics_finds_blacklist_and_fxt_conflicts() {
+        let base = temp_dir("diag");
+        let game = base.join("game");
+        let cleo = game.join("CLEO");
+        fs::create_dir_all(cleo.join("cleo_plugins")).unwrap();
+        fs::create_dir_all(cleo.join("cleo_text")).unwrap();
+        fs::write(cleo.join(".cleo_config.ini"), "").unwrap(); // marks CLEO5
+        // A blacklisted legacy plugin, and two .fxt defining the same key.
+        fs::write(cleo.join("cleo_plugins").join("IniFiles.cleo"), b"MZ..").unwrap();
+        fs::write(cleo.join("cleo_text").join("a.fxt"), "HELLO hi\nONLY_A x\n").unwrap();
+        fs::write(cleo.join("cleo_text").join("b.fxt"), "HELLO bye\n").unwrap();
+
+        let diag = collect_cleo_diagnostics(&game);
+        assert_eq!(diag.blacklisted_plugins, vec!["IniFiles.cleo"]);
+        assert_eq!(diag.fxt_conflicts.len(), 1, "only HELLO is shared");
+        assert_eq!(diag.fxt_conflicts[0].key, "HELLO");
+        assert_eq!(diag.fxt_conflicts[0].files, vec!["a.fxt", "b.fxt"]);
+        assert!(!diag.is_empty());
+        fs::remove_dir_all(&base).unwrap();
+    }
+
+    #[test]
+    fn is_cleo_module_checks_header_magic() {
+        let dir = temp_dir("module");
+        let good = dir.join("lib.s");
+        fs::write(&good, [0xFF, 0x7F, 0xFE, 0x00, 0x00, 0x01, 0x02]).unwrap();
+        let bad = dir.join("bad.s");
+        fs::write(&bad, b"not a module").unwrap();
+        assert!(is_cleo_module(&good));
+        assert!(!is_cleo_module(&bad));
+        fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

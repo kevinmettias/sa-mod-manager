@@ -60,7 +60,8 @@ mod prelude {
         unescape_value, unix_now,
     };
     pub(crate) use crate::workspace::{
-        Executable, add_mod_to_profile_json, copy_profile, create_profile, delete_profile,
+        CleoDiagnostics, Executable, add_mod_to_profile_json,
+        collect_cleo_diagnostics, copy_profile, create_profile, delete_profile,
         ensure_state, import_package, init_state, inspect_game, list_profiles,
         load_profile_for_edit, read_executables, write_executables,
         profile_launch_settings, read_active_profile, read_import_manifest,

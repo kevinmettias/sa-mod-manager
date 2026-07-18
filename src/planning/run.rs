@@ -13,10 +13,15 @@ pub(crate) fn prepare_run(game_root: &Path, profile_name: &str) -> Result<(), Ap
     let (mut launch_args, launch_env) = profile_launch_settings(game_root, profile_name)?;
     let journal_path = materialize_profile_for_run(game_root, profile_name)?;
     // Activate the manager-owned ModLoader profile written during materialize so
-    // ModLoader applies this profile's per-folder priority natively for the run.
-    if let Some(managed) = modloader_run_profile(game_root, profile_name) {
-        launch_args.push("-modprof".to_string());
-        launch_args.push(managed);
+    // ModLoader applies this profile's per-folder priority natively for the run —
+    // unless the user's own launch args already choose a ModLoader mode. `-nomods`,
+    // `-mod`, and `-modprof` are mutually exclusive (nomods > modprof > mod), so a
+    // second `-modprof` would be dead; respect the explicit choice instead.
+    if !launch_args_select_modloader_mode(&launch_args) {
+        if let Some(managed) = modloader_run_profile(game_root, profile_name) {
+            launch_args.push("-modprof".to_string());
+            launch_args.push(managed);
+        }
     }
     let started_unix = unix_now();
     let status_result = launch_game_and_wait(game_root, &launch_args, &launch_env);
@@ -415,6 +420,10 @@ fn write_modloader_priorities_for_run(
     // are expressed as IgnoreMods so ModLoader skips them; never ignore a folder an
     // enabled mod is actively using.
     let ignore_folders = disabled_modloader_folders(game_root, profile_name, &folder_priorities)?;
+    // Per-file exclusion globs the profile declares (a hand-added `ignore_files`
+    // list), mapped to ModLoader's own `[IgnoreFiles]` so one file can be hidden
+    // inside a mod without editing the mod.
+    let ignore_files = profile_ignore_files(game_root, profile_name)?;
     let managed = modloader_managed_profile_name(profile_name);
     // Inherit the user's own active profile so their hand-set priorities and
     // ignore lists still apply; our section only layers the managed mods on top.
@@ -426,6 +435,7 @@ fn write_modloader_priorities_for_run(
         limit,
         &folder_priorities,
         &ignore_folders,
+        &ignore_files,
     ) else {
         return Ok(());
     };
@@ -443,6 +453,20 @@ fn write_modloader_priorities_for_run(
 /// section is exactly the condition for activating it — so the launch argument
 /// can never disagree with what was written, and an unreadable/absent ini simply
 /// means "don't pass -modprof" (a no-op for the game either way).
+/// Whether the user's launch args already pick a ModLoader mode (`-nomods`,
+/// `-mod`, or `-modprof`). ModLoader treats these as mutually exclusive, so the
+/// manager must not append its own `-modprof` on top — it would be ignored, and
+/// silently overriding an explicit `-nomods` would be worse. Matched
+/// case-insensitively, like ModLoader's own `_wcsicmp` parsing.
+fn launch_args_select_modloader_mode(args: &[String]) -> bool {
+    args.iter().any(|arg| {
+        let arg = arg.trim();
+        arg.eq_ignore_ascii_case("-nomods")
+            || arg.eq_ignore_ascii_case("-mod")
+            || arg.eq_ignore_ascii_case("-modprof")
+    })
+}
+
 fn modloader_run_profile(game_root: &Path, profile_name: &str) -> Option<String> {
     let managed = modloader_managed_profile_name(profile_name);
     let ini_path = game_root.join("modloader").join("modloader.ini");
@@ -528,9 +552,64 @@ fn disabled_modloader_folders(
     Ok(ignore.into_iter().collect())
 }
 
+/// Per-file exclusion globs declared by the profile's hand-added `ignore_files`
+/// array (preserved verbatim in the profile's `extra` map). Each becomes a
+/// `[Profiles.<name>.IgnoreFiles]` entry; ModLoader matches them against a file's
+/// basename and its mod-relative path (`*`/`?` globs, case-insensitive). Absent or
+/// malformed → no exclusions.
+fn profile_ignore_files(game_root: &Path, profile_name: &str) -> Result<Vec<String>, AppError> {
+    let profile_path = state_directory(game_root)
+        .join("profiles")
+        .join(format!("{profile_name}.json"));
+    let profile = read_profile_json(&profile_path)?;
+    Ok(extract_ignore_files(&profile.extra))
+}
+
+/// Pull a `["*.dff", …]` string array out of the profile's unmodeled `extra`,
+/// trimming blanks. Anything that is not an array of strings is ignored.
+fn extract_ignore_files(extra: &BTreeMap<String, serde_json::Value>) -> Vec<String> {
+    extra
+        .get("ignore_files")
+        .and_then(|value| value.as_array())
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| item.as_str())
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn user_modloader_flags_suppress_our_modprof() {
+        // A user who set any ModLoader mode keeps it; we don't append a dead -modprof.
+        for arg in ["-nomods", "-NoMods", "-mod", "-modprof"] {
+            assert!(launch_args_select_modloader_mode(&[arg.to_string()]), "{arg}");
+        }
+        // Unrelated args leave us free to add -modprof.
+        assert!(!launch_args_select_modloader_mode(&["-nointro".to_string(), "-windowed".to_string()]));
+        assert!(!launch_args_select_modloader_mode(&[]));
+    }
+
+    #[test]
+    fn ignore_files_are_pulled_from_profile_extra() {
+        let mut extra = BTreeMap::new();
+        extra.insert(
+            "ignore_files".to_string(),
+            serde_json::json!(["*.dff", "  to_ignore/x.txd  ", "", 42]),
+        );
+        let files = extract_ignore_files(&extra);
+        // Strings are trimmed and kept; blanks and non-strings dropped.
+        assert_eq!(files, vec!["*.dff".to_string(), "to_ignore/x.txd".to_string()]);
+        // No key -> empty.
+        assert!(extract_ignore_files(&BTreeMap::new()).is_empty());
+    }
 
     #[test]
     fn materialize_profile_rolls_back_files_when_later_mod_fails() {

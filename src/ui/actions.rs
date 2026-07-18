@@ -202,6 +202,8 @@ impl SanAndreasModUi {
         self.modloader_priorities = read_modloader_priorities(&self.game_root());
         // And what ModLoader actually did last run, for the after-the-fact check.
         self.modloader_log = read_modloader_log(&self.game_root());
+        // CLEO health for the installed game folder, surfaced in the CLEO viewer.
+        self.cleo_diagnostics = Some(collect_cleo_diagnostics(&self.game_root()));
     }
 }
 
