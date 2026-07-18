@@ -13,9 +13,75 @@ pub(crate) struct Settings {
 }
 
 static SETTINGS: OnceLock<Settings> = OnceLock::new();
+/// A `--config <path>` supplied on the command line. Set once at startup, before
+/// any settings are read, so it wins over the env var and the per-user default.
+static CLI_CONFIG_PATH: OnceLock<PathBuf> = OnceLock::new();
 
 fn settings() -> &'static Settings {
-    SETTINGS.get_or_init(|| resolve_settings(read_config_file(), env_overrides()))
+    SETTINGS.get_or_init(|| {
+        let env = env_overrides();
+        let file = read_config_file();
+        // Only an *explicitly* configured (env/config) game root is validated here:
+        // a wrong path is worth flagging early, while an auto-detected or fallback
+        // root is a best guess that later `ensure_gta_install` checks will catch.
+        let explicit_game_root = env
+            .game_root
+            .clone()
+            .or_else(|| file.game_root.as_deref().map(PathBuf::from));
+        warn_if_configured_game_root_invalid(explicit_game_root.as_deref());
+        resolve_settings(file, env)
+    })
+}
+
+/// Record a `--config` path chosen on the command line. Must be called before the
+/// first settings access; a later call is ignored (settings resolve only once).
+pub(crate) fn set_cli_config_path(path: PathBuf) {
+    let _ = CLI_CONFIG_PATH.set(path);
+}
+
+fn warn_if_configured_game_root_invalid(game_root: Option<&Path>) {
+    let Some(root) = game_root else {
+        return;
+    };
+    if game_executable_path(root).is_none() {
+        log_warn!(
+            "configured game root `{}` has no gta_sa.exe/gta-sa.exe; fix SA_MOD_MANAGER_GAME_ROOT or game_root in the config, or clear it to auto-detect",
+            root.display()
+        );
+    }
+}
+
+/// The fallback game root when nothing was explicitly configured: the GTA install
+/// this manager lives inside (found by walking up from our own executable, then
+/// the working directory), else the working directory as a last resort.
+fn resolved_default_game_root() -> PathBuf {
+    detect_game_root().unwrap_or_else(|| env::current_dir().unwrap_or_default())
+}
+
+fn detect_game_root() -> Option<PathBuf> {
+    let mut starts = Vec::new();
+    if let Ok(exe) = env::current_exe() {
+        starts.push(exe);
+    }
+    if let Ok(cwd) = env::current_dir() {
+        starts.push(cwd);
+    }
+    starts
+        .iter()
+        .find_map(|start| game_root_at_or_above(start))
+}
+
+/// Nearest ancestor of `start` (inclusive) that holds a GTA San Andreas
+/// executable, or `None` if none of them do.
+fn game_root_at_or_above(start: &Path) -> Option<PathBuf> {
+    let mut dir = Some(start);
+    while let Some(candidate) = dir {
+        if game_executable_path(candidate).is_some() {
+            return Some(candidate.to_path_buf());
+        }
+        dir = candidate.parent();
+    }
+    None
 }
 
 pub(crate) fn default_game_root() -> PathBuf {
@@ -38,9 +104,12 @@ pub(crate) fn context_rules() -> &'static [ContextRule] {
     &settings().context_rules
 }
 
-/// The config file path: `SA_MOD_MANAGER_CONFIG` if set, else a per-user
-/// location under the platform config directory.
+/// The config file path: `--config` if supplied, else `SA_MOD_MANAGER_CONFIG`,
+/// else a per-user location under the platform config directory.
 pub(crate) fn config_file_path() -> Option<PathBuf> {
+    if let Some(cli) = CLI_CONFIG_PATH.get() {
+        return Some(cli.clone());
+    }
     if let Some(explicit) = env_var_nonempty("SA_MOD_MANAGER_CONFIG") {
         return Some(PathBuf::from(explicit));
     }
@@ -64,12 +133,7 @@ pub(crate) fn write_example_config() -> Result<PathBuf, AppError> {
     }
     let example = SettingsFile {
         game_root: Some(default_game_root().display().to_string()),
-        mod_roots: Some(
-            default_mod_roots()
-                .iter()
-                .map(|root| root.display().to_string())
-                .collect(),
-        ),
+        mod_roots: Some(example_mod_roots()),
         seven_zip: None,
         component_rules: vec![ComponentRuleFile {
             component: "cleo".to_string(),
@@ -86,6 +150,20 @@ pub(crate) fn write_example_config() -> Result<PathBuf, AppError> {
         .map_err(|err| AppError::Tool(format!("failed to serialize config: {err}")))?;
     fs::write(&path, format!("{text}\n"))?;
     Ok(path)
+}
+
+/// Mod-scan roots to show in the generated example config: the resolved defaults
+/// if any are configured, otherwise a single illustrative placeholder so the user
+/// has something concrete to edit rather than an empty list.
+fn example_mod_roots() -> Vec<String> {
+    let configured = default_mod_roots();
+    if configured.is_empty() {
+        return vec!["C:\\Mods\\GTA San Andreas".to_string()];
+    }
+    configured
+        .iter()
+        .map(|root| root.display().to_string())
+        .collect()
 }
 
 #[derive(Serialize, Deserialize, Default)]
@@ -138,7 +216,9 @@ fn resolve_settings(file: SettingsFile, env: EnvOverrides) -> Settings {
     let game_root = env
         .game_root
         .or_else(|| file.game_root.as_deref().map(PathBuf::from))
-        .unwrap_or_else(|| PathBuf::from(DEFAULT_GAME_ROOT));
+        .unwrap_or_else(resolved_default_game_root);
+    // No universal default scan location exists, so an unconfigured mod-roots list
+    // is empty rather than a personal path; `scan` asks for one when it is.
     let mod_roots = env
         .mod_roots
         .or_else(|| {
@@ -146,7 +226,7 @@ fn resolve_settings(file: SettingsFile, env: EnvOverrides) -> Settings {
                 .as_ref()
                 .map(|roots| roots.iter().map(PathBuf::from).collect())
         })
-        .unwrap_or_else(|| DEFAULT_MOD_ROOTS.iter().map(PathBuf::from).collect());
+        .unwrap_or_default();
     let seven_zip = env
         .seven_zip
         .or_else(|| file.seven_zip.as_deref().map(PathBuf::from));
@@ -249,9 +329,10 @@ mod tests {
 
     #[test]
     fn env_beats_config_beats_default_for_game_root() {
-        // default
+        // default: with nothing configured, the game root is auto-detected (or the
+        // working directory), i.e. exactly what `resolved_default_game_root` returns.
         let s = resolve_settings(SettingsFile::default(), empty_env());
-        assert_eq!(s.game_root, PathBuf::from(DEFAULT_GAME_ROOT));
+        assert_eq!(s.game_root, resolved_default_game_root());
 
         // config overrides default
         let file = SettingsFile {
@@ -282,6 +363,33 @@ mod tests {
         };
         let s = resolve_settings(file, empty_env());
         assert_eq!(s.mod_roots, vec![PathBuf::from("A"), PathBuf::from("B")]);
+    }
+
+    #[test]
+    fn unconfigured_mod_roots_default_to_empty() {
+        // No personal path is baked in: an unconfigured scan list is empty, and
+        // the CLI turns that into a prompt rather than scanning someone's drive.
+        let s = resolve_settings(SettingsFile::default(), empty_env());
+        assert!(s.mod_roots.is_empty());
+    }
+
+    #[test]
+    fn detect_game_root_walks_up_to_the_install_folder() {
+        let base = env::temp_dir().join(format!(
+            "sa-mod-manager-detect-{}-{}",
+            std::process::id(),
+            unix_now()
+        ));
+        let install = base.join("Grand Theft Auto San Andreas");
+        let nested = install.join("sa-mod-manager").join("target").join("debug");
+        fs::create_dir_all(&nested).unwrap();
+        fs::write(install.join("gta_sa.exe"), b"").unwrap();
+
+        // Walking up from a deeply nested start finds the folder with the exe;
+        // a start with no GTA install above it yields nothing.
+        assert_eq!(game_root_at_or_above(&nested), Some(install.clone()));
+        assert_eq!(game_root_at_or_above(base.parent().unwrap()), None);
+        fs::remove_dir_all(&base).unwrap();
     }
 
     #[test]

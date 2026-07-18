@@ -1,13 +1,5 @@
 use crate::prelude::*;
 
-/// Compiled-in fallback game root, used only when neither the config file nor
-/// `SA_MOD_MANAGER_GAME_ROOT` nor a CLI flag supplies one. See [`crate::settings`].
-pub(crate) const DEFAULT_GAME_ROOT: &str =
-    r"F:\SteamLibrary\steamapps\common\Grand Theft Auto San Andreas";
-
-/// Compiled-in fallback scan roots, overridable via config, env, or CLI args.
-pub(crate) const DEFAULT_MOD_ROOTS: [&str; 2] = [r"E:\Mods\GTa Sa", r"E:\Mods\GTa Sa\New"];
-
 fn strings(items: &[&str]) -> Vec<String> {
     items.iter().map(|item| item.to_string()).collect()
 }

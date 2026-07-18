@@ -12,9 +12,7 @@ mod workspace;
 
 mod prelude {
     pub(crate) use crate::cli::usage_error;
-    pub(crate) use crate::constants::{
-        DEFAULT_GAME_ROOT, DEFAULT_MOD_ROOTS, builtin_component_rules, builtin_context_rules,
-    };
+    pub(crate) use crate::constants::{builtin_component_rules, builtin_context_rules};
     pub(crate) use crate::game_launch::{
         ensure_gta_install, game_executable_path, launch_game_executable,
     };

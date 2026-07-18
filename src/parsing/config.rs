@@ -74,7 +74,7 @@ fn game_root_from_profile_path(path: &Path) -> PathBuf {
         .and_then(Path::parent)
         .and_then(Path::parent)
         .map(Path::to_path_buf)
-        .unwrap_or_else(|| PathBuf::from(DEFAULT_GAME_ROOT))
+        .unwrap_or_else(crate::settings::default_game_root)
 }
 
 fn profile_mod_entry_from_json(entry: ProfileModEntryFile, game_root: &Path) -> ProfileModEntry {

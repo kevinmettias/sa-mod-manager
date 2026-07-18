@@ -22,6 +22,11 @@ fn report_error(err: &AppError) {
 fn run() -> Result<(), AppError> {
     let mut shell_arguments: Vec<String> = env::args().skip(1).collect();
     crate::logging::set_console_level(extract_verbosity(&mut shell_arguments));
+    // Resolve `--config` before any command touches settings, so it wins over the
+    // env var and per-user default the way an explicit override should.
+    if let Some(config) = extract_config_path(&mut shell_arguments) {
+        crate::settings::set_cli_config_path(config);
+    }
 
     let mut shell_arguments = shell_arguments.into_iter();
     let Some(command) = shell_arguments.next() else {
@@ -31,6 +36,18 @@ fn run() -> Result<(), AppError> {
 
     let command_arguments: Vec<String> = shell_arguments.collect();
     dispatch_command(&command, command_arguments)
+}
+
+/// Remove a global `--config <path>` flag (usable anywhere on the line) and
+/// return the path. A trailing `--config` with no value is dropped and ignored.
+fn extract_config_path(arguments: &mut Vec<String>) -> Option<PathBuf> {
+    let index = arguments.iter().position(|arg| arg == "--config")?;
+    arguments.remove(index);
+    if index < arguments.len() {
+        Some(PathBuf::from(arguments.remove(index)))
+    } else {
+        None
+    }
 }
 
 /// Remove global `--verbose`/`--quiet` flags (usable anywhere on the line) and
@@ -132,11 +149,16 @@ fn dispatch_command(command: &str, arguments: Vec<String>) -> Result<(), AppErro
 }
 
 fn handle_scan_command(arguments: Vec<String>) -> Result<(), AppError> {
-    let roots = if arguments.is_empty() {
+    let roots: Vec<PathBuf> = if arguments.is_empty() {
         default_mod_roots()
     } else {
         arguments.into_iter().map(PathBuf::from).collect()
     };
+    if roots.is_empty() {
+        return Err(usage_error(
+            "no mod roots to scan; pass one or more folders, or set `mod_roots` in the config (config-init)",
+        ));
+    }
     scan_roots(&roots)
 }
 
@@ -676,6 +698,7 @@ fn print_global_option_usage() {
     println!("  -q, --quiet                      Fewer diagnostics (-qq for errors only)");
     println!("  -h, --help                       Show this help");
     println!("  -V, --version                    Print the version and exit");
+    println!("  --config <path>                  Use this config file (overrides SA_MOD_MANAGER_CONFIG)");
     println!("  Diagnostics also append to <game-root>/.sa-mod-manager/logs/sa-mod-manager.log");
     println!();
 }
@@ -765,11 +788,16 @@ fn print_plan_option_usage() {
 fn print_default_usage() {
     // Resolved defaults after config file + env overrides, not just the
     // compiled-in fallbacks.
-    let mod_roots = default_mod_roots()
-        .iter()
-        .map(|root| root.display().to_string())
-        .collect::<Vec<_>>()
-        .join(", ");
+    let configured_roots = default_mod_roots();
+    let mod_roots = if configured_roots.is_empty() {
+        "(none set — pass folders to `scan` or set mod_roots in the config)".to_string()
+    } else {
+        configured_roots
+            .iter()
+            .map(|root| root.display().to_string())
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
     println!("Defaults (config/env overridable):");
     println!("  game root: {}", default_game_root_path().display());
     println!("  mod roots : {mod_roots}");

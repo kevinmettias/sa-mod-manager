@@ -41,7 +41,7 @@ fn resolve_initial_game_root(cli_game_root: Option<PathBuf>, preferences: &UiPre
     if !preferences.game_root.trim().is_empty() {
         return PathBuf::from(preferences.game_root.trim());
     }
-    PathBuf::from(DEFAULT_GAME_ROOT)
+    crate::settings::default_game_root()
 }
 
 pub(super) struct SanAndreasModUi {
@@ -856,10 +856,10 @@ mod tests {
             resolve_initial_game_root(None, &saved),
             PathBuf::from("S:/saved")
         );
-        // With neither, fall back to the compiled default.
+        // With neither, fall back to the auto-detected default.
         assert_eq!(
             resolve_initial_game_root(None, &UiPreferences::default()),
-            PathBuf::from(DEFAULT_GAME_ROOT)
+            crate::settings::default_game_root()
         );
     }
 
