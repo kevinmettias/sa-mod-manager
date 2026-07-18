@@ -98,6 +98,10 @@ pub(super) struct SanAndreasModUi {
     /// Summary of the last run's `modloader.log` (what ModLoader actually loaded
     /// or failed to), read alongside a content scan. `None` until scanned.
     pub(super) modloader_log: Option<ModLoaderLogSummary>,
+    /// CLEO health for the installed game folder (blacklisted plugins, FXT key
+    /// conflicts, per-script missing-plugin/capability issues), read alongside a
+    /// content scan. `None` until scanned.
+    pub(super) cleo_diagnostics: Option<CleoDiagnostics>,
     /// Active content viewer filter: `None` shows every category.
     pub(super) content_category: Option<ContentCategory>,
     pub(super) content_search: String,
@@ -298,6 +302,7 @@ impl SanAndreasModUi {
             content_index: None,
             modloader_priorities: None,
             modloader_log: None,
+            cleo_diagnostics: None,
             content_category: None,
             content_search: String::new(),
             content_conflicts_only: false,
@@ -363,6 +368,7 @@ impl SanAndreasModUi {
         self.content_index = None;
         self.modloader_priorities = None;
         self.modloader_log = None;
+        self.cleo_diagnostics = None;
         self.executables = read_executables(&state_directory(&self.game_root()));
         // Keep the run-target selection in range if a tool was removed elsewhere.
         if self.selected_run_target > self.executables.len() {

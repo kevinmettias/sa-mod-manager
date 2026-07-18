@@ -1472,9 +1472,10 @@ impl SanAndreasModUi {
         ui.add_space(4.0);
 
         let conflict_color = ui.visuals().warn_fg_color;
-        // Cloned out so the ModLoader viewer can borrow them inside the closure.
+        // Cloned out so the tailored viewers can borrow them inside the closure.
         let priorities = self.modloader_priorities.clone();
         let modloader_log = self.modloader_log.clone();
+        let cleo_diagnostics = self.cleo_diagnostics.clone();
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
             .show(ui, |ui| match selected_category {
@@ -1487,6 +1488,7 @@ impl SanAndreasModUi {
                     conflict_color,
                     priorities.as_ref(),
                     modloader_log.as_ref(),
+                    cleo_diagnostics.as_ref(),
                 ),
                 // "All" stays a single flat table across every category.
                 None => content_table(ui, "content_grid_all", &rows, conflict_color),
@@ -1549,9 +1551,10 @@ fn content_group_view(
     conflict_color: egui::Color32,
     priorities: Option<&ModLoaderPriorities>,
     modloader_log: Option<&ModLoaderLogSummary>,
+    cleo_diagnostics: Option<&CleoDiagnostics>,
 ) {
     match category {
-        ContentCategory::Cleo => content_cleo_view(ui, rows, conflict_color),
+        ContentCategory::Cleo => content_cleo_view(ui, rows, conflict_color, cleo_diagnostics),
         ContentCategory::Asi => content_asi_view(ui, rows, conflict_color),
         ContentCategory::ModLoader => {
             content_modloader_view(ui, rows, conflict_color, priorities, modloader_log)
@@ -1637,31 +1640,41 @@ fn content_modloader_view(
     let effective_priorities = priorities.cloned().unwrap_or_default();
     let conflicts = modloader_conflicts(rows, &effective_priorities);
     if !conflicts.is_empty() {
-        let ambiguous = conflicts.iter().filter(|c| c.ambiguous).count();
-        let header = if ambiguous > 0 {
-            format!(
-                "Cross-folder conflicts — {} assets, {ambiguous} with tied priority",
-                conflicts.len()
-            )
-        } else {
-            format!("Cross-folder conflicts — {} assets", conflicts.len())
-        };
+        // Mergeable data files (handling.cfg, *.ide…) are soft: ModLoader combines
+        // them entry-by-entry, so they collide only on overlapping entries. The
+        // rest are hard: the highest-priority folder wins the whole file.
+        let override_count = conflicts.iter().filter(|c| !c.mergeable).count();
+        let merge_count = conflicts.len() - override_count;
+        let ambiguous = conflicts.iter().filter(|c| c.ambiguous && !c.mergeable).count();
+        let mut parts = Vec::new();
+        if override_count > 0 {
+            parts.push(format!("{override_count} override"));
+        }
+        if merge_count > 0 {
+            parts.push(format!("{merge_count} mergeable"));
+        }
+        if ambiguous > 0 {
+            parts.push(format!("{ambiguous} tied"));
+        }
+        let header = format!("Cross-folder conflicts — {}", parts.join(", "));
         egui::CollapsingHeader::new(header)
             .id_salt("modloader_virtual_conflicts")
-            .default_open(true)
+            .default_open(override_count > 0)
             .show(ui, |ui| {
                 ui.weak(
-                    "Same file provided by more than one folder. ModLoader keeps the \
-                     highest-priority folder's copy; tied priorities are non-deterministic — give \
-                     them distinct priorities to pin the winner.",
+                    "Same file provided by more than one folder. Override: the highest-priority \
+                     folder wins the whole file. Mergeable: ModLoader combines entries, so folders \
+                     clash only where they edit the same entry. Tied priorities are \
+                     non-deterministic — give them distinct priorities to pin the winner.",
                 );
                 egui::Grid::new("modloader_conflict_grid")
                     .striped(true)
-                    .num_columns(3)
+                    .num_columns(4)
                     .show(ui, |ui| {
                         ui.strong("Asset");
-                        ui.strong("Winner");
-                        ui.strong("Overridden folders");
+                        ui.strong("Kind");
+                        ui.strong("Result");
+                        ui.strong("Other folders");
                         ui.end_row();
                         for conflict in &conflicts {
                             ui.label(&conflict.asset);
@@ -1671,7 +1684,17 @@ fn content_modloader_view(
                                 .first()
                                 .map(|c| c.priority)
                                 .unwrap_or_default();
-                            if conflict.ambiguous {
+                            if conflict.mergeable {
+                                ui.weak("merge").on_hover_text(
+                                    "ModLoader merges this file entry-by-entry; only entries edited \
+                                     by more than one folder actually conflict.",
+                                );
+                                ui.label("combined").on_hover_text(
+                                    "All folders' entries are kept; overlapping entries resolve by \
+                                     priority.",
+                                );
+                            } else if conflict.ambiguous {
+                                ui.colored_label(conflict_color, "override");
                                 ui.colored_label(
                                     conflict_color,
                                     format!("{winner} (priority {winner_priority}, tied)"),
@@ -1681,16 +1704,17 @@ fn content_modloader_view(
                                      is not guaranteed.",
                                 );
                             } else {
-                                ui.label(format!("{winner} (priority {winner_priority})"));
+                                ui.label("override");
+                                ui.label(format!("{winner} wins (priority {winner_priority})"));
                             }
-                            let losers: Vec<String> = conflict.contenders[1..]
+                            let others: Vec<String> = conflict.contenders[1..]
                                 .iter()
                                 .map(|c| format!("{} ({})", c.folder, c.priority))
                                 .collect();
-                            if losers.is_empty() {
+                            if others.is_empty() {
                                 ui.weak("—");
                             } else {
-                                ui.label(losers.join(", "));
+                                ui.label(others.join(", "));
                             }
                             ui.end_row();
                         }
@@ -1776,9 +1800,83 @@ fn content_grouped(
     }
 }
 
-/// The CLEO viewer: each script listed with its `.ini`/`.fxt`/data companions,
-/// then any loose files that belong to no script.
-fn content_cleo_view(ui: &mut egui::Ui, rows: &[&ContentEntry], conflict_color: egui::Color32) {
+/// The installed-CLEO health panel shown atop the CLEO viewer — what the actual
+/// game folder's CLEO setup will do (from the last content scan), as opposed to
+/// the profile plan the rest of the viewer shows. Hidden when there is nothing to
+/// report.
+fn content_cleo_diagnostics(
+    ui: &mut egui::Ui,
+    diagnostics: &CleoDiagnostics,
+    conflict_color: egui::Color32,
+) {
+    if diagnostics.is_empty() {
+        return;
+    }
+    egui::CollapsingHeader::new("CLEO health (installed game folder)")
+        .id_salt("cleo_health")
+        .default_open(true)
+        .show(ui, |ui| {
+            if !diagnostics.blacklisted_plugins.is_empty() {
+                ui.colored_label(
+                    conflict_color,
+                    format!(
+                        "{} blacklisted plugin(s) — legacy, superseded by SA.*, will not load:",
+                        diagnostics.blacklisted_plugins.len()
+                    ),
+                );
+                for name in &diagnostics.blacklisted_plugins {
+                    ui.monospace(format!("    {name}"));
+                }
+            }
+            if !diagnostics.fxt_conflicts.is_empty() {
+                ui.colored_label(
+                    conflict_color,
+                    format!(
+                        "{} text key conflict(s) — same GXT key in multiple .fxt (last wins):",
+                        diagnostics.fxt_conflicts.len()
+                    ),
+                );
+                for conflict in &diagnostics.fxt_conflicts {
+                    ui.label(format!("    {}: {}", conflict.key, conflict.files.join(", ")));
+                }
+            }
+            if !diagnostics.script_issues.is_empty() {
+                ui.strong(format!(
+                    "{} script(s) with dependencies / elevated access:",
+                    diagnostics.script_issues.len()
+                ));
+                for issue in &diagnostics.script_issues {
+                    let mut parts = Vec::new();
+                    if !issue.missing_plugins.is_empty() {
+                        parts.push(format!("MISSING {}", issue.missing_plugins.join(", ")));
+                    }
+                    if !issue.capabilities.is_empty() {
+                        parts.push(format!("elevated: {}", issue.capabilities.join(", ")));
+                    }
+                    let text = format!("    {}: {}", issue.script, parts.join("; "));
+                    if issue.missing_plugins.is_empty() {
+                        ui.label(text);
+                    } else {
+                        ui.colored_label(conflict_color, text);
+                    }
+                }
+            }
+        });
+    ui.add_space(6.0);
+}
+
+/// The CLEO viewer: an installed-folder health panel (blacklisted plugins, text
+/// key conflicts, per-script missing-plugin/capability issues), then each script
+/// listed with its `.ini`/`.fxt`/data companions, then loose files.
+fn content_cleo_view(
+    ui: &mut egui::Ui,
+    rows: &[&ContentEntry],
+    conflict_color: egui::Color32,
+    diagnostics: Option<&CleoDiagnostics>,
+) {
+    if let Some(diagnostics) = diagnostics {
+        content_cleo_diagnostics(ui, diagnostics, conflict_color);
+    }
     let view = cleo_view(rows);
     if !view.plugins.is_empty() {
         ui.strong(format!("{} plugin modules (.cleo)", view.plugins.len()));

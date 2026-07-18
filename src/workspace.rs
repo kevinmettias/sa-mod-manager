@@ -11,7 +11,7 @@ mod scan;
 mod state;
 
 pub(crate) use executables::{Executable, read_executables, write_executables};
-pub(crate) use game::inspect_game;
+pub(crate) use game::{collect_cleo_diagnostics, inspect_game, CleoDiagnostics};
 pub(crate) use import::{import_package, read_import_manifest, target_template};
 pub(crate) use membership::{
     remove_mod_from_profile_json, set_all_profile_mods, set_profile_mod_activation,
