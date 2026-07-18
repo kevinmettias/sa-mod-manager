@@ -1,4 +1,9 @@
 use crate::prelude::*;
+use std::io::Read;
+
+/// Reused per-file read buffer size for streaming hashes. Bounds `file_hash`
+/// memory to this regardless of file size (game `.img` archives are multi-GB).
+const HASH_BUFFER_BYTES: usize = 64 * 1024;
 
 pub(super) fn apply_copy_tree_with_journal(
     source_abs: &Path,
@@ -28,9 +33,11 @@ fn apply_copy_file_with_journal(
     // file with no recoverable journal entry, silently breaking rollback.
     sync_journal(context.journal)?;
     if let Some(parent) = dest.parent() {
-        fs::create_dir_all(parent)?;
+        fs::create_dir_all(parent)
+            .with_context(|| format!("create directory {}", parent.display()))?;
     }
-    fs::copy(file, &dest)?;
+    fs::copy(file, &dest)
+        .with_context(|| format!("copy {} -> {}", file.display(), dest.display()))?;
     let copied_hash = file_hash(&dest)?;
     write_copy_line(context.journal, file, &dest, &copied_hash)?;
     Ok(())
@@ -45,9 +52,11 @@ fn journal_destination_state(
             .backup_root
             .join(backup_relative_for_destination(context.game_root, dest)?);
         if let Some(parent) = backup.parent() {
-            fs::create_dir_all(parent)?;
+            fs::create_dir_all(parent)
+                .with_context(|| format!("create backup directory {}", parent.display()))?;
         }
-        fs::copy(dest, &backup)?;
+        fs::copy(dest, &backup)
+            .with_context(|| format!("back up {} -> {}", dest.display(), backup.display()))?;
         // The backup is the only copy of the original file once we overwrite the
         // destination, so its contents must be durable before that overwrite.
         sync_file_contents(&backup)?;
@@ -120,11 +129,62 @@ fn sync_file_contents(path: &Path) -> Result<(), AppError> {
 pub(super) fn file_hash(path: &Path) -> Result<String, AppError> {
     const FNV_OFFSET: u64 = 0xcbf29ce484222325;
     const FNV_PRIME: u64 = 0x100000001b3;
-    let bytes = fs::read(path)?;
+    // Stream the file through one reused fixed buffer instead of reading it all
+    // into a Vec. Folding FNV chunk-by-chunk yields the same hash as folding the
+    // whole file, so existing journal hashes still verify.
+    let mut file = fs::File::open(path).with_context(|| format!("open {}", path.display()))?;
+    let mut buffer = [0u8; HASH_BUFFER_BYTES];
     let mut hash = FNV_OFFSET;
-    for byte in bytes {
-        hash ^= u64::from(byte);
-        hash = hash.wrapping_mul(FNV_PRIME);
+    loop {
+        let read = file
+            .read(&mut buffer)
+            .with_context(|| format!("read {}", path.display()))?;
+        if read == 0 {
+            break;
+        }
+        for &byte in &buffer[..read] {
+            hash ^= u64::from(byte);
+            hash = hash.wrapping_mul(FNV_PRIME);
+        }
     }
     Ok(format!("fnv64:{hash:016x}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn file_hash_streams_large_files_without_changing_the_result() {
+        let root = env::temp_dir().join(format!(
+            "sa-mod-manager-hash-{}-{}",
+            std::process::id(),
+            unix_now()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let path = root.join("big.img");
+        // Larger than HASH_BUFFER_BYTES so hashing spans several read chunks.
+        let data: Vec<u8> = (0..(HASH_BUFFER_BYTES * 3 + 123))
+            .map(|i| (i % 251) as u8)
+            .collect();
+        fs::write(&path, &data).unwrap();
+
+        assert_eq!(file_hash(&path).unwrap(), reference_fnv64(&data));
+
+        // An empty file hashes to the FNV offset basis, unchanged by streaming.
+        let empty = root.join("empty.bin");
+        fs::write(&empty, b"").unwrap();
+        assert_eq!(file_hash(&empty).unwrap(), reference_fnv64(b""));
+
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    fn reference_fnv64(bytes: &[u8]) -> String {
+        let mut hash = 0xcbf29ce484222325u64;
+        for &byte in bytes {
+            hash ^= u64::from(byte);
+            hash = hash.wrapping_mul(0x100000001b3);
+        }
+        format!("fnv64:{hash:016x}")
+    }
 }

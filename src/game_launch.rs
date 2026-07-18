@@ -1,13 +1,21 @@
 use crate::prelude::*;
 
-pub(crate) fn launch_game_executable(game_root: &Path) -> Result<std::process::Child, AppError> {
+pub(crate) fn launch_game_executable(
+    game_root: &Path,
+    args: &[String],
+    env: &BTreeMap<String, String>,
+) -> Result<std::process::Child, AppError> {
     let executable = game_executable_path(game_root).ok_or_else(|| {
         AppError::Usage(format!(
             "game executable not found under {}",
             game_root.display()
         ))
     })?;
-    let child = Command::new(&executable).current_dir(game_root).spawn()?;
+    let child = Command::new(&executable)
+        .current_dir(game_root)
+        .args(args)
+        .envs(env)
+        .spawn()?;
     Ok(child)
 }
 

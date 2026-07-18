@@ -22,7 +22,8 @@ pub(crate) fn read_install_lock(game_root: &Path) -> Result<Option<InstallLock>,
     if !path.exists() {
         return Ok(None);
     }
-    let text = fs::read_to_string(&path)?;
+    let text = fs::read_to_string(&path)
+        .with_context(|| format!("read install lock {}", path.display()))?;
     Ok(parse_install_lock(&text))
 }
 
@@ -56,7 +57,8 @@ fn write_install_lock(
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
-    let mut file = fs::File::create(&path)?;
+    let mut file = fs::File::create(&path)
+        .with_context(|| format!("create install lock {}", path.display()))?;
     writeln!(file, "version=1")?;
     writeln!(file, "txid={}", escape_value(txid))?;
     writeln!(

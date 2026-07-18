@@ -43,6 +43,37 @@ pub(super) struct SanAndreasModUi {
     pub(super) telemetry: TelemetrySummary,
     pub(super) telemetry_search: String,
     pub(super) telemetry_kind_filter: String,
+    pub(super) last_error: Option<String>,
+    pub(super) pending_confirm: Option<PendingConfirm>,
+    pub(super) task: Option<BackgroundTask>,
+}
+
+/// A destructive action awaiting user confirmation in a modal dialog.
+pub(super) struct PendingConfirm {
+    pub(super) title: String,
+    pub(super) message: String,
+    pub(super) confirm_label: String,
+    pub(super) action: ConfirmAction,
+}
+
+pub(super) enum ConfirmAction {
+    RemoveMod(String),
+    CleanSelectedRun,
+    CleanRunRecord(PendingRunRecord),
+    CleanFinishedRuns,
+}
+
+/// A long-running operation executing off the UI thread. The UI polls
+/// `receiver` each frame and stays responsive (spinner) until it completes.
+pub(super) struct BackgroundTask {
+    pub(super) label: String,
+    receiver: std::sync::mpsc::Receiver<TaskResult>,
+}
+
+pub(super) enum TaskResult {
+    Import(Result<(), AppError>),
+    Analyze(Result<PackageReport, AppError>),
+    Play(Result<(PathBuf, std::process::Child), AppError>),
 }
 
 #[derive(Clone)]
@@ -161,6 +192,9 @@ impl SanAndreasModUi {
             telemetry: TelemetrySummary::default(),
             telemetry_search: String::new(),
             telemetry_kind_filter: "all".to_string(),
+            last_error: None,
+            pending_confirm: None,
+            task: None,
         };
         ui.refresh();
         ui
@@ -221,25 +255,122 @@ impl SanAndreasModUi {
     ) {
         match result {
             Ok(detail) => {
+                self.last_error = None;
                 self.status = if detail == success_message {
                     success_message.to_string()
                 } else {
                     format!("{success_message}: {detail}")
                 };
                 if let Err(err) = self.reload_state() {
-                    self.status = err.to_string();
+                    self.record_error(err);
                 }
             }
-            Err(err) => self.status = err.to_string(),
+            Err(err) => self.record_error(err),
+        }
+    }
+
+    /// Surface an error both transiently (status bar) and persistently (a
+    /// dismissible banner), so it is not lost the moment the next status arrives.
+    pub(super) fn record_error(&mut self, err: AppError) {
+        let text = err.to_string();
+        self.status = text.clone();
+        self.last_error = Some(text);
+    }
+
+    /// Start a long-running operation off the UI thread. Only one runs at a time;
+    /// the worker wakes the UI via `request_repaint` when it finishes.
+    pub(super) fn spawn_task(
+        &mut self,
+        ctx: &egui::Context,
+        label: &str,
+        work: impl FnOnce() -> TaskResult + Send + 'static,
+    ) {
+        if self.task.is_some() {
+            return;
+        }
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let ctx = ctx.clone();
+        std::thread::spawn(move || {
+            let result = work();
+            let _ = sender.send(result);
+            ctx.request_repaint();
+        });
+        self.last_error = None;
+        self.status = format!("working: {label}…");
+        self.task = Some(BackgroundTask {
+            label: label.to_string(),
+            receiver,
+        });
+    }
+
+    pub(super) fn poll_task(&mut self) {
+        let Some(task) = self.task.as_ref() else {
+            return;
+        };
+        match task.receiver.try_recv() {
+            Ok(result) => {
+                self.task = None;
+                self.apply_task_result(result);
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => {}
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                self.task = None;
+                self.record_error(AppError::Tool("background task ended unexpectedly".to_string()));
+            }
+        }
+    }
+
+    fn apply_task_result(&mut self, result: TaskResult) {
+        match result {
+            TaskResult::Import(result) => {
+                self.set_action_result("imported package", result.map(|_| "imported package".into()))
+            }
+            TaskResult::Analyze(result) => self.apply_analysis(result),
+            TaskResult::Play(result) => self.apply_play(result),
+        }
+    }
+
+    pub(super) fn is_busy(&self) -> bool {
+        self.task.is_some()
+    }
+
+    pub(super) fn task_label(&self) -> Option<&str> {
+        self.task.as_ref().map(|task| task.label.as_str())
+    }
+
+    /// Queue a destructive action for modal confirmation instead of running it.
+    pub(super) fn request_confirm(
+        &mut self,
+        title: &str,
+        message: &str,
+        confirm_label: &str,
+        action: ConfirmAction,
+    ) {
+        self.pending_confirm = Some(PendingConfirm {
+            title: title.to_string(),
+            message: message.to_string(),
+            confirm_label: confirm_label.to_string(),
+            action,
+        });
+    }
+
+    pub(super) fn run_confirmed_action(&mut self, action: ConfirmAction) {
+        match action {
+            ConfirmAction::RemoveMod(mod_id) => self.remove_mod_from_profile(&mod_id),
+            ConfirmAction::CleanSelectedRun => self.cleanup_pending_run(),
+            ConfirmAction::CleanRunRecord(record) => self.cleanup_pending_run_record(record),
+            ConfirmAction::CleanFinishedRuns => self.cleanup_stale_pending_runs(),
         }
     }
 }
 
 impl eframe::App for SanAndreasModUi {
     fn update(&mut self, context: &egui::Context, _frame: &mut eframe::Frame) {
+        self.poll_task();
         self.tick_pending_run_watcher();
         context.request_repaint_after(PENDING_RUN_WATCH_INTERVAL);
         egui::TopBottomPanel::top("top_bar").show(context, |ui| self.top_bar(ui)); // literal: allow external interface text or file-format spelling
+        self.error_banner(context);
         egui::SidePanel::left("navigation") // literal: allow external interface text or file-format spelling
             .exact_width(184.0)
             .show(context, |ui| self.navigation(ui));
@@ -254,6 +385,7 @@ impl eframe::App for SanAndreasModUi {
             UiTab::Run => self.run_panel(ui),
             UiTab::Telemetry => self.telemetry_panel(ui),
         });
+        self.confirm_modal(context);
     }
 }
 

@@ -3,6 +3,7 @@ use crate::prelude::*;
 use super::copy_journal::file_hash;
 
 pub(crate) fn rollback_journal(journal_path: &Path, game_root: &Path) -> Result<(), AppError> {
+    crate::logging::open_for_game_root(game_root);
     ensure_journal_allowed(game_root, journal_path)?;
     let content = fs::read_to_string(journal_path)?;
     let rollback = parse_rollback_journal(&content);
@@ -12,7 +13,7 @@ pub(crate) fn rollback_journal(journal_path: &Path, game_root: &Path) -> Result<
 
     apply_rollback_actions(game_root, &rollback)?;
 
-    println!("rollback complete: {}", journal_path.display());
+    log_info!("rollback complete: {}", journal_path.display());
     Ok(())
 }
 
@@ -200,7 +201,7 @@ fn remove_new_file(game_root: &Path, new_file: &NewFileEntry) -> Result<(), AppE
     ensure_destination_allowed(game_root, &new_file.dest)?;
     if new_file.dest.exists() {
         fs::remove_file(&new_file.dest)?;
-        println!("removed: {}", new_file.dest.display());
+        log_debug!("removed: {}", new_file.dest.display());
         remove_empty_parent_dirs(game_root, &new_file.dest)?;
     }
     Ok(())
@@ -227,7 +228,7 @@ fn restore_backup_file(game_root: &Path, backup: &BackupEntry) -> Result<(), App
         fs::create_dir_all(parent)?;
     }
     fs::copy(&backup.backup, &backup.dest)?;
-    println!("restored: {}", backup.dest.display());
+    log_debug!("restored: {}", backup.dest.display());
     Ok(())
 }
 
@@ -247,7 +248,7 @@ fn remove_empty_parent_dirs(game_root: &Path, file: &Path) -> Result<(), AppErro
         }
         if fs::read_dir(&current)?.next().is_none() {
             fs::remove_dir(&current)?;
-            println!("removed empty dir: {}", current.display());
+            log_debug!("removed empty dir: {}", current.display());
         } else {
             break;
         }

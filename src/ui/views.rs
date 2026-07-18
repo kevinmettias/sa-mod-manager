@@ -42,7 +42,7 @@ impl SanAndreasModUi {
                     self.tab = UiTab::Run;
                 }
                 if ui.button("Clean finished").clicked() {
-                    self.cleanup_stale_pending_runs();
+                    self.request_cleanup_finished();
                 }
             });
         }
@@ -99,7 +99,13 @@ impl SanAndreasModUi {
 
 impl SanAndreasModUi {
     pub(super) fn status_bar(&mut self, ui: &mut egui::Ui) {
+        let busy_label = self.task_label().map(str::to_string);
         ui.horizontal(|ui| {
+            if let Some(label) = busy_label {
+                ui.add(egui::Spinner::new());
+                ui.strong(format!("{label}…"));
+                ui.separator();
+            }
             ui.strong(readiness_label(self));
             ui.separator();
             ui.label(&self.status);
@@ -112,6 +118,63 @@ impl SanAndreasModUi {
                 ui.label("temporary files need cleanup before another launch");
             }
         });
+    }
+
+    /// A dismissible banner for the most recent error, so it persists instead of
+    /// being overwritten by the next transient status line.
+    pub(super) fn error_banner(&mut self, ctx: &egui::Context) {
+        let Some(message) = self.last_error.clone() else {
+            return;
+        };
+        let color = egui::Color32::from_rgb(200, 64, 64);
+        egui::TopBottomPanel::top("error_banner").show(ctx, |ui| {
+            ui.horizontal_wrapped(|ui| {
+                if ui.button("Dismiss").clicked() {
+                    self.last_error = None;
+                }
+                ui.colored_label(color, "⚠");
+                ui.colored_label(color, message);
+            });
+        });
+    }
+
+    /// Modal confirmation for destructive actions. Runs the queued action on
+    /// confirm, discards it on cancel.
+    pub(super) fn confirm_modal(&mut self, ctx: &egui::Context) {
+        let Some(confirm) = self.pending_confirm.as_ref() else {
+            return;
+        };
+        let title = confirm.title.clone();
+        let message = confirm.message.clone();
+        let confirm_label = confirm.confirm_label.clone();
+
+        let mut confirmed = None;
+        egui::Window::new(title)
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .show(ctx, |ui| {
+                ui.label(message);
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    if ui.button(confirm_label).clicked() {
+                        confirmed = Some(true);
+                    }
+                    if ui.button("Cancel").clicked() {
+                        confirmed = Some(false);
+                    }
+                });
+            });
+
+        match confirmed {
+            Some(true) => {
+                if let Some(confirm) = self.pending_confirm.take() {
+                    self.run_confirmed_action(confirm.action);
+                }
+            }
+            Some(false) => self.pending_confirm = None,
+            None => {}
+        }
     }
 }
 
@@ -481,8 +544,11 @@ impl SanAndreasModUi {
         let mut enabled = entry.enabled;
         /* literal: allow external interface text or file-format spelling */
         /* literal: allow external interface text or file-format spelling */
-        if ui.checkbox(&mut enabled, "").changed() {
-            // literal: allow external interface text or file-format spelling
+        if ui
+            .checkbox(&mut enabled, "")
+            .on_hover_text("Enable or disable this mod in the current profile")
+            .changed()
+        {
             let activation = if enabled {
                 ProfileModActivation::Enabled
             } else {
@@ -492,7 +558,11 @@ impl SanAndreasModUi {
         }
         let mut order = entry.load_order;
         let order_drag = egui::DragValue::new(&mut order).speed(10);
-        if ui.add(order_drag).changed() {
+        if ui
+            .add(order_drag)
+            .on_hover_text("Load order: lower loads first; later mods overwrite earlier files")
+            .changed()
+        {
             self.set_mod_order(&entry.id, order);
         }
         ui.label(&entry.id);
@@ -500,9 +570,12 @@ impl SanAndreasModUi {
         ui.monospace(config_display);
         /* literal: allow external interface text or file-format spelling */
         /* literal: allow external interface text or file-format spelling */
-        if ui.button("Remove").clicked() {
-            // literal: allow external interface text or file-format spelling
-            self.remove_mod_from_profile(&entry.id);
+        if ui
+            .button("Remove")
+            .on_hover_text("Remove this mod from the profile (asks first)")
+            .clicked()
+        {
+            self.request_remove_mod(&entry.id);
         }
         ui.end_row();
     }
@@ -667,18 +740,22 @@ impl SanAndreasModUi {
             let package_editor = egui::TextEdit::singleline(&mut self.import_path_input);
             ui.add_sized([650.0, ROW_HEIGHT], package_editor);
         });
+        let idle = !self.is_busy();
         ui.horizontal(|ui| {
-            /* literal: allow external interface text or file-format spelling */
-            /* literal: allow external interface text or file-format spelling */
-            if ui.button("Review package").clicked() {
-                // literal: allow external interface text or file-format spelling
-                self.analyze_package();
+            if ui
+                .add_enabled(idle, egui::Button::new("Review package"))
+                .on_hover_text("List entries and readmes without writing anything")
+                .on_disabled_hover_text("A background task is running")
+                .clicked()
+            {
+                self.analyze_package(ui.ctx());
             }
-            /* literal: allow external interface text or file-format spelling */
-            /* literal: allow external interface text or file-format spelling */
-            if ui.button("Import to library").clicked() {
-                // literal: allow external interface text or file-format spelling
-                self.import_package();
+            if ui
+                .add_enabled(idle, egui::Button::new("Import to library"))
+                .on_hover_text("Extract the package into the managed library")
+                .clicked()
+            {
+                self.import_package(ui.ctx());
             }
         });
         ui.separator();
@@ -785,24 +862,32 @@ impl SanAndreasModUi {
             summary_tile(ui, "Readiness", readiness_label(self));
         });
         ui.label("Play materializes this profile temporarily, launches the game, then watches for cleanup.");
+        let idle = !self.is_busy();
         ui.horizontal(|ui| {
-            /* literal: allow external interface text or file-format spelling */
-            /* literal: allow external interface text or file-format spelling */
-            if ui.button("Play").clicked() {
-                // literal: allow external interface text or file-format spelling
-                self.launch_selected_profile();
+            if ui
+                .add_enabled(idle, egui::Button::new("Play"))
+                .on_hover_text("Materialize this profile, launch the game, then auto-clean on exit")
+                .on_disabled_hover_text("A background task is running")
+                .clicked()
+            {
+                self.launch_selected_profile(ui.ctx());
             }
-            /* literal: allow external interface text or file-format spelling */
-            /* literal: allow external interface text or file-format spelling */
-            if ui.button("Clean selected").clicked() {
-                // literal: allow external interface text or file-format spelling
-                self.cleanup_pending_run();
+            if ui
+                .button("Clean selected")
+                .on_hover_text("Delete the selected run's materialized files (asks first)")
+                .clicked()
+            {
+                self.request_cleanup_selected();
             }
             if ui.button("Check status").clicked() {
                 self.refresh_pending_runs();
             }
-            if ui.button("Clean finished").clicked() {
-                self.cleanup_stale_pending_runs();
+            if ui
+                .button("Clean finished")
+                .on_hover_text("Delete all finished runs' materialized files (asks first)")
+                .clicked()
+            {
+                self.request_cleanup_finished();
             }
         });
         ui.separator();
@@ -841,8 +926,12 @@ impl SanAndreasModUi {
                         ui.monospace(pid);
                         ui.label(&record.detail);
                         ui.monospace(record.journal.display().to_string());
-                        if ui.button("Clean").clicked() {
-                            self.cleanup_pending_run_record(record);
+                        if ui
+                            .button("Clean")
+                            .on_hover_text("Delete this run's materialized files (asks first)")
+                            .clicked()
+                        {
+                            self.request_cleanup_record(record);
                         }
                         ui.end_row();
                     }
@@ -937,7 +1026,8 @@ impl SanAndreasModUi {
                     ui.end_row();
                     for event in recent_events.into_iter().take(50) {
                         ui.label(&event.kind);
-                        ui.monospace(event.created_unix.to_string());
+                        ui.monospace(human_datetime(event.created_unix))
+                            .on_hover_text(format!("unix {}", event.created_unix));
                         ui.label(&event.title);
                         ui.label(&event.detail);
                         ui.end_row();
@@ -972,7 +1062,8 @@ impl SanAndreasModUi {
                     ui.monospace(row.copied_files.to_string());
                     ui.monospace(row.overwritten_files.to_string());
                     ui.monospace((row.missing_sources + row.blocked_bootstrap).to_string());
-                    ui.monospace(row.last_seen_unix.to_string());
+                    ui.monospace(human_datetime(row.last_seen_unix))
+                        .on_hover_text(format!("unix {}", row.last_seen_unix));
                     ui.end_row();
                 }
             });

@@ -5,7 +5,7 @@ mod package;
 mod profile;
 mod rules;
 
-pub(crate) use app_error::AppError;
+pub(crate) use app_error::{AppError, AppErrorKind, ErrorContext};
 pub(crate) use config::{ModConfigJson, ModInstallRootJson};
 pub(crate) use install::{
     CompletedPlanParts, CopyJournalContext, InstallApplyState, InstallOperation, InstallPlan,
