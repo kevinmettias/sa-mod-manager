@@ -26,7 +26,8 @@ pub(crate) fn extension_eq(path: &Path, extension: &str) -> bool {
 }
 
 pub(crate) fn find_seven_zip() -> Option<PathBuf> {
-    if let Some(path) = env::var_os("SA_MOD_MANAGER_7Z").map(PathBuf::from) {
+    // An explicit path from `SA_MOD_MANAGER_7Z` or the config file wins.
+    if let Some(path) = configured_seven_zip() {
         if command_candidate_works(&path) {
             return Some(path);
         }
