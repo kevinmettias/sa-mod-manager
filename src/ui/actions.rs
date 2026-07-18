@@ -1,4 +1,6 @@
 use crate::prelude::*;
+use crate::planning::readme_copy_install_root;
+use crate::workspace::append_mod_config_install_root;
 use eframe::egui;
 
 use super::san_andreas_mod_ui::{
@@ -11,6 +13,66 @@ impl SanAndreasModUi {
         match export_telemetry_summary(&self.game_root(), &self.telemetry) {
             Ok(path) => self.status = format!("exported telemetry: {}", path.display()),
             Err(err) => self.status = err.to_string(),
+        }
+    }
+}
+
+impl SanAndreasModUi {
+    pub(super) fn browse_game_folder(&mut self) {
+        let mut dialog = rfd::FileDialog::new().set_title("Select GTA San Andreas folder");
+        let current = self.game_root();
+        if current.is_dir() {
+            dialog = dialog.set_directory(&current);
+        }
+        if let Some(path) = dialog.pick_folder() {
+            self.game_root_input = path.display().to_string();
+            self.refresh();
+        }
+    }
+
+    pub(super) fn browse_package_file(&mut self) {
+        let dialog = rfd::FileDialog::new()
+            .set_title("Select a mod package")
+            .add_filter("Mod packages", &["zip", "wrap", "7z", "rar"]);
+        if let Some(path) = dialog.pick_file() {
+            self.set_import_path(path);
+        }
+    }
+
+    pub(super) fn browse_package_folder(&mut self) {
+        if let Some(path) = rfd::FileDialog::new()
+            .set_title("Select a mod folder")
+            .pick_folder()
+        {
+            self.set_import_path(path);
+        }
+    }
+
+    fn set_import_path(&mut self, path: PathBuf) {
+        self.import_path_input = path.display().to_string();
+        self.clear_readme_review();
+        self.tab = crate::ui::state::UiTab::Import;
+    }
+
+    /// Drop analysis results tied to a previously reviewed package. Called
+    /// whenever the package path changes so a stale proposal can never be applied
+    /// to a different package's config.
+    pub(super) fn clear_readme_review(&mut self) {
+        self.readme_proposals.clear();
+        self.analysis_summary = None;
+    }
+
+    /// Route a path dropped onto the window: a real GTA install folder fills the
+    /// game-folder field; anything else fills the package field and jumps to Import.
+    pub(super) fn handle_dropped_path(&mut self, path: PathBuf) {
+        if path.is_dir() && game_executable_path(&path).is_some() {
+            self.game_root_input = path.display().to_string();
+            self.status = format!("set game folder: {}", path.display());
+            self.refresh();
+        } else {
+            let display = path.display().to_string();
+            self.set_import_path(path);
+            self.status = format!("loaded package: {display}");
         }
     }
 }
@@ -84,16 +146,45 @@ impl SanAndreasModUi {
 }
 
 impl SanAndreasModUi {
+    /// Validate then persist an edited install root. Returns whether it was saved
+    /// so the caller can keep an invalid edit open for correction.
     pub(super) fn save_mod_install_root(
         &mut self,
         config_path: &Path,
         root_index: usize,
         root: ModInstallRootJson,
-    ) {
+    ) -> bool {
+        if let Err(err) = validate_install_root(&root) {
+            self.record_error(err);
+            return false;
+        }
         let result = update_mod_config_install_root(config_path, root_index, &root)
             .map(|_| "updated install root".to_string());
+        let saved = result.is_ok();
         self.set_action_result("updated install root", result);
+        saved
     }
+}
+
+/// Reject an install root before it reaches disk: source and target must be
+/// non-empty relative paths with no `..` escape or drive-letter, the same
+/// containment rule the installer enforces. `kind` comes from a fixed dropdown,
+/// so it needs no check here.
+fn validate_install_root(root: &ModInstallRootJson) -> Result<(), AppError> {
+    validate_install_root_path("source", &root.source)?;
+    validate_install_root_path("target", &root.target)
+}
+
+fn validate_install_root_path(label: &str, value: &str) -> Result<(), AppError> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Err(AppError::Usage(format!("install root {label} is required")));
+    }
+    path_from_package_root(&normalize_path(trimmed))
+        .map(|_| ())
+        .map_err(|err| {
+            AppError::Usage(format!("install root {label} `{trimmed}` is invalid: {err}"))
+        })
 }
 
 impl SanAndreasModUi {
@@ -507,6 +598,61 @@ impl SanAndreasModUi {
     }
 }
 
+impl SanAndreasModUi {
+    /// The `mod.json` for the package currently under review, if that package has
+    /// been imported into the library. `None` when no package is entered.
+    pub(super) fn reviewed_mod_config_path(&self) -> Option<PathBuf> {
+        let package = self.import_path_input.trim();
+        if package.is_empty() {
+            return None;
+        }
+        let id = package_id(&PathBuf::from(package));
+        Some(
+            state_directory(&self.game_root())
+                .join("mods")
+                .join(id)
+                .join("mod.json"),
+        )
+    }
+
+    /// Promote a readme "copy source -> target" proposal into a real install root
+    /// on the imported mod's config. This is how a below-auto-threshold proposal
+    /// (needs-review / warning) gets applied without hand-editing JSON.
+    pub(super) fn accept_readme_proposal(&mut self, proposal: &ReadmeProposal) {
+        let Some(config_path) = self.reviewed_mod_config_path() else {
+            self.status = "review a package before accepting a proposal".to_string();
+            return;
+        };
+        if !config_path.exists() {
+            self.status = "import this package to the library first, then accept".to_string();
+            return;
+        }
+        let (Some(source), Some(target)) = (&proposal.source, &proposal.target) else {
+            self.status = "this proposal has no concrete source and target to apply".to_string();
+            return;
+        };
+        let package_id = package_id(&PathBuf::from(self.import_path_input.trim()));
+        let root = readme_copy_install_root(source, target, &package_id);
+        // Gate the one-click accept through the same containment check the manual
+        // editor uses, so a garbled readme source cannot land an escaping path in
+        // the config that only fails much later at install time.
+        if let Err(err) = validate_install_root(&root) {
+            self.record_error(err);
+            return;
+        }
+        match append_mod_config_install_root(&config_path, &root) {
+            Ok(true) => self.set_action_result(
+                "added install root from readme",
+                Ok(format!("{} -> {}", root.source, root.target)),
+            ),
+            Ok(false) => {
+                self.status = "that install root is already in the mod config".to_string()
+            }
+            Err(err) => self.record_error(err),
+        }
+    }
+}
+
 fn readme_proposals_from_report(report: &PackageReport) -> Vec<ReadmeProposal> {
     report
         .readme_instructions
@@ -528,6 +674,8 @@ fn readme_proposal_from_instruction(instruction: &ReadmeInstruction) -> ReadmePr
         review_state: readme_proposal_state(instruction),
         normalized_text: instruction.normalized_text.clone(),
         reasons: instruction.confidence_reasons.clone(),
+        source: instruction.source.clone(),
+        target: instruction.target.clone(),
     }
 }
 
@@ -812,7 +960,7 @@ mod tests {
         .unwrap();
         remember_pending_run(&game_root, &journal, Some(u32::MAX)).unwrap();
 
-        let mut ui = SanAndreasModUi::new(game_root.clone());
+        let mut ui = SanAndreasModUi::new(game_root.clone(), test_preferences());
         assert_eq!(ui.pending_runs.len(), 1);
         assert_eq!(ui.pending_runs[0].status, PendingRunStatus::Stale);
 
@@ -844,7 +992,7 @@ mod tests {
         .unwrap();
         remember_pending_run(&game_root, &journal, Some(u32::MAX)).unwrap();
 
-        let mut ui = SanAndreasModUi::new(game_root.clone());
+        let mut ui = SanAndreasModUi::new(game_root.clone(), test_preferences());
         ui.last_pending_watch = Instant::now() - Duration::from_secs(3);
         ui.tick_pending_run_watcher();
 
@@ -906,6 +1054,47 @@ mod tests {
         assert!(!process_is_running(0));
     }
 
+    #[test]
+    fn install_root_validation_rejects_escapes_and_empties() {
+        let valid = ModInstallRootJson {
+            source: "files/CLEO".to_string(),
+            target: "CLEO".to_string(),
+            kind: "cleo".to_string(),
+            enabled: true,
+            optional: false,
+        };
+        assert!(validate_install_root(&valid).is_ok());
+
+        let empty_source = ModInstallRootJson {
+            source: "   ".to_string(),
+            ..valid.clone()
+        };
+        assert!(validate_install_root(&empty_source).is_err());
+
+        let escaping_source = ModInstallRootJson {
+            source: "../evil".to_string(),
+            ..valid.clone()
+        };
+        assert!(validate_install_root(&escaping_source).is_err());
+
+        let escaping_target = ModInstallRootJson {
+            target: "../../outside".to_string(),
+            ..valid.clone()
+        };
+        assert!(validate_install_root(&escaping_target).is_err());
+    }
+
+    #[test]
+    fn readme_accept_root_is_validated_like_manual_edits() {
+        // A well-formed readme copy yields a root that passes validation.
+        let good = readme_copy_install_root("files/CLEO", "CLEO", "gravity_fix");
+        assert!(validate_install_root(&good).is_ok());
+        // A traversal source survives normalize_path but is rejected by the same
+        // check the manual editor uses, so accept and edit stay consistent.
+        let escaping = readme_copy_install_root("../../evil", "CLEO", "gravity_fix");
+        assert!(validate_install_root(&escaping).is_err());
+    }
+
     fn test_readme_instruction(action: ReadmeAction, confidence: f32) -> ReadmeInstruction {
         ReadmeInstruction {
             source_readme: "README.txt".to_string(),
@@ -929,6 +1118,10 @@ mod tests {
         remove_dir_if_exists(&root).unwrap();
         fs::create_dir_all(&root).unwrap();
         root
+    }
+
+    fn test_preferences() -> crate::ui::preferences::UiPreferences {
+        crate::ui::preferences::UiPreferences::default()
     }
 
     fn remove_dir_if_exists(path: &Path) -> Result<(), AppError> {

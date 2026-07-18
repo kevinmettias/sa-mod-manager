@@ -228,16 +228,21 @@ fn staging_root_for_mod_config(
 
 fn enabled_install_roots(
     mut roots: Vec<ModInstallRootJson>,
-    overrides: &BTreeMap<String, bool>,
+    overrides: &BTreeMap<String, ProfileRootOverride>,
 ) -> Vec<ModInstallRootJson> {
     // A per-profile override for a root's `source` wins over the mod's own
-    // `enabled` flag, letting a profile toggle a shared mod's roots.
+    // config, letting a profile toggle a shared mod's roots or retarget them.
     roots.retain(|root| {
         overrides
             .get(&root.source)
-            .copied()
+            .and_then(|over| over.enabled)
             .unwrap_or(root.enabled)
     });
+    for root in &mut roots {
+        if let Some(target) = overrides.get(&root.source).and_then(|over| over.target.clone()) {
+            root.target = target;
+        }
+    }
     roots.sort_by(|a, b| a.source.cmp(&b.source));
     roots
 }
@@ -451,7 +456,13 @@ mod tests {
         write_test_mod_config(&config, "mod", &source, "payload", "modloader/target");
 
         let mut overrides = BTreeMap::new();
-        overrides.insert("payload".to_string(), false);
+        overrides.insert(
+            "payload".to_string(),
+            ProfileRootOverride {
+                enabled: Some(false),
+                target: None,
+            },
+        );
         let entry = ProfileModEntry {
             id: "mod".to_string(),
             enabled: true,
@@ -470,6 +481,60 @@ mod tests {
                 .join("file.txt")
                 .exists(),
             "root disabled by profile override should not materialize"
+        );
+        remove_dir_if_exists(&game_root).unwrap();
+    }
+
+    #[test]
+    fn profile_root_override_retargets_a_specific_install_root() {
+        let game_root = test_root("root_retarget");
+        let source = game_root.join("sources").join("mod");
+        let config = game_root
+            .join(".sa-mod-manager")
+            .join("mods")
+            .join("mod")
+            .join("mod.json");
+        fs::create_dir_all(source.join("payload")).unwrap();
+        fs::write(source.join("payload").join("file.txt"), "payload").unwrap();
+
+        ensure_state(&game_root).unwrap();
+        write_test_mod_config(&config, "mod", &source, "payload", "modloader/target");
+
+        let mut overrides = BTreeMap::new();
+        overrides.insert(
+            "payload".to_string(),
+            ProfileRootOverride {
+                enabled: None,
+                target: Some("modloader/retargeted".to_string()),
+            },
+        );
+        let entry = ProfileModEntry {
+            id: "mod".to_string(),
+            enabled: true,
+            load_order: 100,
+            config: config.clone(),
+            root_overrides: overrides,
+        };
+        write_profile_entries(&game_root, &[entry]);
+
+        materialize_profile_for_run(&game_root, "default").unwrap();
+
+        // Files land at the profile's overridden target, not the mod's default.
+        assert!(
+            game_root
+                .join("modloader")
+                .join("retargeted")
+                .join("file.txt")
+                .exists(),
+            "root should materialize at the profile-overridden target"
+        );
+        assert!(
+            !game_root
+                .join("modloader")
+                .join("target")
+                .join("file.txt")
+                .exists(),
+            "root should not materialize at the mod's default target"
         );
         remove_dir_if_exists(&game_root).unwrap();
     }

@@ -61,6 +61,10 @@ pub(crate) fn open_for_game_root(game_root: &Path) {
     open_log_file(&state_directory(game_root).join("logs").join("sa-mod-manager.log"));
 }
 
+/// Roll the log over once it passes this size, keeping one `.1` backup, so the
+/// diagnostic trail is bounded to roughly twice this on disk.
+const MAX_LOG_BYTES: u64 = 5 * 1024 * 1024;
+
 /// Open the persistent log file (append) once per process. Repeat calls and any
 /// I/O failure are ignored so logging never breaks a command.
 pub(crate) fn open_log_file(path: &Path) {
@@ -73,9 +77,30 @@ pub(crate) fn open_log_file(path: &Path) {
     if let Some(parent) = path.parent() {
         let _ = fs::create_dir_all(parent);
     }
+    rotate_if_over(path, MAX_LOG_BYTES);
     if let Ok(file) = fs::OpenOptions::new().create(true).append(true).open(path) {
         *guard = Some(file);
     }
+}
+
+/// The rotated-backup path for a log file (`<name>.1`).
+fn log_backup_path(path: &Path) -> PathBuf {
+    let mut name = path.as_os_str().to_owned();
+    name.push(".1");
+    PathBuf::from(name)
+}
+
+/// If `path` is larger than `max_bytes`, move it to its `.1` backup (replacing
+/// any previous backup) so the next open starts fresh. Returns whether it
+/// rotated. All I/O errors are treated as "did not rotate".
+fn rotate_if_over(path: &Path, max_bytes: u64) -> bool {
+    let size = fs::metadata(path).map(|meta| meta.len()).unwrap_or(0);
+    if size <= max_bytes {
+        return false;
+    }
+    let backup = log_backup_path(path);
+    let _ = fs::remove_file(&backup);
+    fs::rename(path, &backup).is_ok()
 }
 
 /// Emit a diagnostic. Console output goes to stderr (keeping stdout clean for
@@ -112,3 +137,39 @@ macro_rules! log_debug {
 }
 
 pub(crate) use {log_debug, log_error, log_info, log_warn};
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rotate_moves_oversized_log_to_backup_and_replaces_prior_backup() {
+        let dir = env::temp_dir().join(format!(
+            "sa-mod-manager-log-{}-{}",
+            std::process::id(),
+            unix_now()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        let log = dir.join("sa-mod-manager.log");
+        let backup = log_backup_path(&log);
+
+        // A small file is left in place.
+        fs::write(&log, b"tiny").unwrap();
+        assert!(!rotate_if_over(&log, 100));
+        assert!(log.exists());
+        assert!(!backup.exists());
+
+        // An oversized file is moved to `.1` so the next open starts fresh.
+        fs::write(&log, vec![b'x'; 200]).unwrap();
+        assert!(rotate_if_over(&log, 100));
+        assert!(!log.exists());
+        assert_eq!(fs::read(&backup).unwrap().len(), 200);
+
+        // A second rotation replaces the previous backup rather than piling up.
+        fs::write(&log, vec![b'y'; 150]).unwrap();
+        assert!(rotate_if_over(&log, 100));
+        assert_eq!(fs::read(&backup).unwrap()[0], b'y');
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+}

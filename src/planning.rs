@@ -9,7 +9,7 @@ mod run;
 
 pub(crate) use analysis::analyze_package;
 pub(crate) use apply::apply_install_plan;
-pub(crate) use build::{build_install_plan, sort_operations_for_apply};
+pub(crate) use build::{build_install_plan, readme_copy_install_root, sort_operations_for_apply};
 pub(crate) use install_lock::{interrupted_install, recover_interrupted_install};
 pub(crate) use print::print_install_plan;
 pub(crate) use rollback::rollback_journal;

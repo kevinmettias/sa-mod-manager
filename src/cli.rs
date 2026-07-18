@@ -68,6 +68,14 @@ fn extract_verbosity(arguments: &mut Vec<String>) -> crate::logging::Level {
 }
 
 fn dispatch_command(command: &str, arguments: Vec<String>) -> Result<(), AppError> {
+    // `<command> --help`/`-h` shows that command's help instead of erroring on an
+    // unexpected flag. The `help`/`version` verbs handle their own arguments.
+    if !matches!(command, "help" | "--help" | "-h" | "version" | "--version" | "-V")
+        && arguments.iter().any(|arg| arg == "--help" || arg == "-h")
+    {
+        print_command_help(command);
+        return Ok(());
+    }
     match command {
         "scan" => handle_scan_command(arguments), // literal: allow external interface text or file-format spelling
         "ui" => handle_ui_command(arguments), // literal: allow external interface text or file-format spelling
@@ -98,12 +106,22 @@ fn dispatch_command(command: &str, arguments: Vec<String>) -> Result<(), AppErro
         "profile-delete" => handle_profile_delete_command(arguments), // literal: allow external interface text or file-format spelling
         "profile-args" => handle_profile_args_command(arguments), // literal: allow external interface text or file-format spelling
         "profile-root" => handle_profile_root_command(arguments), // literal: allow external interface text or file-format spelling
+        "profile-root-target" => handle_profile_root_target_command(arguments), // literal: allow external interface text or file-format spelling
         "game" => handle_game_command(arguments), // literal: allow external interface text or file-format spelling
+        "logs" => handle_logs_command(arguments), // literal: allow external interface text or file-format spelling
         /* literal: allow external interface text or file-format spelling */
         /* literal: allow external interface text or file-format spelling */
         "help" | "--help" | "-h" => {
             // literal: allow external interface text or file-format spelling
-            print_usage();
+            match arguments.first() {
+                Some(subcommand) => print_command_help(subcommand),
+                None => print_usage(),
+            }
+            Ok(())
+        }
+        "version" | "--version" | "-V" => {
+            // literal: allow external interface text or file-format spelling
+            print_version();
             Ok(())
         }
         _ => {
@@ -127,8 +145,20 @@ fn default_mod_roots() -> Vec<PathBuf> {
 }
 
 fn handle_ui_command(arguments: Vec<String>) -> Result<(), AppError> {
-    let game_root = optional_game_root_from_raw_arguments(arguments);
+    let game_root = optional_explicit_game_root(arguments);
     crate::ui::run_ui(game_root)
+}
+
+/// Like [`optional_game_root_from_raw_arguments`], but returns `None` when the
+/// user gave no folder, so the UI can fall back to the last-used folder rather
+/// than always forcing the compiled default.
+fn optional_explicit_game_root(arguments: Vec<String>) -> Option<PathBuf> {
+    let mut cursor = CliArguments::new(arguments);
+    match cursor.next_optional() {
+        Some(flag) if flag == "--game" => cursor.next_optional().map(PathBuf::from),
+        Some(path) => Some(PathBuf::from(path)),
+        None => None,
+    }
 }
 
 fn handle_analyze_command(arguments: Vec<String>) -> Result<(), AppError> {
@@ -340,6 +370,16 @@ fn handle_profile_root_command(arguments: Vec<String>) -> Result<(), AppError> {
     set_profile_root_override(&game_root, &safe_name(&profile), &safe_name(&mod_id), &source, enabled)
 }
 
+fn handle_profile_root_target_command(arguments: Vec<String>) -> Result<(), AppError> {
+    let mut cursor = CliArguments::new(arguments);
+    let profile = cursor.required("profile name")?; // literal: allow external interface text or file-format spelling
+    let mod_id = cursor.required("mod id")?; // literal: allow external interface text or file-format spelling
+    let source = cursor.required("install root source")?; // literal: allow external interface text or file-format spelling
+    let target = cursor.required("target path")?; // literal: allow external interface text or file-format spelling
+    let game_root = game_root_from_cli_arguments(cursor)?;
+    set_profile_root_target(&game_root, &safe_name(&profile), &safe_name(&mod_id), &source, &target)
+}
+
 fn parse_on_off(value: &str) -> Result<bool, AppError> {
     match value.to_ascii_lowercase().as_str() {
         "on" | "true" | "enable" | "enabled" | "yes" => Ok(true),
@@ -400,6 +440,28 @@ fn handle_profile_new_command(arguments: Vec<String>) -> Result<(), AppError> {
 fn handle_game_command(arguments: Vec<String>) -> Result<(), AppError> {
     let game_root = optional_game_root_from_raw_arguments(arguments);
     inspect_game(&game_root)
+}
+
+fn handle_logs_command(arguments: Vec<String>) -> Result<(), AppError> {
+    let game_root = optional_game_root_from_raw_arguments(arguments);
+    let log_path = state_directory(&game_root)
+        .join("logs")
+        .join("sa-mod-manager.log");
+    println!("log: {}", log_path.display());
+    match fs::read_to_string(&log_path) {
+        Ok(text) => {
+            let lines: Vec<&str> = text.lines().collect();
+            let start = lines.len().saturating_sub(40);
+            if start > 0 {
+                println!("... ({} earlier lines)", start);
+            }
+            for line in &lines[start..] {
+                println!("{line}");
+            }
+        }
+        Err(_) => println!("(no diagnostics logged yet for this game folder)"),
+    }
+    Ok(())
 }
 
 pub(crate) fn usage_error(message: &str) -> AppError {
@@ -596,7 +658,7 @@ impl CliArguments {
 }
 
 fn print_usage() {
-    println!("sa-mod-manager");
+    println!("sa-mod-manager {}", env!("CARGO_PKG_VERSION"));
     println!();
     print_command_usage();
     print_plan_option_usage();
@@ -604,51 +666,90 @@ fn print_usage() {
     print_default_usage();
 }
 
+fn print_version() {
+    println!("sa-mod-manager {}", env!("CARGO_PKG_VERSION"));
+}
+
 fn print_global_option_usage() {
     println!("Global options (any position):");
     println!("  -v, --verbose                    More diagnostics (repeat/-vv for trace)");
     println!("  -q, --quiet                      Fewer diagnostics (-qq for errors only)");
+    println!("  -h, --help                       Show this help");
+    println!("  -V, --version                    Print the version and exit");
     println!("  Diagnostics also append to <game-root>/.sa-mod-manager/logs/sa-mod-manager.log");
     println!();
 }
 
+/// Single source of truth for the command list. Both the full usage screen and
+/// per-command help (`help <cmd>`, `<cmd> --help`) render from this, so there is
+/// no second table to keep in sync.
+const COMMAND_USAGE_LINES: &[&str] = &[
+    "  ui [game-root]                   Open the desktop manager UI",
+    "  config-init                      Write an example user config (paths + detection rules)",
+    "  game [game-root]                 Inspect installed GTA SA mod infrastructure",
+    "  logs [game-root]                 Show the persistent diagnostics log (recent lines)",
+    "  init [game-root]                 Create manager state folders",
+    "  profiles [game-root]             List profiles",
+    "  profile-new <name> [game-root]   Create a profile manifest",
+    "  profile-use <name> [--game path] Set the active profile",
+    "  profile-copy <src> <dest>        Copy a profile to a new name",
+    "  profile-rename <old> <new>       Rename a profile",
+    "  profile-delete <name>            Delete a profile",
+    "  profile-args [--game p] <name> ..  Set profile launch arguments",
+    "  profile-root <name> <mod> <src> on|off  Toggle a mod's install root for a profile",
+    "  profile-root-target <name> <mod> <src> <target>  Retarget a mod's install root for a profile",
+    "  scan [mod-root ...]              Inventory archives and folders",
+    "  analyze <archive-or-folder>      Detect install roots, options, risks, and compatibility hints",
+    "  dry-install <package> [options]  Build a no-write install plan",
+    "  install <package> --permanent    Apply plan with backups and a journal",
+    "  config-new <package> [options]   Write human-editable mod JSON config",
+    "  import <package> [options]       Pre-extract package into library and write mod JSON",
+    "  profile-json <name> [game-root]  Write human-editable profile JSON",
+    "  profile-add <profile> <mod.json> Add mod config to profile JSON",
+    "  profile-show <profile> [--game]  Show enabled mods and load order",
+    "  profile-enable <profile> <mod>   Enable a profile mod",
+    "  profile-disable <profile> <mod>  Disable a profile mod",
+    "  profile-order <profile> <mod> N  Set profile load order",
+    "  profile-remove <profile> <mod>   Remove a mod from a profile",
+    "  prepare-run [profile] [--game]   Materialize a profile (default: active) into the game folder",
+    "  cleanup-run <journal> [--game]   Remove temporary materialized files",
+    "  extract-stage <package> [options] Extract package into managed staging only",
+    "  rollback <journal> [--game path] Restore a recorded install transaction",
+    "  recover [game-root]              Roll back an interrupted permanent install",
+];
+
 fn print_command_usage() {
     println!("Commands:");
-    println!("  ui [game-root]                   Open the desktop manager UI");
-    println!("  config-init                      Write an example user config (paths + detection rules)");
-    println!("  game [game-root]                 Inspect installed GTA SA mod infrastructure");
-    println!("  init [game-root]                 Create manager state folders");
-    println!("  profiles [game-root]             List profiles");
-    println!("  profile-new <name> [game-root]   Create a profile manifest");
-    println!("  profile-use <name> [--game path] Set the active profile");
-    println!("  profile-copy <src> <dest>        Copy a profile to a new name");
-    println!("  profile-rename <old> <new>       Rename a profile");
-    println!("  profile-delete <name>            Delete a profile");
-    println!("  profile-args [--game p] <name> ..  Set profile launch arguments");
-    println!("  profile-root <name> <mod> <src> on|off  Toggle a mod's install root for a profile");
-    println!("  scan [mod-root ...]              Inventory archives and folders");
-    println!(
-        "  analyze <archive-or-folder>      Detect install roots, options, risks, and compatibility hints"
-    );
-    println!("  dry-install <package> [options]  Build a no-write install plan");
-    println!("  install <package> --permanent    Apply plan with backups and a journal");
-    println!("  config-new <package> [options]   Write human-editable mod JSON config");
-    println!(
-        "  import <package> [options]       Pre-extract package into library and write mod JSON"
-    );
-    println!("  profile-json <name> [game-root]  Write human-editable profile JSON");
-    println!("  profile-add <profile> <mod.json> Add mod config to profile JSON");
-    println!("  profile-show <profile> [--game]  Show enabled mods and load order");
-    println!("  profile-enable <profile> <mod>   Enable a profile mod");
-    println!("  profile-disable <profile> <mod>  Disable a profile mod");
-    println!("  profile-order <profile> <mod> N  Set profile load order");
-    println!("  profile-remove <profile> <mod>   Remove a mod from a profile");
-    println!("  prepare-run [profile] [--game]   Materialize a profile (default: active) into the game folder");
-    println!("  cleanup-run <journal> [--game]   Remove temporary materialized files");
-    println!("  extract-stage <package> [options] Extract package into managed staging only");
-    println!("  rollback <journal> [--game path] Restore a recorded install transaction");
-    println!("  recover [game-root]              Roll back an interrupted permanent install");
+    for line in COMMAND_USAGE_LINES {
+        println!("{line}");
+    }
     println!();
+}
+
+/// Help for a single command: its synopsis plus the option groups that apply.
+/// Falls back to a pointer to full help when the command is unknown.
+fn print_command_help(command: &str) {
+    println!("sa-mod-manager {command}");
+    println!();
+    let matches: Vec<&&str> = COMMAND_USAGE_LINES
+        .iter()
+        .filter(|line| command_line_name(line) == command)
+        .collect();
+    if matches.is_empty() {
+        println!("Unknown command `{command}`. Run `sa-mod-manager help` for all commands.");
+        return;
+    }
+    for line in matches {
+        println!("{line}");
+    }
+    println!();
+    print_plan_option_usage();
+    print_global_option_usage();
+}
+
+/// The command token a usage line describes (first word after the indent).
+fn command_line_name(line: &str) -> &str {
+    line.split_whitespace().next().unwrap_or("")
 }
 
 fn print_plan_option_usage() {

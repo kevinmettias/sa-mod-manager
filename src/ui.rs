@@ -1,4 +1,5 @@
 mod actions;
+mod preferences;
 mod san_andreas_mod_ui;
 mod state;
 mod views;

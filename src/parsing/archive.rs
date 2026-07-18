@@ -1,6 +1,8 @@
 use crate::prelude::*;
 use std::io::Read;
 use std::process::Stdio;
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
 pub(crate) fn extract_archive_to_named_staging(
     package: &Path,
@@ -185,36 +187,51 @@ fn zip_entry_error(package: &Path, err: &zip::result::ZipError) -> AppError {
 /// so an archive-in-archive cannot multiply past these limits.
 const MAX_EXTRACT_BYTES: u64 = 16 * 1024 * 1024 * 1024;
 const MAX_EXTRACT_ENTRIES: usize = 500_000;
+/// Cap on concurrent zip-extraction workers; disk I/O saturates before high
+/// thread counts, so we stay modest.
+const MAX_EXTRACT_WORKERS: usize = 8;
 const MAX_NESTED_DEPTH: usize = 3;
 const NESTED_ARCHIVE_EXTENSIONS: [&str; 3] = ["zip", "7z", "rar"];
 
+/// Atomic so it can be shared (`&self`) across parallel extraction workers; the
+/// cap is enforced globally even though per-entry byte limits read approximately.
 struct ExtractBudget {
-    remaining_bytes: u64,
-    remaining_entries: usize,
+    remaining_bytes: AtomicU64,
+    remaining_entries: AtomicUsize,
 }
 
 impl ExtractBudget {
     fn new() -> Self {
+        Self::with_limits(MAX_EXTRACT_BYTES, MAX_EXTRACT_ENTRIES)
+    }
+
+    fn with_limits(bytes: u64, entries: usize) -> Self {
         Self {
-            remaining_bytes: MAX_EXTRACT_BYTES,
-            remaining_entries: MAX_EXTRACT_ENTRIES,
+            remaining_bytes: AtomicU64::new(bytes),
+            remaining_entries: AtomicUsize::new(entries),
         }
     }
 
-    fn take_entry(&mut self, package: &Path) -> Result<(), AppError> {
-        self.remaining_entries = self
-            .remaining_entries
-            .checked_sub(1)
-            .ok_or_else(|| too_many_entries_error(package))?;
-        Ok(())
+    fn take_entry(&self, package: &Path) -> Result<(), AppError> {
+        self.remaining_entries
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |value| {
+                value.checked_sub(1)
+            })
+            .map(|_| ())
+            .map_err(|_| too_many_entries_error(package))
     }
 
-    fn take_bytes(&mut self, count: u64, package: &Path) -> Result<(), AppError> {
-        self.remaining_bytes = self
-            .remaining_bytes
-            .checked_sub(count)
-            .ok_or_else(|| archive_too_large_error(package))?;
-        Ok(())
+    fn take_bytes(&self, count: u64, package: &Path) -> Result<(), AppError> {
+        self.remaining_bytes
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |value| {
+                value.checked_sub(count)
+            })
+            .map(|_| ())
+            .map_err(|_| archive_too_large_error(package))
+    }
+
+    fn remaining_bytes(&self) -> u64 {
+        self.remaining_bytes.load(Ordering::Relaxed)
     }
 }
 
@@ -274,42 +291,132 @@ fn seven_zip_missing_message(package: &str) -> String {
 fn extract_zip_to_directory(
     package: &Path,
     target: &Path,
-    budget: &mut ExtractBudget,
+    budget: &ExtractBudget,
 ) -> Result<(), AppError> {
     fs::create_dir_all(target)?;
-    let file = fs::File::open(package)?;
-    let mut archive = zip::ZipArchive::new(file).map_err(|err| {
-        AppError::Tool(format!("failed to read zip {}: {err}", package.display()))
-    })?;
-    for idx in 0..archive.len() {
-        budget.take_entry(package)?;
-        let mut entry = archive
-            .by_index(idx)
-            .map_err(|err| zip_entry_error(package, &err))?;
-        let Some(enclosed) = entry.enclosed_name() else {
-            continue;
-        };
-        // Skip symlink entries: materializing one would let a later entry write
-        // through the link to a path outside the extraction target (zip-slip).
-        if is_symlink_mode(entry.unix_mode()) {
-            continue;
+    let count = open_zip(package)?.len();
+
+    let workers = extraction_worker_count(count);
+    if workers <= 1 {
+        let mut archive = open_zip(package)?;
+        for idx in 0..count {
+            extract_zip_entry(&mut archive, idx, package, target, budget)?;
         }
-        let dest = target.join(enclosed);
-        if entry.is_dir() {
-            fs::create_dir_all(dest)?;
-            continue;
-        }
-        if let Some(parent) = dest.parent() {
-            fs::create_dir_all(parent)?;
-        }
-        let mut out = fs::File::create(dest)?;
-        // Bound the *actual* decompressed bytes (not the header-declared size) so a
-        // zip bomb cannot exhaust the disk: read at most one byte past the budget,
-        // then charge what was written, which fails once the limit is crossed.
-        let limit = budget.remaining_bytes.saturating_add(1);
-        let written = io::copy(&mut entry.by_ref().take(limit), &mut out)?;
-        budget.take_bytes(written, package)?;
+        return Ok(());
     }
+
+    // Each worker opens its own archive handle (`ZipArchive` isn't `Sync`) and
+    // pulls entry indices from a shared atomic dispenser. deflate decompression
+    // is CPU-bound, so this scales extraction across cores.
+    let next = AtomicUsize::new(0);
+    let first_error: Mutex<Option<AppError>> = Mutex::new(None);
+    std::thread::scope(|scope| {
+        for _ in 0..workers {
+            scope.spawn(|| {
+                extract_zip_worker(package, target, budget, count, &next, &first_error);
+            });
+        }
+    });
+    match first_error
+        .into_inner()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+    {
+        Some(err) => Err(err),
+        None => Ok(()),
+    }
+}
+
+fn open_zip(package: &Path) -> Result<zip::ZipArchive<fs::File>, AppError> {
+    let file = fs::File::open(package)?;
+    zip::ZipArchive::new(file)
+        .map_err(|err| AppError::Tool(format!("failed to read zip {}: {err}", package.display())))
+}
+
+fn extraction_worker_count(entry_count: usize) -> usize {
+    if entry_count <= 1 {
+        return 1;
+    }
+    let cpus = std::thread::available_parallelism()
+        .map(|count| count.get())
+        .unwrap_or(1);
+    cpus.clamp(1, MAX_EXTRACT_WORKERS).min(entry_count)
+}
+
+fn extract_zip_worker(
+    package: &Path,
+    target: &Path,
+    budget: &ExtractBudget,
+    count: usize,
+    next: &AtomicUsize,
+    first_error: &Mutex<Option<AppError>>,
+) {
+    let mut archive = match open_zip(package) {
+        Ok(archive) => archive,
+        Err(err) => {
+            record_first_error(first_error, err);
+            return;
+        }
+    };
+    loop {
+        if first_error
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .is_some()
+        {
+            break;
+        }
+        let idx = next.fetch_add(1, Ordering::Relaxed);
+        if idx >= count {
+            break;
+        }
+        if let Err(err) = extract_zip_entry(&mut archive, idx, package, target, budget) {
+            record_first_error(first_error, err);
+            break;
+        }
+    }
+}
+
+fn record_first_error(slot: &Mutex<Option<AppError>>, err: AppError) {
+    let mut guard = slot.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    if guard.is_none() {
+        *guard = Some(err);
+    }
+}
+
+fn extract_zip_entry(
+    archive: &mut zip::ZipArchive<fs::File>,
+    idx: usize,
+    package: &Path,
+    target: &Path,
+    budget: &ExtractBudget,
+) -> Result<(), AppError> {
+    budget.take_entry(package)?;
+    let mut entry = archive
+        .by_index(idx)
+        .map_err(|err| zip_entry_error(package, &err))?;
+    let Some(enclosed) = entry.enclosed_name() else {
+        return Ok(());
+    };
+    // Skip symlink entries: materializing one would let a later entry write
+    // through the link to a path outside the extraction target (zip-slip).
+    if is_symlink_mode(entry.unix_mode()) {
+        return Ok(());
+    }
+    let dest = target.join(enclosed);
+    if entry.is_dir() {
+        fs::create_dir_all(dest)?;
+        return Ok(());
+    }
+    if let Some(parent) = dest.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let mut out = fs::File::create(dest)?;
+    // Bound the *actual* decompressed bytes (not the header-declared size) so a
+    // zip bomb cannot exhaust the disk: read at most one byte past the budget,
+    // then charge what was written, which fails once the limit is crossed.
+    let limit = budget.remaining_bytes().saturating_add(1);
+    let written = io::copy(&mut entry.by_ref().take(limit), &mut out)?;
+    budget.take_bytes(written, package)?;
     Ok(())
 }
 
@@ -446,11 +553,8 @@ mod tests {
         let payload = "x".repeat(64);
         write_zip_package(&package, &[("data/file.bin", payload.as_str())]);
 
-        let mut budget = ExtractBudget {
-            remaining_bytes: 16,
-            remaining_entries: 100,
-        };
-        let err = extract_zip_to_directory(&package, &root.join("out"), &mut budget)
+        let budget = ExtractBudget::with_limits(16, 100);
+        let err = extract_zip_to_directory(&package, &root.join("out"), &budget)
             .unwrap_err()
             .to_string();
 
@@ -464,11 +568,8 @@ mod tests {
         let package = root.join("many.zip");
         write_zip_package(&package, &[("a.txt", "a"), ("b.txt", "b")]);
 
-        let mut budget = ExtractBudget {
-            remaining_bytes: 1 << 20,
-            remaining_entries: 1,
-        };
-        let err = extract_zip_to_directory(&package, &root.join("out"), &mut budget)
+        let budget = ExtractBudget::with_limits(1 << 20, 1);
+        let err = extract_zip_to_directory(&package, &root.join("out"), &budget)
             .unwrap_err()
             .to_string();
 
@@ -542,6 +643,36 @@ mod tests {
         assert!(message.contains(".zip and .wrap"));
         assert!(message.contains(".7z and .rar"));
         assert!(message.contains("SA_MOD_MANAGER_7Z"));
+    }
+
+    #[test]
+    fn parallel_zip_extraction_extracts_every_file_correctly() {
+        let root = test_root("zip_parallel");
+        let package = root.join("many.zip");
+        // Enough files across nested dirs to fan out over multiple workers.
+        let entries: Vec<(String, String)> = (0..40)
+            .map(|idx| {
+                let name = if idx % 3 == 0 {
+                    format!("data/file-{idx:02}.txt")
+                } else {
+                    format!("cleo/nested/file-{idx:02}.txt")
+                };
+                (name, format!("payload-{idx}"))
+            })
+            .collect();
+        let entry_refs: Vec<(&str, &str)> = entries
+            .iter()
+            .map(|(name, content)| (name.as_str(), content.as_str()))
+            .collect();
+        write_zip_package(&package, &entry_refs);
+
+        let target = root.join("out");
+        extract_archive_to_directory(&package, &target).unwrap();
+
+        for (name, content) in &entries {
+            assert_eq!(fs::read_to_string(target.join(name)).unwrap(), *content);
+        }
+        remove_dir_if_exists(&root).unwrap();
     }
 
     fn write_zip_package(path: &Path, entries: &[(&str, &str)]) {

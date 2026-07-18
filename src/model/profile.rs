@@ -6,4 +6,4 @@ mod mod_entry;
 pub(crate) use command_options::CommandOptions;
 pub(crate) use json::Json as ProfileJson;
 pub(crate) use mod_activation::ModActivation as ProfileModActivation;
-pub(crate) use mod_entry::ModEntry as ProfileModEntry;
+pub(crate) use mod_entry::{ModEntry as ProfileModEntry, RootOverride as ProfileRootOverride};

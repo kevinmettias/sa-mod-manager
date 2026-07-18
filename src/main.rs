@@ -29,9 +29,9 @@ mod prelude {
         EntryClassificationState, InstallApplyState, InstallCandidate, InstallOperation,
         InstallPlan, ManifestInstallRoot, ModConfigJson, ModInstallRootJson, PackageEntry,
         PackageKind, PackageRef, PackageReport, PackageSummary, PlanBuildCollections,
-        PlanBuildContext, ProfileJson, ProfileModActivation, ProfileModEntry, ReadmeAction,
-        ReadmeDocument, ReadmeInsight, ReadmeInsightKind, ReadmeInstruction, RunApplyState,
-        RunInstallContext, TargetKind,
+        PlanBuildContext, ProfileJson, ProfileModActivation, ProfileModEntry, ProfileRootOverride,
+        ReadmeAction, ReadmeDocument, ReadmeInsight, ReadmeInsightKind, ReadmeInstruction,
+        RunApplyState, RunInstallContext, TargetKind,
     };
     pub(crate) use crate::parsing::{
         backup_relative_for_destination, classify_component, classify_context, classify_risk,
@@ -57,7 +57,8 @@ mod prelude {
         import_package, init_state, inspect_game, list_profiles, load_profile_for_edit,
         profile_launch_settings, read_active_profile, remove_mod_from_profile_json, rename_profile,
         scan_roots, set_active_profile, set_profile_launch_args, set_profile_mod_activation,
-        set_profile_mod_order, set_profile_root_override, show_profile_json, target_template,
+        set_profile_mod_order, set_profile_root_override, set_profile_root_target, show_profile_json,
+        target_template,
         update_mod_config_install_root, write_mod_config_json, write_mod_config_json_with_source,
         write_profile_json, write_profile_json_file,
     };
