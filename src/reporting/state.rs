@@ -4,6 +4,11 @@ pub(crate) fn state_directory(game_root: &Path) -> PathBuf {
     game_root.join(".sa-mod-manager") // literal: allow external interface text or file-format spelling
 }
 
+/// Generous upper bound for a single manager-written control file (a profile,
+/// mod, or import manifest — all small JSON). Anything larger is corrupt or
+/// hostile and is refused before it is parsed.
+pub(crate) const MAX_CONTROL_FILE_BYTES: u64 = 4 * 1024 * 1024;
+
 /// Read a control file (journal, manifest, config) into a string, refusing any
 /// input larger than `max_bytes`. Manager-written control files are small; a
 /// file bigger than the cap is corrupt or hostile, and reading it whole would
@@ -82,6 +87,28 @@ pub(crate) fn safe_name(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn read_capped_accepts_up_to_the_limit_and_refuses_beyond_it() {
+        let dir = env::temp_dir().join(format!(
+            "sa-mod-manager-readcap-{}-{}",
+            std::process::id(),
+            unix_now()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("control.txt");
+
+        // A file exactly at the limit is read in full.
+        fs::write(&path, b"12345").unwrap();
+        assert_eq!(read_capped(&path, 5).unwrap(), "12345");
+
+        // One byte over the limit is refused rather than slurped.
+        fs::write(&path, b"123456").unwrap();
+        let err = read_capped(&path, 5).unwrap_err().to_string();
+        assert!(err.contains("limit"), "{err}");
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
 
     #[test]
     fn safe_profile_name_warns_only_when_it_rewrites() {

@@ -242,7 +242,9 @@ fn active_profile_path(game_root: &Path) -> PathBuf {
 /// has been chosen. Infallible: a missing or unreadable marker falls back to
 /// `default`.
 pub(crate) fn read_active_profile(game_root: &Path) -> String {
-    match fs::read_to_string(active_profile_path(game_root)) {
+    // The marker holds only a profile name; cap the read so a corrupt/oversized
+    // marker falls back to `default` instead of being slurped whole.
+    match read_capped(&active_profile_path(game_root), 64 * 1024) {
         Ok(text) => {
             let name = text.trim();
             if name.is_empty() {

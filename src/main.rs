@@ -12,9 +12,12 @@ mod workspace;
 
 mod prelude {
     pub(crate) use crate::cli::usage_error;
-    pub(crate) use crate::constants::{builtin_component_rules, builtin_context_rules};
+    pub(crate) use crate::constants::{
+        builtin_component_rules, builtin_context_rules, has_cleo_script_extension,
+        CLEO_SCRIPT_EXTENSIONS,
+    };
     pub(crate) use crate::game_launch::{
-        ensure_gta_install, game_executable_path, launch_game_executable,
+        ensure_gta_install, game_executable_path, launch_external_tool, launch_game_executable,
     };
     pub(crate) use crate::logging::{log_debug, log_error, log_info, log_warn};
     pub(crate) use crate::settings::{
@@ -35,13 +38,16 @@ mod prelude {
         backup_relative_for_destination, classify_component, classify_context, classify_risk,
         collect_files_recursive, copy_tree_contents, detect_install_candidate, detect_option_group,
         ensure_destination_allowed, extract_archive_to_directory, extract_archive_to_named_staging,
-        list_archive_entries_native, list_archive_failed_error, missing_7zip_error_for_package,
-        path_from_package_root, read_mod_config_json, read_package_text_file, read_profile_json,
-        write_package_manifest,
+        list_archive_entries_native, list_archive_failed_error_detail,
+        missing_7zip_error_for_package, path_from_package_root, read_mod_config_json,
+        read_package_text_file, read_profile_json, write_package_manifest,
     };
     pub(crate) use crate::planning::{
-        RUN_RESULT_GAME_ERROR, RUN_RESULT_LAUNCH_FAILED, RUN_RESULT_SUCCESS, RunOutcome,
-        analyze_package, apply_install_plan, build_install_plan, interrupted_install,
+        ContentCategory, ContentEntry, ContentIndex, IndexedMod, ModLoaderLogSummary,
+        ModLoaderPriorities, RUN_RESULT_GAME_ERROR, RUN_RESULT_LAUNCH_FAILED, RUN_RESULT_SUCCESS,
+        RunOutcome, analyze_package, apply_install_plan, asi_view, build_content_index,
+        build_install_plan, cleo_view, effective_install_roots, group_entries, interrupted_install,
+        modloader_conflicts, per_mod_flags, read_modloader_log, read_modloader_priorities,
         materialize_profile_for_run, prepare_run, print_install_plan, read_run_outcome_for_journal,
         recover_interrupted_install, rollback_journal, sort_operations_for_apply, txid_from_journal,
         write_run_outcome,
@@ -49,12 +55,14 @@ mod prelude {
     pub(crate) use crate::reporting::{
         escape_value, extension_eq, extract_to_staging, file_name, find_seven_zip, human_bytes,
         human_datetime,
-        is_readme_name, json_escape, list_matching, normalize_path, package_id, print_report,
-        read_capped, safe_name, safe_profile_name, state_directory, unescape_value, unix_now,
+        MAX_CONTROL_FILE_BYTES, is_readme_name, json_escape, list_matching, normalize_path,
+        package_id, print_report, read_capped, safe_name, safe_profile_name, state_directory,
+        unescape_value, unix_now,
     };
     pub(crate) use crate::workspace::{
-        add_mod_to_profile_json, copy_profile, create_profile, delete_profile, ensure_state,
-        import_package, init_state, inspect_game, list_profiles, load_profile_for_edit,
+        Executable, add_mod_to_profile_json, copy_profile, create_profile, delete_profile,
+        ensure_state, import_package, init_state, inspect_game, list_profiles,
+        load_profile_for_edit, read_executables, write_executables,
         profile_launch_settings, read_active_profile, read_import_manifest,
         remove_mod_from_profile_json, rename_profile,
         scan_roots, set_active_profile, set_all_profile_mods, set_profile_launch_args,

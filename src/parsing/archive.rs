@@ -86,7 +86,7 @@ fn seven_zip_preflight(
         .arg("-slt") // literal: allow external interface text or file-format spelling
         .arg(package)
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        .stderr(Stdio::piped())
         .spawn()?;
 
     let mut declared_bytes: u64 = 0;
@@ -106,6 +106,9 @@ fn seven_zip_preflight(
             }
             if let Some(value) = strip_listing_key(&line, "Path = ") {
                 declared_entries = declared_entries.saturating_add(1);
+                if declared_entries > budget.remaining_entries() {
+                    return Err(too_many_entries_error(package));
+                }
                 ensure_contained_entry(value.trim(), package)?;
             } else if let Some(value) = strip_listing_key(&line, "Size = ")
                 && let Ok(size) = value.trim().parse::<u64>()
@@ -114,8 +117,9 @@ fn seven_zip_preflight(
             }
         }
     }
-    if !child.wait()?.success() {
-        return Err(list_archive_failed_error(package));
+    let output = child.wait_with_output()?;
+    if !output.status.success() {
+        return Err(list_archive_failed_error_detail(package, &output.stderr));
     }
 
     if declared_entries > budget.remaining_entries() {
@@ -205,6 +209,11 @@ pub(crate) fn list_archive_entries_native(
     let mut archive = zip::ZipArchive::new(file).map_err(|err| {
         AppError::Tool(format!("failed to read zip {}: {err}", package.display()))
     })?;
+    // A zip central directory can claim any number of entries; bound how many we
+    // enumerate so a hostile archive cannot grow this vector without limit.
+    if archive.len() > MAX_EXTRACT_ENTRIES {
+        return Err(too_many_entries_error(package));
+    }
     let mut entries = Vec::new();
     for idx in 0..archive.len() {
         let file = archive
@@ -242,9 +251,15 @@ pub(crate) fn missing_7zip_error_for_package(package: &Path) -> AppError {
     AppError::Tool(seven_zip_missing_message(&package.display().to_string()))
 }
 
-pub(crate) fn list_archive_failed_error(package: &Path) -> AppError {
-    let message = format!("7-Zip failed to list {}", package.display());
-    AppError::Tool(message)
+/// Build a "7-Zip failed to list" error, keeping 7-Zip's own reason (from its
+/// stderr) so a corrupt archive is diagnosable instead of collapsing to a
+/// generic line. Pass an empty slice when no stderr was captured.
+pub(crate) fn list_archive_failed_error_detail(package: &Path, stderr: &[u8]) -> AppError {
+    AppError::Tool(format!(
+        "7-Zip failed to list {}{}",
+        package.display(),
+        stderr_snippet(&String::from_utf8_lossy(stderr))
+    ))
 }
 
 pub(crate) fn copy_tree_contents(source: &Path, target: &Path) -> Result<(), AppError> {

@@ -1,11 +1,23 @@
 use crate::prelude::*;
 
-use super::copy_journal::{apply_copy_tree_with_journal, sync_journal};
+use super::content::{
+    modloader_active_profile, modloader_folder_from_target, modloader_managed_profile_name,
+    modloader_priority_limit, render_modloader_managed_profile, spread_priority,
+};
+use super::copy_journal::{
+    apply_copy_tree_with_journal, apply_generated_file_with_journal, sync_journal,
+};
 use super::rollback::rollback_journal;
 
 pub(crate) fn prepare_run(game_root: &Path, profile_name: &str) -> Result<(), AppError> {
-    let (launch_args, launch_env) = profile_launch_settings(game_root, profile_name)?;
+    let (mut launch_args, launch_env) = profile_launch_settings(game_root, profile_name)?;
     let journal_path = materialize_profile_for_run(game_root, profile_name)?;
+    // Activate the manager-owned ModLoader profile written during materialize so
+    // ModLoader applies this profile's per-folder priority natively for the run.
+    if let Some(managed) = modloader_run_profile(game_root, profile_name) {
+        launch_args.push("-modprof".to_string());
+        launch_args.push(managed);
+    }
     let started_unix = unix_now();
     let status_result = launch_game_and_wait(game_root, &launch_args, &launch_env);
     // Record how the launch actually went before rolling the run back, so a
@@ -106,6 +118,26 @@ pub(crate) fn materialize_profile_for_run(
         &mut journal,
     );
     if let Err(err) = materialize_result {
+        return Err(rollback_failed_materialization(
+            game_root,
+            &run_state.journal_path,
+            journal,
+            err,
+        ));
+    }
+
+    // Reflect the profile's load order into ModLoader's own per-folder priority,
+    // so the order the user set actually governs which mod wins at runtime — for
+    // sandboxed modloader mods, copy order into distinct folders decides nothing.
+    // Journaled like any other write, so an ephemeral run's rollback restores the
+    // prior modloader.ini.
+    if let Err(err) = write_modloader_priorities_for_run(
+        &profile.mods,
+        profile_name,
+        game_root,
+        &run_state.backup_root,
+        &mut journal,
+    ) {
         return Err(rollback_failed_materialization(
             game_root,
             &run_state.journal_path,
@@ -354,6 +386,146 @@ fn write_missing_source(journal: &mut fs::File, source_abs: &Path) -> Result<(),
         escape_value(&source_abs.display().to_string())
     )?;
     Ok(())
+}
+
+/// Express the profile's load order as a native ModLoader profile in
+/// `modloader/modloader.ini`, so ModLoader's own per-folder priority — the thing
+/// that actually decides which sandboxed mod wins a shared asset — matches the
+/// order the user set. Written into a manager-owned `SAMM_<profile>` profile
+/// (inheriting the user's `Default`) and activated per launch with `-modprof`, so
+/// the user's own ModLoader config is never disturbed. A no-op when the profile
+/// has no modloader-sandboxed mods or the file already reflects the same order.
+fn write_modloader_priorities_for_run(
+    entries: &[ProfileModEntry],
+    profile_name: &str,
+    game_root: &Path,
+    backup_root: &Path,
+    journal: &mut fs::File,
+) -> Result<(), AppError> {
+    let ini_path = game_root.join("modloader").join("modloader.ini");
+    let existing = read_capped(&ini_path, MAX_CONTROL_FILE_BYTES).ok();
+    let existing_ref = existing.as_deref().unwrap_or("");
+    let limit = modloader_priority_limit(existing_ref);
+
+    let folder_priorities = modloader_folder_priorities(entries, limit)?;
+    if folder_priorities.is_empty() {
+        return Ok(());
+    }
+    // Disabled modloader mods still sitting in `modloader/` (a persistent install)
+    // are expressed as IgnoreMods so ModLoader skips them; never ignore a folder an
+    // enabled mod is actively using.
+    let ignore_folders = disabled_modloader_folders(game_root, profile_name, &folder_priorities)?;
+    let managed = modloader_managed_profile_name(profile_name);
+    // Inherit the user's own active profile so their hand-set priorities and
+    // ignore lists still apply; our section only layers the managed mods on top.
+    let parent = modloader_active_profile(existing_ref);
+    let Some(rendered) = render_modloader_managed_profile(
+        existing.as_deref(),
+        &managed,
+        &parent,
+        limit,
+        &folder_priorities,
+        &ignore_folders,
+    ) else {
+        return Ok(());
+    };
+    let mut context = CopyJournalContext {
+        game_root,
+        backup_root,
+        journal,
+    };
+    apply_generated_file_with_journal(&rendered, &ini_path, &mut context)
+}
+
+/// The `-modprof` profile name to activate for this run, or `None` when no
+/// managed profile is present to activate. Decided by the just-written
+/// `modloader.ini` itself — the presence of our `[Profiles.<name>.Priority]`
+/// section is exactly the condition for activating it — so the launch argument
+/// can never disagree with what was written, and an unreadable/absent ini simply
+/// means "don't pass -modprof" (a no-op for the game either way).
+fn modloader_run_profile(game_root: &Path, profile_name: &str) -> Option<String> {
+    let managed = modloader_managed_profile_name(profile_name);
+    let ini_path = game_root.join("modloader").join("modloader.ini");
+    let has_section = read_capped(&ini_path, MAX_CONTROL_FILE_BYTES)
+        .map(|text| text.contains(&format!("[Profiles.{managed}.Priority]")))
+        .unwrap_or(false);
+    has_section.then_some(managed)
+}
+
+/// Assign each modloader-sandboxed mod a ModLoader priority from its rank in the
+/// (already load-order-sorted) profile: later mods get higher priority so they
+/// win, matching how later mods overwrite in the manager's own materialize order.
+/// Mods with no `modloader/<folder>` target contribute nothing.
+fn modloader_folder_priorities(
+    entries: &[ProfileModEntry],
+    limit: i32,
+) -> Result<BTreeMap<String, i32>, AppError> {
+    let mut mods_folders: Vec<BTreeSet<String>> = Vec::new();
+    for entry in entries {
+        let config = read_mod_config_json(&entry.config)?;
+        if !config.enabled {
+            continue;
+        }
+        let folders = modloader_folders_of(&config, &entry.root_overrides);
+        if !folders.is_empty() {
+            mods_folders.push(folders);
+        }
+    }
+
+    let count = mods_folders.len();
+    let mut folder_priorities = BTreeMap::new();
+    for (rank, folders) in mods_folders.iter().enumerate() {
+        let priority = spread_priority(rank, count, limit);
+        for folder in folders {
+            folder_priorities.insert(folder.clone(), priority);
+        }
+    }
+    Ok(folder_priorities)
+}
+
+/// The `modloader/<folder>` sandbox folders a mod config installs into, after the
+/// profile's per-root overrides are applied.
+fn modloader_folders_of(
+    config: &ModConfigJson,
+    overrides: &BTreeMap<String, ProfileRootOverride>,
+) -> BTreeSet<String> {
+    let roots = enabled_install_roots(config.install_roots.clone(), overrides);
+    roots
+        .iter()
+        .filter_map(|root| modloader_folder_from_target(&root.target))
+        .collect()
+}
+
+/// Folders of modloader mods the profile has **disabled**, so ModLoader can be
+/// told to ignore them even when they persist on disk. Excludes any folder an
+/// enabled mod uses, so a shared folder is never ignored out from under an active
+/// mod. Reads the full (unfiltered) profile; a disabled entry whose config is
+/// missing or unreadable is skipped rather than failing the run.
+fn disabled_modloader_folders(
+    game_root: &Path,
+    profile_name: &str,
+    enabled_priorities: &BTreeMap<String, i32>,
+) -> Result<Vec<String>, AppError> {
+    let profile_path = state_directory(game_root)
+        .join("profiles")
+        .join(format!("{profile_name}.json"));
+    let profile = read_profile_json(&profile_path)?;
+    let enabled: BTreeSet<String> = enabled_priorities.keys().cloned().collect();
+    let mut ignore: BTreeSet<String> = BTreeSet::new();
+    for entry in &profile.mods {
+        if entry.enabled {
+            continue;
+        }
+        let Ok(config) = read_mod_config_json(&entry.config) else {
+            continue;
+        };
+        for folder in modloader_folders_of(&config, &entry.root_overrides) {
+            if !enabled.contains(&folder) {
+                ignore.insert(folder);
+            }
+        }
+    }
+    Ok(ignore.into_iter().collect())
 }
 
 #[cfg(test)]
@@ -645,6 +817,147 @@ mod tests {
             .to_string();
 
         assert!(err.contains("references missing mod config"));
+        remove_dir_if_exists(&game_root).unwrap();
+    }
+
+    #[test]
+    fn materialize_writes_modloader_priorities_from_load_order() {
+        let game_root = test_root("materialize_ml_priorities");
+        let early_source = game_root.join("sources").join("early");
+        let late_source = game_root.join("sources").join("late");
+        let early_config = game_root
+            .join(".sa-mod-manager")
+            .join("mods")
+            .join("early")
+            .join("mod.json");
+        let late_config = game_root
+            .join(".sa-mod-manager")
+            .join("mods")
+            .join("late")
+            .join("mod.json");
+        fs::create_dir_all(early_source.join("payload")).unwrap();
+        fs::create_dir_all(late_source.join("payload")).unwrap();
+        fs::write(early_source.join("payload").join("a.dff"), "e").unwrap();
+        fs::write(late_source.join("payload").join("b.dff"), "l").unwrap();
+
+        ensure_state(&game_root).unwrap();
+        // Each mod is sandboxed in its own modloader/<folder>; on disk they never
+        // collide, so only the written priority can order them.
+        write_test_mod_config(
+            &early_config,
+            "early",
+            &early_source,
+            "payload",
+            "modloader/early_mod",
+        );
+        write_test_mod_config(
+            &late_config,
+            "late",
+            &late_source,
+            "payload",
+            "modloader/late_mod",
+        );
+        write_profile_entries(
+            &game_root,
+            &[
+                test_profile_entry("late", true, 200, &late_config),
+                test_profile_entry("early", true, 100, &early_config),
+            ],
+        );
+
+        let journal = materialize_profile_for_run(&game_root, "default").unwrap();
+
+        let ini =
+            fs::read_to_string(game_root.join("modloader").join("modloader.ini")).unwrap();
+        // Later load order -> higher ModLoader priority (wins at runtime).
+        let priorities = crate::planning::read_modloader_priorities(&game_root).unwrap();
+        assert!(
+            priorities.for_folder("late_mod") > priorities.for_folder("early_mod"),
+            "later mod must get higher ModLoader priority; ini was:\n{ini}"
+        );
+        // Written into a manager-owned native profile that inherits Default.
+        assert!(ini.contains("[Profiles.SAMM_default.Priority]"), "ini was:\n{ini}");
+        assert!(ini.contains("[Profiles.SAMM_default.Config]"), "ini was:\n{ini}");
+        assert!(ini.contains("Parents = Default"), "ini was:\n{ini}");
+        // That profile is what the run activates via -modprof.
+        assert_eq!(
+            modloader_run_profile(&game_root, "default").as_deref(),
+            Some("SAMM_default")
+        );
+        // The ini write is journaled, so an ephemeral run's rollback restores it.
+        let journal_text = fs::read_to_string(&journal).unwrap();
+        assert!(
+            journal_text.contains("modloader.ini"),
+            "ini write should be journaled for rollback"
+        );
+        remove_dir_if_exists(&game_root).unwrap();
+    }
+
+    #[test]
+    fn disabled_modloader_mod_is_written_as_ignoremods() {
+        let game_root = test_root("materialize_ignoremods");
+        let on_source = game_root.join("sources").join("on");
+        let off_source = game_root.join("sources").join("off");
+        let on_config = game_root
+            .join(".sa-mod-manager")
+            .join("mods")
+            .join("on")
+            .join("mod.json");
+        let off_config = game_root
+            .join(".sa-mod-manager")
+            .join("mods")
+            .join("off")
+            .join("mod.json");
+        fs::create_dir_all(on_source.join("payload")).unwrap();
+        fs::create_dir_all(off_source.join("payload")).unwrap();
+        fs::write(on_source.join("payload").join("a.dff"), "on").unwrap();
+        fs::write(off_source.join("payload").join("b.dff"), "off").unwrap();
+
+        ensure_state(&game_root).unwrap();
+        write_test_mod_config(&on_config, "on", &on_source, "payload", "modloader/on_mod");
+        write_test_mod_config(&off_config, "off", &off_source, "payload", "modloader/off_mod");
+        write_profile_entries(
+            &game_root,
+            &[
+                test_profile_entry("on", true, 100, &on_config),
+                // Disabled: its folder should be ignored, not materialized.
+                test_profile_entry("off", false, 200, &off_config),
+            ],
+        );
+
+        materialize_profile_for_run(&game_root, "default").unwrap();
+
+        let ini =
+            fs::read_to_string(game_root.join("modloader").join("modloader.ini")).unwrap();
+        assert!(ini.contains("[Profiles.SAMM_default.IgnoreMods]"), "ini was:\n{ini}");
+        assert!(ini.contains("off_mod"), "disabled folder should be ignored; ini was:\n{ini}");
+        // The disabled mod is never copied into the sandbox.
+        assert!(!game_root.join("modloader").join("off_mod").exists());
+        remove_dir_if_exists(&game_root).unwrap();
+    }
+
+    #[test]
+    fn no_modloader_mods_writes_no_profile_and_no_modprof() {
+        let game_root = test_root("materialize_no_ml");
+        let source = game_root.join("sources").join("cleo_only");
+        let config = game_root
+            .join(".sa-mod-manager")
+            .join("mods")
+            .join("cleo_only")
+            .join("mod.json");
+        fs::create_dir_all(source.join("payload")).unwrap();
+        fs::write(source.join("payload").join("script.cs"), "x").unwrap();
+
+        ensure_state(&game_root).unwrap();
+        // A CLEO-only mod targets CLEO/, never a modloader sandbox.
+        write_test_mod_config(&config, "cleo_only", &source, "payload", "CLEO");
+        write_profile_entries(&game_root, &[test_profile_entry("cleo_only", true, 100, &config)]);
+
+        materialize_profile_for_run(&game_root, "default").unwrap();
+
+        // No modloader mods -> no managed profile written, so nothing to activate.
+        assert!(!game_root.join("modloader").join("modloader.ini").exists());
+        assert_eq!(modloader_run_profile(&game_root, "default"), None);
         remove_dir_if_exists(&game_root).unwrap();
     }
 

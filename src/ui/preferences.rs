@@ -61,7 +61,7 @@ impl UiPreferences {
         let Some(path) = ui_state_path() else {
             return Self::default();
         };
-        let Ok(text) = fs::read_to_string(path) else {
+        let Ok(text) = read_capped(&path, MAX_CONTROL_FILE_BYTES) else {
             return Self::default();
         };
         serde_json::from_str(&text).unwrap_or_default()

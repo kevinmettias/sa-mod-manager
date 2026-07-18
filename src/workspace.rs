@@ -1,4 +1,8 @@
+mod cleo_deps;
+mod cleo_diagnostics;
+mod executables;
 mod game;
+mod game_version;
 mod import;
 mod membership;
 mod mod_config;
@@ -6,6 +10,7 @@ mod profiles;
 mod scan;
 mod state;
 
+pub(crate) use executables::{Executable, read_executables, write_executables};
 pub(crate) use game::inspect_game;
 pub(crate) use import::{import_package, read_import_manifest, target_template};
 pub(crate) use membership::{

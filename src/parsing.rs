@@ -7,8 +7,8 @@ mod path;
 
 pub(crate) use archive::{
     collect_files_recursive, copy_tree_contents, extract_archive_to_directory,
-    extract_archive_to_named_staging, list_archive_entries_native, list_archive_failed_error,
-    missing_7zip_error_for_package, read_package_text_file,
+    extract_archive_to_named_staging, list_archive_entries_native,
+    list_archive_failed_error_detail, missing_7zip_error_for_package, read_package_text_file,
 };
 pub(crate) use classify::{classify_component, classify_context, classify_risk};
 pub(crate) use config::{read_mod_config_json, read_profile_json};

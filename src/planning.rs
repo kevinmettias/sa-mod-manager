@@ -1,6 +1,7 @@
 mod analysis;
 mod apply;
 mod build;
+mod content;
 mod copy_journal;
 mod install_lock;
 mod print;
@@ -11,6 +12,12 @@ mod run_outcome;
 pub(crate) use analysis::analyze_package;
 pub(crate) use apply::apply_install_plan;
 pub(crate) use build::{build_install_plan, readme_copy_install_root, sort_operations_for_apply};
+pub(crate) use content::{
+    ContentCategory, ContentEntry, ContentIndex, IndexedMod, ModLoaderLogSummary,
+    ModLoaderPriorities, asi_view, build_content_index, cleo_view, effective_install_roots,
+    group_entries, modloader_conflicts, per_mod_flags, read_modloader_log,
+    read_modloader_priorities,
+};
 pub(crate) use install_lock::{interrupted_install, recover_interrupted_install};
 pub(crate) use print::print_install_plan;
 pub(crate) use rollback::rollback_journal;

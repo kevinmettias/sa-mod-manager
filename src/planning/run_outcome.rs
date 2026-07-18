@@ -73,7 +73,7 @@ pub(crate) fn read_run_outcome_for_journal(state_root: &Path, journal: &Path) ->
     if txid.is_empty() {
         return None;
     }
-    let text = fs::read_to_string(outcome_path(state_root, &txid)).ok()?;
+    let text = read_capped(&outcome_path(state_root, &txid), MAX_CONTROL_FILE_BYTES).ok()?;
     serde_json::from_str(&text).ok()
 }
 

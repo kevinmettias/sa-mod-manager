@@ -120,6 +120,10 @@ fn push_readme_operation(
 fn readme_target_kind(target: &str) -> TargetKind {
     match normalize_path(target).to_ascii_lowercase().as_str() {
         "cleo" => TargetKind::Cleo,
+        "cleo_text" | "cleo/cleo_text" => TargetKind::CleoText,
+        "cleo_plugins" | "cleo_plugin" | "cleo/cleo_plugins" => TargetKind::CleoPlugin,
+        "cleo_modules" | "cleo_module" | "cleo/cleo_modules" => TargetKind::CleoModules,
+        "cleo_saves" | "cleo_save" | "cleo/cleo_saves" => TargetKind::CleoSaves,
         "modloader" => TargetKind::ModLoader,
         "." => TargetKind::DirectManaged,
         _ => TargetKind::DirectManaged,
@@ -315,9 +319,15 @@ fn target_kind(candidate: &InstallCandidate) -> TargetKind {
     // literal: allow external interface text or file-format spelling
     {
         TargetKind::Bootstrap
-    } else if candidate.components.contains(&Component::Cleo)
-        || candidate.components.contains(&Component::CleoText)
-    {
+    } else if candidate.components.contains(&Component::CleoPlugin) {
+        TargetKind::CleoPlugin
+    } else if candidate.components.contains(&Component::CleoModules) {
+        TargetKind::CleoModules
+    } else if candidate.components.contains(&Component::CleoSaves) {
+        TargetKind::CleoSaves
+    } else if candidate.components.contains(&Component::CleoText) {
+        TargetKind::CleoText
+    } else if candidate.components.contains(&Component::Cleo) {
         TargetKind::Cleo
     } else if candidate.components.contains(&Component::Asi) {
         TargetKind::Asi
@@ -337,6 +347,10 @@ fn target_root_for(kind: &TargetKind, game_root: &Path, package_id: &str) -> Pat
             .join("modloader") // literal: allow external interface text or file-format spelling
             .join(crate::settings::modloader_folder_name(package_id)),
         TargetKind::Cleo => game_root.join("CLEO"), // literal: allow external interface text or file-format spelling
+        TargetKind::CleoText => game_root.join("CLEO").join("cleo_text"), // literal: allow external interface text or file-format spelling
+        TargetKind::CleoPlugin => game_root.join("CLEO").join("cleo_plugins"), // literal: allow external interface text or file-format spelling
+        TargetKind::CleoModules => game_root.join("CLEO").join("cleo_modules"), // literal: allow external interface text or file-format spelling
+        TargetKind::CleoSaves => game_root.join("CLEO").join("cleo_saves"), // literal: allow external interface text or file-format spelling
         TargetKind::Asi => game_root.to_path_buf(),
         TargetKind::Bootstrap => game_root.to_path_buf(),
         TargetKind::DirectManaged => game_root.to_path_buf(),
@@ -381,9 +395,14 @@ fn target_order(kind: &TargetKind) -> u8 {
     match kind {
         TargetKind::Bootstrap => 0,
         TargetKind::ModLoader => 1,
+        // CLEO scripts, then their modules/plugins/text/saves on top, before ASI.
         TargetKind::Cleo => 2,
-        TargetKind::Asi => 3,
-        TargetKind::DirectManaged => 4,
+        TargetKind::CleoModules => 3,
+        TargetKind::CleoPlugin => 4,
+        TargetKind::CleoText => 5,
+        TargetKind::CleoSaves => 6,
+        TargetKind::Asi => 7,
+        TargetKind::DirectManaged => 8,
     }
 }
 
@@ -399,6 +418,33 @@ mod tests {
         entries.sort_by(|a, b| a.0.cmp(&b.0));
         let total = (entries.len(), entries.iter().map(|(_, size)| size).sum());
         SourceStatsIndex { entries, total }
+    }
+
+    fn candidate_with(component: Component) -> InstallCandidate {
+        InstallCandidate {
+            source_root: "pkg".to_string(),
+            target_strategy: "CLEO".to_string(),
+            file_count: 1,
+            total_bytes: 1,
+            components: BTreeSet::from([component]),
+            notes: BTreeSet::new(),
+        }
+    }
+
+    #[test]
+    fn cleo_components_route_to_their_own_folders() {
+        let game = Path::new("/game");
+        let cases = [
+            (Component::Cleo, game.join("CLEO")),
+            (Component::CleoText, game.join("CLEO").join("cleo_text")),
+            (Component::CleoPlugin, game.join("CLEO").join("cleo_plugins")),
+            (Component::CleoModules, game.join("CLEO").join("cleo_modules")),
+            (Component::CleoSaves, game.join("CLEO").join("cleo_saves")),
+        ];
+        for (component, expected) in cases {
+            let kind = target_kind(&candidate_with(component));
+            assert_eq!(target_root_for(&kind, game, "pkg"), expected);
+        }
     }
 
     #[test]

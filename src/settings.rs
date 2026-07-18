@@ -509,7 +509,7 @@ fn read_config_file() -> SettingsFile {
     let Some(path) = config_file_path() else {
         return SettingsFile::default();
     };
-    let Ok(text) = fs::read_to_string(&path) else {
+    let Ok(text) = read_capped(&path, MAX_CONTROL_FILE_BYTES) else {
         return SettingsFile::default();
     };
     match serde_json::from_str(&text) {
@@ -544,6 +544,9 @@ fn component_from_key(key: &str) -> Option<Component> {
         "modloader_content" | "modloader-content" => Some(Component::ModLoaderContent),
         "cleo" => Some(Component::Cleo),
         "cleo_text" | "cleo-text" => Some(Component::CleoText),
+        "cleo_plugin" | "cleo-plugin" | "cleo_plugins" => Some(Component::CleoPlugin),
+        "cleo_module" | "cleo-module" | "cleo_modules" => Some(Component::CleoModules),
+        "cleo_save" | "cleo-save" | "cleo_saves" => Some(Component::CleoSaves),
         "asi" => Some(Component::Asi),
         "img" | "img_replacement" | "img-replacement" => Some(Component::ImgReplacement),
         "script_data" | "script-data" => Some(Component::ScriptData),
