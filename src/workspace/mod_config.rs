@@ -65,6 +65,46 @@ pub(crate) fn update_mod_config_install_root(
     Ok(())
 }
 
+/// Append an install root to an existing mod config, preserving every other
+/// field. Returns `false` without writing when a root with the same
+/// source/target/kind is already present, so accepting the same readme proposal
+/// twice is a harmless no-op rather than a duplicate.
+pub(crate) fn append_mod_config_install_root(
+    config_path: &Path,
+    root: &ModInstallRootJson,
+) -> Result<bool, AppError> {
+    let text = fs::read_to_string(config_path)?;
+    let mut json: serde_json::Value = serde_json::from_str(&text).map_err(|err| {
+        AppError::Usage(format!("invalid mod json {}: {err}", config_path.display()))
+    })?;
+    let roots = json
+        .get_mut("install_roots")
+        .and_then(serde_json::Value::as_array_mut)
+        .ok_or_else(|| {
+            AppError::Usage(format!(
+                "mod json missing install_roots array: {}",
+                config_path.display()
+            ))
+        })?;
+    if roots.iter().any(|existing| install_root_matches(existing, root)) {
+        return Ok(false);
+    }
+    let value = serde_json::to_value(root)
+        .map_err(|err| AppError::Tool(format!("failed to serialize install root: {err}")))?;
+    roots.push(value);
+    let formatted = serde_json::to_string_pretty(&json)
+        .map_err(|err| AppError::Tool(format!("failed to write mod json: {err}")))?;
+    fs::write(config_path, format!("{formatted}\n"))?;
+    Ok(true)
+}
+
+fn install_root_matches(existing: &serde_json::Value, root: &ModInstallRootJson) -> bool {
+    let field = |key: &str| existing.get(key).and_then(serde_json::Value::as_str);
+    field("source") == Some(root.source.as_str())
+        && field("target") == Some(root.target.as_str())
+        && field("kind") == Some(root.kind.as_str())
+}
+
 fn write_mod_config_header(
     file: &mut fs::File,
     report: &PackageReport,
@@ -233,6 +273,55 @@ mod tests {
         assert!(parsed.install_roots[0].optional);
         let text = fs::read_to_string(&config_path).unwrap();
         assert!(text.contains("keep me"));
+        remove_dir_if_exists(&root).unwrap();
+    }
+
+    #[test]
+    fn append_install_root_adds_once_and_dedups() {
+        let root = test_root("append_mod_config_root");
+        let config_path = root.join("mod.json");
+        fs::write(
+            &config_path,
+            r#"{
+  "version": 1,
+  "id": "test_mod",
+  "package": "package.wrap",
+  "enabled": true,
+  "install_roots": [
+    {
+      "source": "old",
+      "target": "modloader/old",
+      "kind": "modloader",
+      "enabled": true,
+      "optional": false
+    }
+  ],
+  "notes": ["keep me"]
+}
+"#,
+        )
+        .unwrap();
+        let added = ModInstallRootJson {
+            source: "files/CLEO".to_string(),
+            target: "CLEO".to_string(),
+            kind: "cleo".to_string(),
+            enabled: true,
+            optional: false,
+        };
+
+        // First append writes and reports it added.
+        assert!(append_mod_config_install_root(&config_path, &added).unwrap());
+        let parsed = read_mod_config_json(&config_path).unwrap();
+        assert_eq!(parsed.install_roots.len(), 2);
+        assert_eq!(parsed.install_roots[1].source, "files/CLEO");
+        // Other fields and the original root survive.
+        assert_eq!(parsed.install_roots[0].source, "old");
+        assert!(fs::read_to_string(&config_path).unwrap().contains("keep me"));
+
+        // Re-appending the same source/target/kind is a no-op.
+        assert!(!append_mod_config_install_root(&config_path, &added).unwrap());
+        let reparsed = read_mod_config_json(&config_path).unwrap();
+        assert_eq!(reparsed.install_roots.len(), 2);
         remove_dir_if_exists(&root).unwrap();
     }
 

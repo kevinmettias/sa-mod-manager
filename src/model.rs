@@ -16,7 +16,9 @@ pub(crate) use package::{
     PackageRef, PackageReport, PackageSummary, ReadmeAction, ReadmeDocument, ReadmeInsight,
     ReadmeInsightKind, ReadmeInstruction,
 };
-pub(crate) use profile::{CommandOptions, ProfileJson, ProfileModActivation, ProfileModEntry};
+pub(crate) use profile::{
+    CommandOptions, ProfileJson, ProfileModActivation, ProfileModEntry, ProfileRootOverride,
+};
 pub(crate) use rules::{
     CandidateDetection, CandidateMetadata, Component, ComponentRule, ContextRule, InstallCandidate,
 };

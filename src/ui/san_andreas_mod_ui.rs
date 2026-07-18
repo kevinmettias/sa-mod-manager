@@ -1,18 +1,25 @@
 use crate::prelude::*;
 use eframe::egui;
 
+use super::preferences::UiPreferences;
 use super::state::{UiState, UiTab, load_ui_state};
 
 pub(super) const ROW_HEIGHT: f32 = 28.0;
 const PENDING_RUN_WATCH_INTERVAL: Duration = Duration::from_secs(2);
+/// Throttle preference writes so dragging the window edge cannot flood the disk;
+/// discrete changes (tab, profile, folder) still persist within this window.
+const PREF_SAVE_INTERVAL: Duration = Duration::from_secs(1);
 
-pub(crate) fn run_ui(game_root: PathBuf) -> Result<(), AppError> {
+pub(crate) fn run_ui(cli_game_root: Option<PathBuf>) -> Result<(), AppError> {
+    let preferences = UiPreferences::load();
+    let game_root = resolve_initial_game_root(cli_game_root, &preferences);
+    let window_size = preferences.window_size();
     let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default().with_inner_size([1180.0, 760.0]),
+        viewport: egui::ViewportBuilder::default().with_inner_size(window_size),
         ..Default::default()
     };
-    let application_factory: eframe::AppCreator<'_> = Box::new(|_| {
-        let application = SanAndreasModUi::new(game_root);
+    let application_factory: eframe::AppCreator<'_> = Box::new(move |_| {
+        let application = SanAndreasModUi::new(game_root, preferences);
         let boxed_application: Box<dyn eframe::App> = Box::new(application);
         Ok(boxed_application)
     });
@@ -22,6 +29,19 @@ pub(crate) fn run_ui(game_root: PathBuf) -> Result<(), AppError> {
         application_factory,
     )
     .map_err(|err| AppError::Tool(format!("failed to open UI: {err}")))
+}
+
+/// An explicit `--game`/positional argument always wins; otherwise fall back to
+/// the last folder used, then to the compiled default. This keeps a scripted
+/// `ui <path>` deterministic while letting the plain `ui` command remember.
+fn resolve_initial_game_root(cli_game_root: Option<PathBuf>, preferences: &UiPreferences) -> PathBuf {
+    if let Some(root) = cli_game_root {
+        return root;
+    }
+    if !preferences.game_root.trim().is_empty() {
+        return PathBuf::from(preferences.game_root.trim());
+    }
+    PathBuf::from(DEFAULT_GAME_ROOT)
 }
 
 pub(super) struct SanAndreasModUi {
@@ -46,6 +66,10 @@ pub(super) struct SanAndreasModUi {
     pub(super) last_error: Option<String>,
     pub(super) pending_confirm: Option<PendingConfirm>,
     pub(super) task: Option<BackgroundTask>,
+    pub(super) dark_mode: bool,
+    window_size: [f32; 2],
+    last_pref_save: Instant,
+    prefs_signature: String,
 }
 
 /// A destructive action awaiting user confirmation in a modal dialog.
@@ -103,6 +127,10 @@ pub(super) struct ReadmeProposal {
     pub(super) review_state: ReadmeProposalState,
     pub(super) normalized_text: String,
     pub(super) reasons: Vec<String>,
+    /// Raw source/target the instruction referenced, retained so a Copy proposal
+    /// can be promoted into a mod-config install root on demand.
+    pub(super) source: Option<String>,
+    pub(super) target: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -171,8 +199,12 @@ impl fmt::Display for PendingRunStatus {
 }
 
 impl SanAndreasModUi {
-    pub(super) fn new(game_root: PathBuf) -> Self {
-        let selected_profile = "default".to_string(); // literal: allow external interface text or file-format spelling
+    pub(super) fn new(game_root: PathBuf, preferences: UiPreferences) -> Self {
+        let selected_profile = if preferences.profile.trim().is_empty() {
+            "default".to_string() // literal: allow external interface text or file-format spelling
+        } else {
+            preferences.profile.trim().to_string()
+        };
         let mut ui = Self {
             game_root_input: game_root.display().to_string(),
             selected_profile,
@@ -180,7 +212,7 @@ impl SanAndreasModUi {
             new_profile_input: String::new(),
             status: String::new(),
             state: UiState::default(),
-            tab: UiTab::Home,
+            tab: preferences.tab(),
             pending_journal: None,
             pending_runs: Vec::new(),
             game_child: None,
@@ -195,8 +227,16 @@ impl SanAndreasModUi {
             last_error: None,
             pending_confirm: None,
             task: None,
+            dark_mode: preferences.dark_mode,
+            window_size: preferences.window_size(),
+            last_pref_save: Instant::now(),
+            prefs_signature: String::new(),
         };
         ui.refresh();
+        // Baseline the signature against the state that survived `refresh` (which
+        // may have replaced a stale saved profile), so the first frame does not
+        // rewrite an unchanged file.
+        ui.prefs_signature = ui.current_preferences().signature();
         ui
     }
 
@@ -364,9 +404,92 @@ impl SanAndreasModUi {
     }
 }
 
+impl SanAndreasModUi {
+    /// Apply the chosen light/dark palette. Cheap to call each frame, and doing so
+    /// keeps the window in sync the instant the toggle flips.
+    fn apply_theme(&self, ctx: &egui::Context) {
+        let visuals = if self.dark_mode {
+            egui::Visuals::dark()
+        } else {
+            egui::Visuals::light()
+        };
+        ctx.set_visuals(visuals);
+    }
+
+    /// Keyboard access to the core navigation: Ctrl/Cmd+1..6 jump to a tab,
+    /// Ctrl/Cmd+R reloads, and Escape dismisses the error banner. The confirm
+    /// modal owns Escape/backdrop while it is open (see `confirm_modal`).
+    fn handle_shortcuts(&mut self, ctx: &egui::Context) {
+        use egui::{Key, Modifiers};
+        let editing = ctx.memory(|memory| memory.focused().is_some());
+        // When nothing is focused and no modal is up, Escape clears the banner.
+        // While a field is focused, leave Escape to egui so it defocuses instead.
+        if !editing
+            && self.pending_confirm.is_none()
+            && ctx.input_mut(|input| input.consume_key(Modifiers::NONE, Key::Escape))
+        {
+            self.last_error = None;
+        }
+        // Do not steal navigation/reload chords while the user is typing (Ctrl+R
+        // would reload mid-edit) or while the modal should hold focus.
+        if editing || self.pending_confirm.is_some() {
+            return;
+        }
+        const TAB_KEYS: [(Key, UiTab); 6] = [
+            (Key::Num1, UiTab::Home),
+            (Key::Num2, UiTab::Profiles),
+            (Key::Num3, UiTab::Mods),
+            (Key::Num4, UiTab::Import),
+            (Key::Num5, UiTab::Run),
+            (Key::Num6, UiTab::Telemetry),
+        ];
+        for (key, tab) in TAB_KEYS {
+            if ctx.input_mut(|input| input.consume_key(Modifiers::COMMAND, key)) {
+                self.tab = tab;
+            }
+        }
+        if ctx.input_mut(|input| input.consume_key(Modifiers::COMMAND, Key::R)) {
+            self.refresh();
+        }
+    }
+
+    /// Snapshot the session state that is worth remembering between runs.
+    fn current_preferences(&self) -> UiPreferences {
+        UiPreferences {
+            game_root: self.game_root_input.clone(),
+            profile: self.selected_profile.clone(),
+            tab: self.tab.as_key().to_string(),
+            dark_mode: self.dark_mode,
+            width: self.window_size[0],
+            height: self.window_size[1],
+        }
+    }
+
+    /// Track the live window size and persist preferences at most once per
+    /// interval, and only when something actually changed.
+    fn persist_preferences_if_changed(&mut self, ctx: &egui::Context) {
+        let size = ctx.input(|input| input.screen_rect().size());
+        self.window_size = [size.x, size.y];
+        if self.last_pref_save.elapsed() < PREF_SAVE_INTERVAL {
+            return;
+        }
+        let preferences = self.current_preferences();
+        let signature = preferences.signature();
+        self.last_pref_save = Instant::now();
+        if signature == self.prefs_signature {
+            return;
+        }
+        preferences.save();
+        self.prefs_signature = signature;
+    }
+}
+
 impl eframe::App for SanAndreasModUi {
     fn update(&mut self, context: &egui::Context, _frame: &mut eframe::Frame) {
+        self.apply_theme(context);
+        self.handle_shortcuts(context);
         self.poll_task();
+        self.handle_file_drops(context);
         self.tick_pending_run_watcher();
         context.request_repaint_after(PENDING_RUN_WATCH_INTERVAL);
         egui::TopBottomPanel::top("top_bar").show(context, |ui| self.top_bar(ui)); // literal: allow external interface text or file-format spelling
@@ -386,6 +509,12 @@ impl eframe::App for SanAndreasModUi {
             UiTab::Telemetry => self.telemetry_panel(ui),
         });
         self.confirm_modal(context);
+        self.persist_preferences_if_changed(context);
+    }
+
+    /// A final flush on close captures a resize made in the last throttle window.
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        self.current_preferences().save();
     }
 }
 
@@ -710,6 +839,29 @@ fn write_recent_events_json(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn explicit_game_root_wins_over_saved_then_default() {
+        let saved = UiPreferences {
+            game_root: "S:/saved".to_string(),
+            ..UiPreferences::default()
+        };
+        // An explicit CLI folder always wins.
+        assert_eq!(
+            resolve_initial_game_root(Some(PathBuf::from("C:/explicit")), &saved),
+            PathBuf::from("C:/explicit")
+        );
+        // With no CLI folder, the last-used folder is restored.
+        assert_eq!(
+            resolve_initial_game_root(None, &saved),
+            PathBuf::from("S:/saved")
+        );
+        // With neither, fall back to the compiled default.
+        assert_eq!(
+            resolve_initial_game_root(None, &UiPreferences::default()),
+            PathBuf::from(DEFAULT_GAME_ROOT)
+        );
+    }
 
     #[test]
     fn telemetry_summary_aggregates_imports_and_journals() {

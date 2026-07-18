@@ -39,13 +39,14 @@ fn list_archive_entries(package: &Path) -> Result<Vec<PackageEntry>, AppError> {
     if let Some(entries) = list_archive_entries_native(package)? {
         return Ok(entries);
     }
-    let text = read_archive_listing(package)?;
     let mut entries = Vec::new();
     let mut fields = ArchiveEntryFields::default();
 
-    for line in text.lines() {
+    // Parse the `7z l -slt` output as it streams, so we never buffer the whole
+    // listing (which is O(entries)) — only one line plus the entry list we build.
+    stream_archive_listing(package, |line| {
         parse_archive_listing_line(line, &mut fields, &mut entries);
-    }
+    })?;
 
     fields.flush_into(&mut entries);
 
@@ -53,18 +54,30 @@ fn list_archive_entries(package: &Path) -> Result<Vec<PackageEntry>, AppError> {
     Ok(entries)
 }
 
-fn read_archive_listing(package: &Path) -> Result<String, AppError> {
+fn stream_archive_listing(
+    package: &Path,
+    mut on_line: impl FnMut(&str),
+) -> Result<(), AppError> {
+    use std::io::BufRead;
+
     let seven_zip = find_seven_zip().ok_or_else(|| missing_7zip_error_for_package(package))?;
-    let output = Command::new(seven_zip)
+    let mut child = Command::new(seven_zip)
         .env("LC_ALL", "C") // prefer stable tool output regardless of system locale
         .arg("l") // literal: allow external interface text or file-format spelling
         .arg("-slt") // literal: allow external interface text or file-format spelling
         .arg(package)
-        .output()?;
-    if !output.status.success() {
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()?;
+    if let Some(stdout) = child.stdout.take() {
+        for line in std::io::BufReader::new(stdout).lines() {
+            on_line(&line?);
+        }
+    }
+    if !child.wait()?.success() {
         return Err(list_archive_failed_error(package));
     }
-    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    Ok(())
 }
 
 fn parse_archive_listing_line(

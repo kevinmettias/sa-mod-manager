@@ -76,101 +76,51 @@ pub(crate) fn write_profile_json_file(
     game_root: &Path,
     profile: &ProfileJson,
 ) -> Result<(), AppError> {
-    let mut file = fs::File::create(path)?;
-    writeln!(file, "{{")?;
-    writeln!(file, "  \"version\": 1,")?;
-    writeln!(file, "  \"name\": \"{}\",", json_escape(&profile.name))?;
-    writeln!(
-        file,
-        "  \"game_root\": \"{}\",",
-        json_escape(&game_root.display().to_string())
-    )?;
-    writeln!(file, "  \"ephemeral\": true,")?;
-    write_profile_launch_args(&mut file, &profile.launch_args)?;
-    write_profile_launch_env(&mut file, &profile.launch_env)?;
-    writeln!(file, "  \"mods\": [")?;
-    write_profile_json_entries(&mut file, &profile.mods)?;
-    writeln!(file, "  ]")?;
-    writeln!(file, "}}")?;
+    // Serialize with serde so the writer and the serde reader cannot drift and
+    // hand-edits round-trip. The round-trip is locked by a test below.
+    let document = ProfileDocument {
+        version: 1,
+        name: &profile.name,
+        game_root: game_root.display().to_string(),
+        ephemeral: true,
+        launch_args: &profile.launch_args,
+        launch_env: &profile.launch_env,
+        mods: profile.mods.iter().map(profile_mod_document).collect(),
+    };
+    let text = serde_json::to_string_pretty(&document)
+        .map_err(|err| AppError::Tool(format!("failed to serialize profile: {err}")))?;
+    fs::write(path, format!("{text}\n"))?;
     Ok(())
 }
 
-fn write_profile_launch_args(file: &mut fs::File, args: &[String]) -> Result<(), AppError> {
-    if args.is_empty() {
-        writeln!(file, "  \"launch_args\": [],")?;
-        return Ok(());
-    }
-    writeln!(file, "  \"launch_args\": [")?;
-    for (idx, arg) in args.iter().enumerate() {
-        let comma = if idx + 1 != args.len() { "," } else { "" };
-        writeln!(file, "    \"{}\"{comma}", json_escape(arg))?;
-    }
-    writeln!(file, "  ],")?;
-    Ok(())
+#[derive(Serialize)]
+struct ProfileDocument<'a> {
+    version: u32,
+    name: &'a str,
+    game_root: String,
+    ephemeral: bool,
+    launch_args: &'a [String],
+    launch_env: &'a BTreeMap<String, String>,
+    mods: Vec<ProfileModDocument<'a>>,
 }
 
-fn write_profile_launch_env(
-    file: &mut fs::File,
-    env: &BTreeMap<String, String>,
-) -> Result<(), AppError> {
-    if env.is_empty() {
-        writeln!(file, "  \"launch_env\": {{}},")?;
-        return Ok(());
-    }
-    writeln!(file, "  \"launch_env\": {{")?;
-    for (idx, (key, value)) in env.iter().enumerate() {
-        let comma = if idx + 1 != env.len() { "," } else { "" };
-        writeln!(
-            file,
-            "    \"{}\": \"{}\"{comma}",
-            json_escape(key),
-            json_escape(value)
-        )?;
-    }
-    writeln!(file, "  }},")?;
-    Ok(())
+#[derive(Serialize)]
+struct ProfileModDocument<'a> {
+    id: &'a str,
+    enabled: bool,
+    load_order: i32,
+    config: String,
+    root_overrides: &'a BTreeMap<String, ProfileRootOverride>,
 }
 
-fn write_profile_json_entries(
-    file: &mut fs::File,
-    mods: &[ProfileModEntry],
-) -> Result<(), AppError> {
-    for (idx, entry) in mods.iter().enumerate() {
-        writeln!(file, "    {{")?;
-        writeln!(file, "      \"id\": \"{}\",", json_escape(&entry.id))?;
-        writeln!(file, "      \"enabled\": {},", entry.enabled)?;
-        writeln!(file, "      \"load_order\": {},", entry.load_order)?;
-        writeln!(
-            file,
-            "      \"config\": \"{}\",",
-            json_escape(&entry.config.display().to_string())
-        )?;
-        write_profile_entry_root_overrides(file, &entry.root_overrides)?;
-        write!(file, "    }}")?;
-        if idx + 1 != mods.len() {
-            writeln!(file, ",")?;
-        } else {
-            writeln!(file)?;
-        }
+fn profile_mod_document(entry: &ProfileModEntry) -> ProfileModDocument<'_> {
+    ProfileModDocument {
+        id: &entry.id,
+        enabled: entry.enabled,
+        load_order: entry.load_order,
+        config: entry.config.display().to_string(),
+        root_overrides: &entry.root_overrides,
     }
-    Ok(())
-}
-
-fn write_profile_entry_root_overrides(
-    file: &mut fs::File,
-    overrides: &BTreeMap<String, bool>,
-) -> Result<(), AppError> {
-    if overrides.is_empty() {
-        writeln!(file, "      \"root_overrides\": {{}}")?;
-        return Ok(());
-    }
-    writeln!(file, "      \"root_overrides\": {{")?;
-    for (idx, (source, enabled)) in overrides.iter().enumerate() {
-        let comma = if idx + 1 != overrides.len() { "," } else { "" };
-        writeln!(file, "        \"{}\": {enabled}{comma}", json_escape(source))?;
-    }
-    writeln!(file, "      }}")?;
-    Ok(())
 }
 
 pub(crate) fn add_mod_to_profile_json(
@@ -339,19 +289,46 @@ pub(crate) fn set_profile_root_override(
     source: &str,
     enabled: bool,
 ) -> Result<(), AppError> {
+    update_profile_root_override(game_root, profile_name, mod_id, source, |over| {
+        over.enabled = Some(enabled);
+    })?;
+    println!(
+        "set root `{source}` of `{mod_id}` to {} in profile `{profile_name}`",
+        if enabled { "enabled" } else { "disabled" }
+    );
+    Ok(())
+}
+
+pub(crate) fn set_profile_root_target(
+    game_root: &Path,
+    profile_name: &str,
+    mod_id: &str,
+    source: &str,
+    target: &str,
+) -> Result<(), AppError> {
+    let target = normalize_path(target);
+    update_profile_root_override(game_root, profile_name, mod_id, source, |over| {
+        over.target = Some(target.clone());
+    })?;
+    println!("set root `{source}` of `{mod_id}` to target `{target}` in profile `{profile_name}`");
+    Ok(())
+}
+
+fn update_profile_root_override(
+    game_root: &Path,
+    profile_name: &str,
+    mod_id: &str,
+    source: &str,
+    update: impl FnOnce(&mut ProfileRootOverride),
+) -> Result<(), AppError> {
     let mut profile = load_profile_for_edit(game_root, profile_name)?;
     let Some(entry) = profile.mods.iter_mut().find(|entry| entry.id == mod_id) else {
         return Err(AppError::Usage(format!(
             "mod `{mod_id}` is not in profile `{profile_name}`"
         )));
     };
-    entry.root_overrides.insert(source.to_string(), enabled);
-    write_profile_json(game_root, &profile)?;
-    println!(
-        "set root `{source}` of `{mod_id}` to {} in profile `{profile_name}`",
-        if enabled { "enabled" } else { "disabled" }
-    );
-    Ok(())
+    update(entry.root_overrides.entry(source.to_string()).or_default());
+    write_profile_json(game_root, &profile)
 }
 
 pub(crate) fn copy_profile(
@@ -501,6 +478,82 @@ mod tests {
         copy_profile(&game_root, "windowed", "windowed_copy").unwrap();
         let (copied, _) = profile_launch_settings(&game_root, "windowed_copy").unwrap();
         assert_eq!(copied, expected);
+        remove(&game_root);
+    }
+
+    #[test]
+    fn profile_json_round_trips_through_serde() {
+        let game_root = test_root("profile_round_trip");
+        ensure_state(&game_root).unwrap();
+        let mut root_overrides = BTreeMap::new();
+        root_overrides.insert(
+            "cleo".to_string(),
+            ProfileRootOverride {
+                enabled: Some(false),
+                target: Some("CLEO_custom".to_string()),
+            },
+        );
+        let mut launch_env = BTreeMap::new();
+        launch_env.insert("SA_TEST".to_string(), "1".to_string());
+        let profile = ProfileJson {
+            name: "roundtrip".to_string(),
+            mods: vec![ProfileModEntry {
+                id: "cleo".to_string(),
+                enabled: true,
+                load_order: 150,
+                config: game_root
+                    .join(".sa-mod-manager")
+                    .join("mods")
+                    .join("cleo")
+                    .join("mod.json"),
+                root_overrides,
+            }],
+            launch_args: vec!["-windowed".to_string(), "-nointro".to_string()],
+            launch_env,
+        };
+
+        write_profile_json(&game_root, &profile).unwrap();
+        let read = load_profile_for_edit(&game_root, "roundtrip").unwrap();
+
+        assert_eq!(read.name, profile.name);
+        assert_eq!(read.launch_args, profile.launch_args);
+        assert_eq!(read.launch_env, profile.launch_env);
+        assert_eq!(read.mods.len(), 1);
+        assert_eq!(read.mods[0].id, "cleo");
+        assert!(read.mods[0].enabled);
+        assert_eq!(read.mods[0].load_order, 150);
+        let over = read.mods[0].root_overrides.get("cleo").unwrap();
+        assert_eq!(over.enabled, Some(false));
+        assert_eq!(over.target.as_deref(), Some("CLEO_custom"));
+        remove(&game_root);
+    }
+
+    #[test]
+    fn legacy_bare_bool_root_override_still_reads() {
+        let game_root = test_root("legacy_override");
+        ensure_state(&game_root).unwrap();
+        let path = state_directory(&game_root)
+            .join("profiles")
+            .join("legacy.json");
+        // Old on-disk format used a bare bool for the override value.
+        fs::write(
+            &path,
+            concat!(
+                "{\n",
+                "  \"name\": \"legacy\",\n",
+                "  \"mods\": [\n",
+                "    { \"id\": \"cleo\", \"enabled\": true, \"load_order\": 100,\n",
+                "      \"config\": \"x/mod.json\", \"root_overrides\": { \"CLEO\": false } }\n",
+                "  ]\n",
+                "}\n"
+            ),
+        )
+        .unwrap();
+
+        let read = load_profile_for_edit(&game_root, "legacy").unwrap();
+        let over = read.mods[0].root_overrides.get("CLEO").unwrap();
+        assert_eq!(over.enabled, Some(false));
+        assert_eq!(over.target, None);
         remove(&game_root);
     }
 

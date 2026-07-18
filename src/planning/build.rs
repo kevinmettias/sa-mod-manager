@@ -109,6 +109,24 @@ fn readme_target_kind(target: &str) -> TargetKind {
     }
 }
 
+/// Build the `mod.json` install root a readme "copy source -> target" instruction
+/// implies, using the exact kind/target mapping the automatic import path uses so
+/// a hand-accepted proposal is indistinguishable from an auto-detected one.
+pub(crate) fn readme_copy_install_root(
+    source: &str,
+    target: &str,
+    package_id: &str,
+) -> ModInstallRootJson {
+    let kind = readme_target_kind(target);
+    ModInstallRootJson {
+        source: normalize_path(source),
+        target: target_template(&kind, package_id),
+        kind: kind.to_string(),
+        enabled: true,
+        optional: false,
+    }
+}
+
 fn add_manifest_operations(
     report: &PackageReport,
     index: &SourceStatsIndex,

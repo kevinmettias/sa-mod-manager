@@ -17,21 +17,45 @@ impl SanAndreasModUi {
             ui.separator();
             ui.label("Game folder"); // literal: allow external interface text or file-format spelling
             let game_root_editor = egui::TextEdit::singleline(&mut self.game_root_input);
-            ui.add_sized([520.0, ROW_HEIGHT], game_root_editor);
+            ui.add_sized([470.0, ROW_HEIGHT], game_root_editor);
+            if ui
+                .button("Browse…")
+                .on_hover_text("Pick the GTA San Andreas folder")
+                .clicked()
+            {
+                self.browse_game_folder();
+            }
             /* literal: allow external interface text or file-format spelling */
             /* literal: allow external interface text or file-format spelling */
-            if ui.button("Reload").clicked() {
+            if ui
+                .button("Reload")
+                .on_hover_text("Re-read manager state from disk (Ctrl+R)")
+                .clicked()
+            {
                 // literal: allow external interface text or file-format spelling
                 self.refresh();
             }
             /* literal: allow external interface text or file-format spelling */
             /* literal: allow external interface text or file-format spelling */
-            if ui.button("Initialize").clicked() {
+            if ui
+                .button("Initialize")
+                .on_hover_text("Create the .sa-mod-manager state folders in the game directory")
+                .clicked()
+            {
                 // literal: allow external interface text or file-format spelling
                 self.initialize_state();
             }
-            if ui.button("Start").clicked() {
-                self.tab = UiTab::Home;
+            let theme_label = if self.dark_mode {
+                "Light theme" // literal: allow external interface text or file-format spelling
+            } else {
+                "Dark theme" // literal: allow external interface text or file-format spelling
+            };
+            if ui
+                .button(theme_label)
+                .on_hover_text("Switch between light and dark appearance")
+                .clicked()
+            {
+                self.dark_mode = !self.dark_mode;
             }
         });
         if let Some(summary) = self.pending_cleanup_summary() {
@@ -52,18 +76,25 @@ impl SanAndreasModUi {
 impl SanAndreasModUi {
     pub(super) fn navigation(&mut self, ui: &mut egui::Ui) {
         ui.add_space(8.0);
-        ui.selectable_value(&mut self.tab, UiTab::Home, "Start"); // literal: allow external interface text or file-format spelling
+        ui.selectable_value(&mut self.tab, UiTab::Home, "Start") // literal: allow external interface text or file-format spelling
+            .on_hover_text("Ctrl+1");
         ui.small("overview and next action");
-        ui.selectable_value(&mut self.tab, UiTab::Profiles, "Profiles"); // literal: allow external interface text or file-format spelling
+        ui.selectable_value(&mut self.tab, UiTab::Profiles, "Profiles") // literal: allow external interface text or file-format spelling
+            .on_hover_text("Ctrl+2");
         ui.small("load order and toggles");
-        ui.selectable_value(&mut self.tab, UiTab::Mods, "Library"); // literal: allow external interface text or file-format spelling
+        ui.selectable_value(&mut self.tab, UiTab::Mods, "Library") // literal: allow external interface text or file-format spelling
+            .on_hover_text("Ctrl+3");
         ui.small("installed packages");
-        ui.selectable_value(&mut self.tab, UiTab::Import, "Import Mod"); // literal: allow external interface text or file-format spelling
+        ui.selectable_value(&mut self.tab, UiTab::Import, "Import Mod") // literal: allow external interface text or file-format spelling
+            .on_hover_text("Ctrl+4");
         ui.small("readme review");
-        ui.selectable_value(&mut self.tab, UiTab::Run, "Play & Cleanup"); // literal: allow external interface text or file-format spelling
+        ui.selectable_value(&mut self.tab, UiTab::Run, "Play & Cleanup") // literal: allow external interface text or file-format spelling
+            .on_hover_text("Ctrl+5");
         ui.small("temporary run safety");
-        ui.selectable_value(&mut self.tab, UiTab::Telemetry, "Telemetry"); // literal: allow external interface text or file-format spelling
+        ui.selectable_value(&mut self.tab, UiTab::Telemetry, "Telemetry") // literal: allow external interface text or file-format spelling
+            .on_hover_text("Ctrl+6");
         ui.small("history and export");
+        ui.small("Keys: Ctrl+1–6 tabs · Ctrl+R reload · Esc dismiss");
         ui.separator();
         ui.label("Profile"); // literal: allow external interface text or file-format spelling
         let mut changed_profile = false;
@@ -149,22 +180,26 @@ impl SanAndreasModUi {
         let confirm_label = confirm.confirm_label.clone();
 
         let mut confirmed = None;
-        egui::Window::new(title)
-            .collapsible(false)
-            .resizable(false)
-            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-            .show(ctx, |ui| {
-                ui.label(message);
-                ui.add_space(8.0);
-                ui.horizontal(|ui| {
-                    if ui.button(confirm_label).clicked() {
-                        confirmed = Some(true);
-                    }
-                    if ui.button("Cancel").clicked() {
-                        confirmed = Some(false);
-                    }
-                });
+        // A real modal dims and blocks the background, so destructive-action
+        // buttons behind it cannot be clicked while the prompt is open.
+        let modal = egui::Modal::new(egui::Id::new("confirm_modal")).show(ctx, |ui| {
+            ui.set_max_width(360.0);
+            ui.heading(title);
+            ui.label(message);
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                if ui.button(confirm_label).clicked() {
+                    confirmed = Some(true);
+                }
+                if ui.button("Cancel").clicked() {
+                    confirmed = Some(false);
+                }
             });
+        });
+        // Clicking the dimmed backdrop or pressing Escape cancels the action.
+        if modal.should_close() {
+            confirmed = Some(false);
+        }
 
         match confirmed {
             Some(true) => {
@@ -179,6 +214,26 @@ impl SanAndreasModUi {
 }
 
 impl SanAndreasModUi {
+    /// Show a hint while files hover and consume any dropped onto the window.
+    pub(super) fn handle_file_drops(&mut self, ctx: &egui::Context) {
+        let hovering = ctx.input(|input| !input.raw.hovered_files.is_empty());
+        if hovering {
+            egui::Area::new(egui::Id::new("drop_hint"))
+                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                .interactable(false)
+                .show(ctx, |ui| {
+                    egui::Frame::popup(ui.style()).show(ui, |ui| {
+                        ui.heading("Drop a mod package or GTA folder");
+                    });
+                });
+        }
+        let dropped =
+            ctx.input(|input| input.raw.dropped_files.iter().find_map(|file| file.path.clone()));
+        if let Some(path) = dropped {
+            self.handle_dropped_path(path);
+        }
+    }
+
     pub(super) fn home_panel(&mut self, ui: &mut egui::Ui) {
         ui.heading("Start");
         ui.label("Current setup, next action, and cleanup state in one place.");
@@ -686,10 +741,7 @@ impl SanAndreasModUi {
             });
             ui.horizontal(|ui| {
                 ui.label("kind");
-                ui.add_sized(
-                    [160.0, ROW_HEIGHT],
-                    egui::TextEdit::singleline(&mut edit.kind),
-                );
+                install_kind_combo(ui, &key, &mut edit.kind);
                 if ui.button("Save root").clicked() {
                     save_root = Some(edit.clone());
                 }
@@ -699,14 +751,44 @@ impl SanAndreasModUi {
             });
         });
         if let Some(updated) = save_root {
-            self.save_mod_install_root(&item.path, root_index, updated);
-            self.mod_root_edits.remove(&key);
+            // Keep the in-progress edit on failure so a rejected source/target can
+            // be corrected instead of silently reverting.
+            if self.save_mod_install_root(&item.path, root_index, updated) {
+                self.mod_root_edits.remove(&key);
+            }
         }
     }
 }
 
 fn mod_root_edit_key(path: &Path, root_index: usize) -> String {
     format!("{}#{root_index}", path.display())
+}
+
+/// The install-root kinds the planner understands. Selecting from this list
+/// replaces free-text entry, so a root cannot be saved with a kind that later
+/// fails manifest validation. An unrecognized existing value (e.g. a legacy
+/// alias) still displays and is preserved until the user picks a new one.
+const INSTALL_KIND_OPTIONS: [&str; 9] = [
+    "modloader",
+    "cleo",
+    "cleo_text",
+    "asi",
+    "plugin",
+    "bootstrap",
+    "runtime",
+    "direct",
+    "direct_managed",
+];
+
+fn install_kind_combo(ui: &mut egui::Ui, id_source: &str, kind: &mut String) {
+    egui::ComboBox::from_id_salt(format!("kind_{id_source}"))
+        .selected_text(kind.clone())
+        .width(160.0)
+        .show_ui(ui, |ui| {
+            for option in INSTALL_KIND_OPTIONS {
+                ui.selectable_value(kind, option.to_string(), option);
+            }
+        });
 }
 
 impl SanAndreasModUi {
@@ -738,8 +820,28 @@ impl SanAndreasModUi {
         ui.horizontal(|ui| {
             ui.label("Package or folder"); // literal: allow external interface text or file-format spelling
             let package_editor = egui::TextEdit::singleline(&mut self.import_path_input);
-            ui.add_sized([650.0, ROW_HEIGHT], package_editor);
+            let package_response = ui.add_sized([470.0, ROW_HEIGHT], package_editor);
+            if package_response.changed() {
+                // Editing the path invalidates proposals from the last review, so
+                // "Add to config" can never target a different package.
+                self.clear_readme_review();
+            }
+            if ui
+                .button("File…")
+                .on_hover_text("Pick a .zip / .wrap / .7z / .rar package")
+                .clicked()
+            {
+                self.browse_package_file();
+            }
+            if ui
+                .button("Folder…")
+                .on_hover_text("Pick an already-extracted mod folder")
+                .clicked()
+            {
+                self.browse_package_folder();
+            }
         });
+        ui.label("Tip: you can also drag a package or your GTA folder onto this window.");
         let idle = !self.is_busy();
         ui.horizontal(|ui| {
             if ui
@@ -798,19 +900,37 @@ impl SanAndreasModUi {
             summary_tile(ui, "Needs review", &needs_review.to_string());
             summary_tile(ui, "Warnings", &warnings.to_string());
         });
+        // A Copy proposal can only be written into a config that already exists,
+        // i.e. after the package has been imported. Surface that state once so
+        // each row's button can explain itself instead of failing on click.
+        let imported = self
+            .reviewed_mod_config_path()
+            .map(|path| path.exists())
+            .unwrap_or(false);
+        if !imported {
+            ui.label("Import this package to the library to enable applying a proposal to its config.");
+        }
         let proposals = self.readme_proposals.clone();
+        let mut accepted = None;
         egui::ScrollArea::vertical()
             .max_height(360.0)
             .show(ui, |ui| {
-                for proposal in proposals {
-                    readme_proposal_panel(ui, &proposal);
+                for proposal in &proposals {
+                    if readme_proposal_panel(ui, proposal, imported) {
+                        accepted = Some(proposal.clone());
+                    }
                     ui.add_space(6.0);
                 }
             });
+        if let Some(proposal) = accepted {
+            self.accept_readme_proposal(&proposal);
+        }
     }
 }
 
-fn readme_proposal_panel(ui: &mut egui::Ui, proposal: &ReadmeProposal) {
+/// Returns `true` when the user clicked "Add to config" for this proposal.
+fn readme_proposal_panel(ui: &mut egui::Ui, proposal: &ReadmeProposal, imported: bool) -> bool {
+    let mut accepted = false;
     ui.group(|ui| {
         ui.horizontal(|ui| {
             ui.strong(readme_proposal_title(proposal));
@@ -828,7 +948,21 @@ fn readme_proposal_panel(ui: &mut egui::Ui, proposal: &ReadmeProposal) {
         if !proposal.reasons.is_empty() {
             ui.label(format!("Why: {}", proposal.reasons.join("; ")));
         }
+        if readme_proposal_is_actionable(proposal) {
+            accepted = ui
+                .add_enabled(imported, egui::Button::new("Add to config"))
+                .on_hover_text("Append this copy as an install root on the imported mod's config")
+                .on_disabled_hover_text("Import this package to the library first")
+                .clicked();
+        }
     });
+    accepted
+}
+
+/// Only a `copy` proposal with a concrete source and target maps to an install
+/// root; relationship hints (requires/conflict/…) are informational only.
+fn readme_proposal_is_actionable(proposal: &ReadmeProposal) -> bool {
+    proposal.action == "copy" && proposal.source.is_some() && proposal.target.is_some()
 }
 
 fn readme_proposal_title(proposal: &ReadmeProposal) -> String {

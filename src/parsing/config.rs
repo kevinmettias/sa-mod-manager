@@ -37,7 +37,29 @@ struct ProfileModEntryFile {
     enabled: Option<bool>,
     load_order: Option<i32>,
     config: Option<PathBuf>,
-    root_overrides: Option<BTreeMap<String, bool>>,
+    root_overrides: Option<BTreeMap<String, RootOverrideFile>>,
+}
+
+/// A root override is read as either the legacy bare bool (enable/disable) or
+/// the richer object form, so older profiles keep working.
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum RootOverrideFile {
+    Enabled(bool),
+    Full {
+        enabled: Option<bool>,
+        target: Option<String>,
+    },
+}
+
+fn root_override_from_file(raw: RootOverrideFile) -> ProfileRootOverride {
+    match raw {
+        RootOverrideFile::Enabled(enabled) => ProfileRootOverride {
+            enabled: Some(enabled),
+            target: None,
+        },
+        RootOverrideFile::Full { enabled, target } => ProfileRootOverride { enabled, target },
+    }
 }
 
 fn profile_name_from_path(path: &Path) -> String {
@@ -62,7 +84,12 @@ fn profile_mod_entry_from_json(entry: ProfileModEntryFile, game_root: &Path) -> 
     let config = entry
         .config
         .unwrap_or_else(|| default_mod_config_path(game_root, &id));
-    let root_overrides = entry.root_overrides.unwrap_or_default();
+    let root_overrides = entry
+        .root_overrides
+        .unwrap_or_default()
+        .into_iter()
+        .map(|(source, raw)| (source, root_override_from_file(raw)))
+        .collect();
     ProfileModEntry {
         id,
         enabled,
