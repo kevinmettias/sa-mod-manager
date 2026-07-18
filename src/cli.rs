@@ -9,24 +9,39 @@ pub(crate) fn main() {
 }
 
 fn report_error(err: &AppError) {
+    // `AppError`'s Display already renders the full `context: cause` chain down to
+    // the underlying OS error (see `AppError::Context`), so `{err}` prints the
+    // whole story; the category only sets the prefix and any follow-up hint.
     match err.kind() {
         AppErrorKind::Usage => {
             log_error!("usage error: {err}");
             log_error!("run `sa-mod-manager help` for usage");
         }
         AppErrorKind::Tool => log_error!("tool error: {err}"),
-        AppErrorKind::Io => log_error!("error: {err}"),
+        AppErrorKind::Io => log_error!("i/o error: {err}"),
     }
 }
 
 fn run() -> Result<(), AppError> {
     let mut shell_arguments: Vec<String> = env::args().skip(1).collect();
-    crate::logging::set_console_level(extract_verbosity(&mut shell_arguments));
-    // Resolve `--config` before any command touches settings, so it wins over the
-    // env var and per-user default the way an explicit override should.
-    if let Some(config) = extract_config_path(&mut shell_arguments) {
-        crate::settings::set_cli_config_path(config);
+    let cli_level = extract_verbosity(&mut shell_arguments);
+    // Resolve `--config`/`--7z`/`--mod-roots` before any command touches settings,
+    // so they win over env and config the way explicit overrides should.
+    if let Some(config) = extract_flag_value(&mut shell_arguments, "--config") {
+        crate::settings::set_cli_config_path(PathBuf::from(config));
     }
+    if let Some(seven_zip) = extract_flag_value(&mut shell_arguments, "--7z") {
+        crate::settings::set_cli_seven_zip(PathBuf::from(seven_zip));
+    }
+    if let Some(mod_roots) = extract_flag_value(&mut shell_arguments, "--mod-roots") {
+        let roots: Vec<PathBuf> = env::split_paths(&mod_roots)
+            .filter(|path| !path.as_os_str().is_empty())
+            .collect();
+        crate::settings::set_cli_mod_roots(roots);
+    }
+    // A `-v`/`-q` flag wins; otherwise use the configured level (default Info).
+    let level = cli_level.unwrap_or_else(crate::settings::configured_log_level);
+    crate::logging::set_console_level(level);
 
     let mut shell_arguments = shell_arguments.into_iter();
     let Some(command) = shell_arguments.next() else {
@@ -38,50 +53,60 @@ fn run() -> Result<(), AppError> {
     dispatch_command(&command, command_arguments)
 }
 
-/// Remove a global `--config <path>` flag (usable anywhere on the line) and
-/// return the path. A trailing `--config` with no value is dropped and ignored.
-fn extract_config_path(arguments: &mut Vec<String>) -> Option<PathBuf> {
-    let index = arguments.iter().position(|arg| arg == "--config")?;
+/// Remove a global `--<flag> <value>` option (usable anywhere on the line) and
+/// return its value. A trailing flag with no following value is dropped and
+/// ignored rather than swallowing the next flag.
+fn extract_flag_value(arguments: &mut Vec<String>, flag: &str) -> Option<String> {
+    let index = arguments.iter().position(|arg| arg == flag)?;
     arguments.remove(index);
-    if index < arguments.len() {
-        Some(PathBuf::from(arguments.remove(index)))
-    } else {
-        None
+    let value = arguments.get(index)?;
+    if value.starts_with('-') {
+        return None;
     }
+    Some(arguments.remove(index))
 }
 
 /// Remove global `--verbose`/`--quiet` flags (usable anywhere on the line) and
 /// resolve them to a console log level. Each `-v` raises verbosity, each `-q`
 /// lowers it.
-fn extract_verbosity(arguments: &mut Vec<String>) -> crate::logging::Level {
+fn extract_verbosity(arguments: &mut Vec<String>) -> Option<crate::logging::Level> {
     use crate::logging::Level;
     let mut verbosity: i32 = 0;
+    let mut saw_flag = false;
     arguments.retain(|arg| match arg.as_str() {
         "-v" | "--verbose" => {
             verbosity += 1;
+            saw_flag = true;
             false
         }
         "-vv" => {
             verbosity += 2;
+            saw_flag = true;
             false
         }
         "-q" | "--quiet" => {
             verbosity -= 1;
+            saw_flag = true;
             false
         }
         "-qq" => {
             verbosity -= 2;
+            saw_flag = true;
             false
         }
         _ => true,
     });
-    match verbosity {
+    // No flag means "defer to the configured level"; a flag maps to a level.
+    if !saw_flag {
+        return None;
+    }
+    Some(match verbosity {
         i if i <= -2 => Level::Error,
         -1 => Level::Warn,
         0 => Level::Info,
         1 => Level::Debug,
         _ => Level::Trace,
-    }
+    })
 }
 
 fn dispatch_command(command: &str, arguments: Vec<String>) -> Result<(), AppError> {
@@ -121,6 +146,8 @@ fn dispatch_command(command: &str, arguments: Vec<String>) -> Result<(), AppErro
         "profile-copy" => handle_profile_copy_command(arguments), // literal: allow external interface text or file-format spelling
         "profile-rename" => handle_profile_rename_command(arguments), // literal: allow external interface text or file-format spelling
         "profile-delete" => handle_profile_delete_command(arguments), // literal: allow external interface text or file-format spelling
+        "profile-all-off" => handle_profile_all_off_command(arguments), // literal: allow external interface text or file-format spelling
+        "profile-all-on" => handle_profile_all_on_command(arguments), // literal: allow external interface text or file-format spelling
         "profile-args" => handle_profile_args_command(arguments), // literal: allow external interface text or file-format spelling
         "profile-root" => handle_profile_root_command(arguments), // literal: allow external interface text or file-format spelling
         "profile-root-target" => handle_profile_root_target_command(arguments), // literal: allow external interface text or file-format spelling
@@ -346,7 +373,7 @@ fn handle_profile_copy_command(arguments: Vec<String>) -> Result<(), AppError> {
     let source = cursor.required("source profile name")?; // literal: allow external interface text or file-format spelling
     let dest = cursor.required("destination profile name")?; // literal: allow external interface text or file-format spelling
     let game_root = game_root_from_cli_arguments(cursor)?;
-    copy_profile(&game_root, &safe_name(&source), &dest)
+    copy_profile(&game_root, &safe_name(&source), &safe_profile_name_warned(&dest))
 }
 
 fn handle_profile_rename_command(arguments: Vec<String>) -> Result<(), AppError> {
@@ -354,7 +381,7 @@ fn handle_profile_rename_command(arguments: Vec<String>) -> Result<(), AppError>
     let old_name = cursor.required("current profile name")?; // literal: allow external interface text or file-format spelling
     let new_name = cursor.required("new profile name")?; // literal: allow external interface text or file-format spelling
     let game_root = game_root_from_cli_arguments(cursor)?;
-    rename_profile(&game_root, &safe_name(&old_name), &new_name)
+    rename_profile(&game_root, &safe_name(&old_name), &safe_profile_name_warned(&new_name))
 }
 
 fn handle_profile_delete_command(arguments: Vec<String>) -> Result<(), AppError> {
@@ -443,7 +470,9 @@ fn handle_init_command(arguments: Vec<String>) -> Result<(), AppError> {
 fn handle_config_init_command(_arguments: Vec<String>) -> Result<(), AppError> {
     let path = write_example_config()?;
     println!("wrote example config: {}", path.display());
-    println!("edit it to set default game root, mod roots, 7-Zip path, and detection rules");
+    println!(
+        "edit it to set game root, mod roots, 7-Zip path, detection rules, readme thresholds, watch interval, modloader prefix, infrastructure checks, launch defaults, log level, and default profile"
+    );
     Ok(())
 }
 
@@ -456,7 +485,35 @@ fn handle_profile_new_command(arguments: Vec<String>) -> Result<(), AppError> {
     let mut cursor = CliArguments::new(arguments);
     let name = cursor.required("profile name")?; // literal: allow external interface text or file-format spelling
     let game_root = optional_game_root_from_cli_arguments(cursor);
-    create_profile(&game_root, &name)
+    create_profile(&game_root, &safe_profile_name_warned(&name))
+}
+
+fn handle_profile_all_off_command(arguments: Vec<String>) -> Result<(), AppError> {
+    set_all_profile_mods_from_cli(arguments, ProfileModActivation::Disabled)
+}
+
+fn handle_profile_all_on_command(arguments: Vec<String>) -> Result<(), AppError> {
+    set_all_profile_mods_from_cli(arguments, ProfileModActivation::Enabled)
+}
+
+fn set_all_profile_mods_from_cli(
+    arguments: Vec<String>,
+    activation: ProfileModActivation,
+) -> Result<(), AppError> {
+    let mut cursor = CliArguments::new(arguments);
+    let profile = cursor.required("profile name")?; // literal: allow external interface text or file-format spelling
+    let game_root = game_root_from_cli_arguments(cursor)?;
+    set_all_profile_mods(&game_root, &safe_name(&profile), activation)
+}
+
+/// Normalize a name and warn (to stderr/log) if it had to be rewritten, so a CLI
+/// user is told when e.g. `My Profile!` becomes `my_profile`.
+fn safe_profile_name_warned(input: &str) -> String {
+    let (safe, note) = safe_profile_name(input);
+    if let Some(note) = note {
+        log_warn!("{note}");
+    }
+    safe
 }
 
 fn handle_game_command(arguments: Vec<String>) -> Result<(), AppError> {
@@ -699,6 +756,8 @@ fn print_global_option_usage() {
     println!("  -h, --help                       Show this help");
     println!("  -V, --version                    Print the version and exit");
     println!("  --config <path>                  Use this config file (overrides SA_MOD_MANAGER_CONFIG)");
+    println!("  --7z <path>                      Use this 7-Zip executable (overrides SA_MOD_MANAGER_7Z)");
+    println!("  --mod-roots <a;b>                Scan roots (overrides SA_MOD_MANAGER_MOD_ROOTS); path-separated");
     println!("  Diagnostics also append to <game-root>/.sa-mod-manager/logs/sa-mod-manager.log");
     println!();
 }
@@ -708,7 +767,7 @@ fn print_global_option_usage() {
 /// no second table to keep in sync.
 const COMMAND_USAGE_LINES: &[&str] = &[
     "  ui [game-root]                   Open the desktop manager UI",
-    "  config-init                      Write an example user config (paths + detection rules)",
+    "  config-init                      Write an example user config (paths, detection rules, readme thresholds, watch interval, modloader prefix)",
     "  game [game-root]                 Inspect installed GTA SA mod infrastructure",
     "  logs [game-root]                 Show the persistent diagnostics log (recent lines)",
     "  init [game-root]                 Create manager state folders",
@@ -734,6 +793,8 @@ const COMMAND_USAGE_LINES: &[&str] = &[
     "  profile-disable <profile> <mod>  Disable a profile mod",
     "  profile-order <profile> <mod> N  Set profile load order",
     "  profile-remove <profile> <mod>   Remove a mod from a profile",
+    "  profile-all-off <profile>        Disable every mod (vanilla mode)",
+    "  profile-all-on <profile>         Enable every mod in a profile",
     "  prepare-run [profile] [--game]   Materialize a profile (default: active) into the game folder",
     "  cleanup-run <journal> [--game]   Remove temporary materialized files",
     "  extract-stage <package> [options] Extract package into managed staging only",

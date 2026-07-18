@@ -24,6 +24,11 @@ pub(super) fn apply_copy_tree_with_journal(
     let files = collect_files_recursive(source_abs)?;
     let game_root = context.game_root;
     let backup_root = context.backup_root;
+    // Validate and create every distinct destination directory once, up front, so
+    // the per-file hot loop below no longer canonicalizes the game root or
+    // create_dir_all's a shared parent for each file. Validating here also fails
+    // fast before any bytes are written if a destination would escape the root.
+    prepare_destination_dirs(source_abs, target_root, &files, game_root)?;
     let journal: SharedJournal = Mutex::new(&mut *context.journal);
 
     let workers = worker_count(files.len());
@@ -120,22 +125,70 @@ fn apply_copy_file(
     journal: &SharedJournal,
 ) -> Result<(), AppError> {
     let rel = file.strip_prefix(source_abs).unwrap_or(file);
+    // The destination directory was created and validated by
+    // `prepare_destination_dirs` before this loop, so the containment check and
+    // directory creation are intentionally not repeated per file here.
     let dest = target_root.join(rel);
-    ensure_destination_allowed(game_root, &dest)?;
     journal_destination_state(&dest, game_root, backup_root, journal)?;
     // Force the backup/new record to durable storage *before* the destructive
     // copy below, so a crash can never leave an overwritten game file with no
     // recoverable journal entry.
     sync_shared_journal(journal)?;
-    if let Some(parent) = dest.parent() {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("create directory {}", parent.display()))?;
-    }
     // Copy source -> dest while hashing in one pass. The copied content equals
     // the source, so its hash is the source's — avoiding a re-read of dest.
     let copied_hash = copy_and_hash(file, &dest)?;
     write_copy_line(journal, file, &dest, &copied_hash)?;
     Ok(())
+}
+
+/// Create and validate each distinct destination directory once. Canonicalizing
+/// the game root and each parent here — rather than per file — keeps the copy
+/// loop off the filesystem-heavy `canonicalize`/`create_dir_all` path while
+/// preserving the same containment guarantee: no destination escapes the root.
+fn prepare_destination_dirs(
+    source_abs: &Path,
+    target_root: &Path,
+    files: &[PathBuf],
+    game_root: &Path,
+) -> Result<(), AppError> {
+    let canonical_game_root = game_root.canonicalize()?;
+    let mut prepared = std::collections::BTreeSet::new();
+    for file in files {
+        let rel = file.strip_prefix(source_abs).unwrap_or(file);
+        let dest = target_root.join(rel);
+        let Some(parent) = dest.parent() else {
+            continue;
+        };
+        if !prepared.insert(parent.to_path_buf()) {
+            continue;
+        }
+        // Validate against the nearest already-existing ancestor *before* creating
+        // anything, so a rejected (escaping) target leaves no stray directory
+        // behind outside the game root. The to-be-created segments are plain
+        // directories (never symlinks), so resolving the existing anchor is
+        // sufficient to catch an escape.
+        let anchor = nearest_existing_ancestor(parent);
+        let canonical_anchor = anchor
+            .canonicalize()
+            .with_context(|| format!("resolve {}", anchor.display()))?;
+        if !canonical_anchor.starts_with(&canonical_game_root) {
+            return Err(AppError::Usage(format!(
+                "destination escapes game root: {}",
+                dest.display()
+            )));
+        }
+        fs::create_dir_all(parent)
+            .with_context(|| format!("create directory {}", parent.display()))?;
+    }
+    Ok(())
+}
+
+/// The nearest ancestor of `path` (inclusive) that currently exists, walking up
+/// until one is found; the filesystem root always exists, so this terminates.
+fn nearest_existing_ancestor(path: &Path) -> PathBuf {
+    let mut current = path.to_path_buf();
+    while !current.exists() && current.pop() {}
+    current
 }
 
 fn journal_destination_state(
@@ -152,10 +205,10 @@ fn journal_destination_state(
         }
         // Back up the original by copying dest -> backup while hashing in one
         // pass, avoiding a separate re-read of the backup just to hash it.
+        // `copy_and_hash` fsyncs the staged bytes before renaming them into place,
+        // so the backup's contents are already durable here — no reopen+fsync of
+        // the backup is needed before the destination is later overwritten.
         let backup_hash = copy_and_hash(dest, &backup)?;
-        // The backup is the only copy of the original once we overwrite the
-        // destination, so its contents must be durable before that overwrite.
-        sync_file_contents(&backup)?;
         write_backup_line(journal, dest, &backup, &backup_hash)?;
     } else {
         write_new_line(journal, dest)?;
@@ -166,11 +219,37 @@ fn journal_destination_state(
 /// Stream `source` to `dest` through one reused buffer, returning the FNV hash
 /// of the bytes written. A single read of `source` replaces the previous
 /// copy-then-reread-to-hash, roughly halving disk reads per file.
+///
+/// The bytes are staged into a sibling temp file and then atomically renamed
+/// over `dest`, so an observer (or a crash) never sees a half-written mix: the
+/// visible destination is only ever the complete previous file or the complete
+/// new one. Destinations within a copy tree are distinct, so the temp name
+/// derived from `dest` cannot collide across concurrent workers.
 fn copy_and_hash(source: &Path, dest: &Path) -> Result<String, AppError> {
+    let temp = temp_sibling(dest);
+    let hash = match stream_copy_to_temp(source, &temp) {
+        Ok(hash) => hash,
+        Err(err) => {
+            let _ = fs::remove_file(&temp);
+            return Err(err);
+        }
+    };
+    // `fs::rename` replaces an existing destination on both Windows and Unix,
+    // making the swap atomic. The staged bytes were fsynced before this point,
+    // so the rename can never expose a renamed-but-empty destination.
+    if let Err(err) = fs::rename(&temp, dest) {
+        let _ = fs::remove_file(&temp);
+        return Err(AppError::from(err)
+            .context(format!("replace {} with staged copy", dest.display())));
+    }
+    Ok(format!("fnv64:{hash:016x}"))
+}
+
+fn stream_copy_to_temp(source: &Path, temp: &Path) -> Result<u64, AppError> {
     let mut input =
         fs::File::open(source).with_context(|| format!("open {}", source.display()))?;
     let mut output =
-        fs::File::create(dest).with_context(|| format!("create {}", dest.display()))?;
+        fs::File::create(temp).with_context(|| format!("create {}", temp.display()))?;
     let mut buffer = [0u8; HASH_BUFFER_BYTES];
     let mut hash = FNV_OFFSET;
     loop {
@@ -182,13 +261,25 @@ fn copy_and_hash(source: &Path, dest: &Path) -> Result<String, AppError> {
         }
         output
             .write_all(&buffer[..read])
-            .with_context(|| format!("write {}", dest.display()))?;
+            .with_context(|| format!("write {}", temp.display()))?;
         for &byte in &buffer[..read] {
             hash ^= u64::from(byte);
             hash = hash.wrapping_mul(FNV_PRIME);
         }
     }
-    Ok(format!("fnv64:{hash:016x}"))
+    // Force the staged bytes durable before the caller renames them into place.
+    output
+        .sync_all()
+        .with_context(|| format!("sync {}", temp.display()))?;
+    Ok(hash)
+}
+
+/// A staging path alongside `dest` (same directory, hence same filesystem, so
+/// the follow-up rename stays atomic).
+fn temp_sibling(dest: &Path) -> PathBuf {
+    let mut name = dest.as_os_str().to_os_string();
+    name.push(".sa-tmp"); // literal: allow external interface text or file-format spelling
+    PathBuf::from(name)
 }
 
 fn write_backup_line(
@@ -204,7 +295,8 @@ fn write_backup_line(
         escape_value(&dest.display().to_string()),
         escape_value(&backup.display().to_string()),
         backup_hash
-    )?;
+    )
+    .with_context(|| format!("write backup journal entry for {}", dest.display()))?;
     Ok(())
 }
 
@@ -214,7 +306,8 @@ fn write_new_line(journal: &SharedJournal, dest: &Path) -> Result<(), AppError> 
         &mut **guard,
         "new={}",
         escape_value(&dest.display().to_string())
-    )?;
+    )
+    .with_context(|| format!("write new-file journal entry for {}", dest.display()))?;
     Ok(())
 }
 
@@ -231,16 +324,16 @@ fn write_copy_line(
         escape_value(&file.display().to_string()),
         escape_value(&dest.display().to_string()),
         copied_hash
-    )?;
+    )
+    .with_context(|| format!("write copy journal entry for {}", dest.display()))?;
     Ok(())
 }
 
 /// Durably flush the shared journal (under its lock).
 fn sync_shared_journal(journal: &SharedJournal) -> Result<(), AppError> {
     let mut guard = journal.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    let file: &mut fs::File = &mut **guard;
-    file.flush()?;
-    file.sync_all()?;
+    guard.flush().with_context(|| "flush journal")?;
+    guard.sync_all().with_context(|| "sync journal to disk")?;
     Ok(())
 }
 
@@ -249,19 +342,8 @@ fn sync_shared_journal(journal: &SharedJournal) -> Result<(), AppError> {
 /// On Windows this maps to `FlushFileBuffers`; the journal is opened for
 /// writing so the call is permitted.
 pub(super) fn sync_journal(journal: &mut fs::File) -> Result<(), AppError> {
-    journal.flush()?;
-    journal.sync_all()?;
-    Ok(())
-}
-
-/// Force an already-written file's contents to durable storage.
-///
-/// Opens the file with write access because `File::sync_all` -> `FlushFileBuffers`
-/// requires a writable handle on Windows; `write(true)` without `truncate`
-/// leaves the existing contents intact.
-fn sync_file_contents(path: &Path) -> Result<(), AppError> {
-    let file = fs::OpenOptions::new().write(true).open(path)?;
-    file.sync_all()?;
+    journal.flush().with_context(|| "flush journal")?;
+    journal.sync_all().with_context(|| "sync journal to disk")?;
     Ok(())
 }
 
@@ -382,5 +464,37 @@ mod tests {
             40
         );
         fs::remove_dir_all(&game_root).unwrap();
+    }
+
+    #[test]
+    fn prepare_destination_dirs_creates_valid_dirs_and_rejects_escapes() {
+        let root = env::temp_dir().join(format!(
+            "sa-mod-manager-prep-{}-{}",
+            std::process::id(),
+            unix_now()
+        ));
+        let game_root = root.join("game");
+        let source = root.join("source");
+        fs::create_dir_all(source.join("nested")).unwrap();
+        fs::create_dir_all(&game_root).unwrap();
+        fs::write(source.join("a.txt"), "a").unwrap();
+        fs::write(source.join("nested/b.txt"), "b").unwrap();
+        let files = collect_files_recursive(&source).unwrap();
+
+        // A target under the game root is created and validated.
+        let target = game_root.join("modloader");
+        prepare_destination_dirs(&source, &target, &files, &game_root).unwrap();
+        assert!(target.join("nested").is_dir());
+
+        // A target outside the game root is rejected before anything is created,
+        // leaving no stray directory behind.
+        let escaping = root.join("outside");
+        let err = prepare_destination_dirs(&source, &escaping, &files, &game_root)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("escapes game root"), "{err}");
+        assert!(!escaping.exists(), "rejected target must not be created");
+
+        fs::remove_dir_all(&root).unwrap();
     }
 }

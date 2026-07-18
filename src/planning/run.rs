@@ -6,17 +6,70 @@ use super::rollback::rollback_journal;
 pub(crate) fn prepare_run(game_root: &Path, profile_name: &str) -> Result<(), AppError> {
     let (launch_args, launch_env) = profile_launch_settings(game_root, profile_name)?;
     let journal_path = materialize_profile_for_run(game_root, profile_name)?;
-    let launch_result = launch_game_and_wait(game_root, &launch_args, &launch_env);
+    let started_unix = unix_now();
+    let status_result = launch_game_and_wait(game_root, &launch_args, &launch_env);
+    // Record how the launch actually went before rolling the run back, so a
+    // failed launch is distinguishable from a real play session in telemetry.
+    record_run_outcome(
+        game_root,
+        &journal_path,
+        profile_name,
+        &launch_args,
+        started_unix,
+        &status_result,
+    );
+    let launch_result = interpret_launch_status(status_result);
     let rollback_result = rollback_journal(&journal_path, game_root);
     launch_result?;
     rollback_result
+}
+
+fn record_run_outcome(
+    game_root: &Path,
+    journal_path: &Path,
+    profile_name: &str,
+    launch_args: &[String],
+    started_unix: u64,
+    status_result: &Result<ExitStatus, AppError>,
+) {
+    let finished_unix = unix_now();
+    let (result, exit_code) = match status_result {
+        Ok(status) if status.success() => (RUN_RESULT_SUCCESS, status.code()),
+        Ok(status) => (RUN_RESULT_GAME_ERROR, status.code()),
+        Err(_) => (RUN_RESULT_LAUNCH_FAILED, None),
+    };
+    let outcome = RunOutcome {
+        version: 1,
+        txid: txid_from_journal(journal_path),
+        profile: profile_name.to_string(),
+        result: result.to_string(),
+        exit_code,
+        duration_ms: Some(finished_unix.saturating_sub(started_unix).saturating_mul(1000)),
+        launch_args: launch_args.to_vec(),
+        started_unix,
+        finished_unix,
+    };
+    // Telemetry is best-effort: a failed write must not fail the run itself.
+    if let Err(err) = write_run_outcome(&state_directory(game_root), &outcome) {
+        log_warn!("could not record run outcome: {err}");
+    }
+}
+
+/// Map a finished launch to the run's result. A non-zero game exit and a spawn
+/// failure both surface as errors, matching the previous behavior.
+fn interpret_launch_status(status_result: Result<ExitStatus, AppError>) -> Result<(), AppError> {
+    match status_result {
+        Ok(status) if status.success() => Ok(()),
+        Ok(status) => Err(AppError::Usage(format!("game exited with status: {status}"))),
+        Err(err) => Err(err),
+    }
 }
 
 fn launch_game_and_wait(
     game_root: &Path,
     args: &[String],
     env: &BTreeMap<String, String>,
-) -> Result<(), AppError> {
+) -> Result<ExitStatus, AppError> {
     let exe = game_executable(game_root).ok_or_else(|| {
         AppError::Usage(format!(
             "game executable not found under {}",
@@ -28,13 +81,7 @@ fn launch_game_and_wait(
         .args(args)
         .envs(env)
         .status()?;
-    if status.success() {
-        Ok(())
-    } else {
-        Err(AppError::Usage(format!(
-            "game exited with status: {status}"
-        )))
-    }
+    Ok(status)
 }
 
 fn game_executable(game_root: &Path) -> Option<PathBuf> {
@@ -59,8 +106,12 @@ pub(crate) fn materialize_profile_for_run(
         &mut journal,
     );
     if let Err(err) = materialize_result {
-        rollback_failed_materialization(game_root, &run_state.journal_path, journal, err)?;
-        unreachable!("rollback_failed_materialization always returns an error");
+        return Err(rollback_failed_materialization(
+            game_root,
+            &run_state.journal_path,
+            journal,
+            err,
+        ));
     }
 
     sync_journal(&mut journal)?;
@@ -82,12 +133,18 @@ fn apply_profile_mods_for_run(
     Ok(())
 }
 
+/// Roll back a partially-materialized run and return the error to surface.
+///
+/// Returns the original `materialize_error` when rollback succeeds, or a
+/// combined error when rollback itself fails. Returning [`AppError`] directly
+/// (rather than `Result`) makes "this function always yields an error" a
+/// type-level guarantee, so the caller needs no `unreachable!`.
 fn rollback_failed_materialization(
     game_root: &Path,
     journal_path: &Path,
     mut journal: fs::File,
     materialize_error: AppError,
-) -> Result<(), AppError> {
+) -> AppError {
     let flush_result = journal.flush();
     drop(journal);
 
@@ -97,11 +154,11 @@ fn rollback_failed_materialization(
     };
 
     match rollback_result {
-        Ok(()) => Err(materialize_error),
-        Err(rollback_error) => Err(AppError::Usage(format!(
+        Ok(()) => materialize_error,
+        Err(rollback_error) => AppError::Usage(format!(
             "failed to materialize profile: {materialize_error}; rollback also failed: {rollback_error}; journal: {}",
             journal_path.display()
-        ))),
+        )),
     }
 }
 

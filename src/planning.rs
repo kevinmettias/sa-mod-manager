@@ -6,6 +6,7 @@ mod install_lock;
 mod print;
 mod rollback;
 mod run;
+mod run_outcome;
 
 pub(crate) use analysis::analyze_package;
 pub(crate) use apply::apply_install_plan;
@@ -14,3 +15,7 @@ pub(crate) use install_lock::{interrupted_install, recover_interrupted_install};
 pub(crate) use print::print_install_plan;
 pub(crate) use rollback::rollback_journal;
 pub(crate) use run::{materialize_profile_for_run, prepare_run};
+pub(crate) use run_outcome::{
+    RUN_RESULT_GAME_ERROR, RUN_RESULT_LAUNCH_FAILED, RUN_RESULT_SUCCESS, RunOutcome,
+    read_run_outcome_for_journal, txid_from_journal, write_run_outcome,
+};

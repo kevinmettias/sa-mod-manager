@@ -40,23 +40,27 @@ mod prelude {
         write_package_manifest,
     };
     pub(crate) use crate::planning::{
+        RUN_RESULT_GAME_ERROR, RUN_RESULT_LAUNCH_FAILED, RUN_RESULT_SUCCESS, RunOutcome,
         analyze_package, apply_install_plan, build_install_plan, interrupted_install,
-        materialize_profile_for_run, prepare_run, print_install_plan, recover_interrupted_install,
-        rollback_journal, sort_operations_for_apply,
+        materialize_profile_for_run, prepare_run, print_install_plan, read_run_outcome_for_journal,
+        recover_interrupted_install, rollback_journal, sort_operations_for_apply, txid_from_journal,
+        write_run_outcome,
     };
     pub(crate) use crate::reporting::{
         escape_value, extension_eq, extract_to_staging, file_name, find_seven_zip, human_bytes,
         human_datetime,
         is_readme_name, json_escape, list_matching, normalize_path, package_id, print_report,
-        safe_name, state_directory, unescape_value, unix_now,
+        read_capped, safe_name, safe_profile_name, state_directory, unescape_value, unix_now,
     };
     pub(crate) use crate::workspace::{
         add_mod_to_profile_json, copy_profile, create_profile, delete_profile, ensure_state,
         import_package, init_state, inspect_game, list_profiles, load_profile_for_edit,
-        profile_launch_settings, read_active_profile, remove_mod_from_profile_json, rename_profile,
-        scan_roots, set_active_profile, set_profile_launch_args, set_profile_mod_activation,
-        set_profile_mod_order, set_profile_root_override, set_profile_root_target, show_profile_json,
-        target_template,
+        profile_launch_settings, read_active_profile, read_import_manifest,
+        remove_mod_from_profile_json, rename_profile,
+        scan_roots, set_active_profile, set_all_profile_mods, set_profile_launch_args,
+        set_profile_mod_activation, set_profile_mod_order, set_profile_mod_order_list,
+        set_profile_root_override,
+        set_profile_root_target, show_profile_json, target_template,
         update_mod_config_install_root, write_mod_config_json, write_mod_config_json_with_source,
         write_profile_json, write_profile_json_file,
     };
@@ -68,7 +72,7 @@ mod prelude {
     pub(crate) use std::fs;
     pub(crate) use std::io::{self, Write};
     pub(crate) use std::path::{Path, PathBuf};
-    pub(crate) use std::process::Command;
+    pub(crate) use std::process::{Command, ExitStatus};
     pub(crate) use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 }
 

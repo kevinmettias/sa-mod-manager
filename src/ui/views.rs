@@ -7,7 +7,7 @@ use super::san_andreas_mod_ui::{
 };
 use super::state::{ModConfigItem, UiTab};
 use super::widgets::{
-    infrastructure_grid, profile_grid_header, selected_profile_entries, should_add_mod_to_profile,
+    infrastructure_grid, selected_profile_entries, should_add_mod_to_profile,
 };
 
 impl SanAndreasModUi {
@@ -256,6 +256,11 @@ impl SanAndreasModUi {
                 },
             );
             summary_tile(ui, "Runs", &self.telemetry.run_journals.to_string());
+            summary_tile(
+                ui,
+                "Failed launches",
+                &self.telemetry.failed_launches.to_string(),
+            );
         });
         ui.add_space(8.0);
         self.next_action_panel(ui);
@@ -568,7 +573,13 @@ impl SanAndreasModUi {
                 },
             );
         });
-        ui.label("Toggle mods for this profile and set lower load-order numbers first.");
+        self.profile_management_panel(ui);
+        self.profile_launch_args_panel(ui);
+        ui.separator();
+        ui.label(
+            "Load order runs top to bottom: mods lower in the list overwrite the ones above them. \
+             Drag the ⣿ handle, use ▲/▼, or type a priority number to reorder; the checkbox toggles a mod.",
+        );
         ui.separator();
         if entries.is_empty() {
             ui.label("No mods in this profile."); // literal: allow external interface text or file-format spelling
@@ -582,57 +593,329 @@ impl SanAndreasModUi {
             });
             return;
         }
-        egui::Grid::new("profile_mod_grid") // literal: allow external interface text or file-format spelling
-            .striped(true)
-            .min_col_width(92.0)
-            .show(ui, |ui| {
-                profile_grid_header(ui);
-                for entry in entries {
-                    self.profile_mod_row(ui, &entry);
+        self.profile_mod_order_list(ui, &entries);
+        self.profile_root_overrides_panel(ui, &entries);
+    }
+
+    /// Profile lifecycle actions that were previously CLI-only: set-active,
+    /// copy, rename, and delete.
+    fn profile_management_panel(&mut self, ui: &mut egui::Ui) {
+        ui.group(|ui| {
+            ui.horizontal(|ui| {
+                if ui
+                    .button("Set active")
+                    .on_hover_text("Use this profile by default (like `profile-use`)")
+                    .clicked()
+                {
+                    self.set_active_selected_profile();
+                }
+                if ui
+                    .button("All off (vanilla)")
+                    .on_hover_text("Disable every mod so the next run is vanilla")
+                    .clicked()
+                {
+                    self.set_all_selected_profile_mods(ProfileModActivation::Disabled);
+                }
+                if ui
+                    .button("All on")
+                    .on_hover_text("Enable every mod in this profile")
+                    .clicked()
+                {
+                    self.set_all_selected_profile_mods(ProfileModActivation::Enabled);
+                }
+                if ui
+                    .button("Delete")
+                    .on_hover_text("Delete this profile (asks first)")
+                    .clicked()
+                {
+                    self.request_delete_profile();
                 }
             });
+            ui.horizontal(|ui| {
+                ui.label("Copy to");
+                ui.add_sized(
+                    [140.0, ROW_HEIGHT],
+                    egui::TextEdit::singleline(&mut self.copy_profile_input),
+                );
+                if ui.button("Copy").clicked() {
+                    self.copy_selected_profile();
+                }
+                ui.label("Rename to");
+                ui.add_sized(
+                    [140.0, ROW_HEIGHT],
+                    egui::TextEdit::singleline(&mut self.rename_profile_input),
+                );
+                if ui.button("Rename").clicked() {
+                    self.rename_selected_profile();
+                }
+            });
+        });
+    }
+
+    /// Editor for the profile's launch arguments (space-separated), mirroring the
+    /// CLI `profile-args` verb.
+    fn profile_launch_args_panel(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
+            ui.label("Launch args");
+            ui.add_sized(
+                [360.0, ROW_HEIGHT],
+                egui::TextEdit::singleline(&mut self.launch_args_input)
+                    .hint_text("-nointro -windowed"),
+            );
+            if ui
+                .button("Save args")
+                .on_hover_text("Set this profile's launch arguments")
+                .clicked()
+            {
+                self.save_launch_args();
+            }
+        });
     }
 }
 
 impl SanAndreasModUi {
-    pub(super) fn profile_mod_row(&mut self, ui: &mut egui::Ui, entry: &ProfileModEntry) {
-        let mut enabled = entry.enabled;
-        /* literal: allow external interface text or file-format spelling */
-        /* literal: allow external interface text or file-format spelling */
-        if ui
-            .checkbox(&mut enabled, "")
-            .on_hover_text("Enable or disable this mod in the current profile")
-            .changed()
-        {
+    /// A Mod-Organizer-style ordered mod list: a drag handle for seamless
+    /// drag-to-reorder, ▲/▼ nudges, a directly editable priority index, and a
+    /// per-mod enable checkbox. All mutations are collected during the immutable
+    /// pass over `entries` and applied afterwards, so `self` is never borrowed
+    /// mutably while the rows are drawn.
+    pub(super) fn profile_mod_order_list(
+        &mut self,
+        ui: &mut egui::Ui,
+        entries: &[ProfileModEntry],
+    ) {
+        let count = entries.len();
+        let order_ids: Vec<String> = entries.iter().map(|entry| entry.id.clone()).collect();
+
+        // Deferred side effects (at most one fires per frame in practice).
+        let mut activation: Option<(String, bool)> = None;
+        let mut remove: Option<String> = None;
+        let mut reorder: Option<Vec<String>> = None;
+
+        ui.horizontal(|ui| {
+            ui.add_space(20.0);
+            ui.strong("On");
+            ui.strong("Priority");
+            ui.strong("Mod");
+        });
+        egui::ScrollArea::vertical()
+            .auto_shrink([false, true])
+            .max_height(420.0)
+            .show(ui, |ui| {
+                // Reorder resolved from a completed drag (source → insertion slot).
+                let mut drag_from: Option<usize> = None;
+                let mut drop_to: Option<usize> = None;
+
+                for (idx, entry) in entries.iter().enumerate() {
+                    // A move requested by this row via a button or the index field.
+                    let mut move_to: Option<usize> = None;
+                    let row = ui
+                        .horizontal(|ui| {
+                            // Drag handle — the drag source carries this row index.
+                            ui.dnd_drag_source(
+                                egui::Id::new(("mod_grip", &entry.id)),
+                                idx,
+                                |ui| {
+                                    ui.label("⣿").on_hover_text("Drag to reorder");
+                                },
+                            );
+
+                            let mut enabled = entry.enabled;
+                            if ui
+                                .checkbox(&mut enabled, "")
+                                .on_hover_text("Enable or disable this mod in the current profile")
+                                .changed()
+                            {
+                                activation = Some((entry.id.clone(), enabled));
+                            }
+
+                            // 1-based priority; typing a new number moves the mod there.
+                            let mut position = idx + 1;
+                            if ui
+                                .add(
+                                    egui::DragValue::new(&mut position)
+                                        .range(1..=count.max(1))
+                                        .speed(0.1),
+                                )
+                                .on_hover_text("Priority — type a number to move this mod there")
+                                .changed()
+                            {
+                                let target = position.clamp(1, count) - 1;
+                                if target != idx {
+                                    move_to = Some(target);
+                                }
+                            }
+
+                            if ui
+                                .add_enabled(idx > 0, egui::Button::new("▲"))
+                                .on_hover_text("Move up (loads earlier)")
+                                .clicked()
+                            {
+                                move_to = Some(idx - 1);
+                            }
+                            if ui
+                                .add_enabled(idx + 1 < count, egui::Button::new("▼"))
+                                .on_hover_text("Move down (loads later, overwrites)")
+                                .clicked()
+                            {
+                                move_to = Some(idx + 1);
+                            }
+
+                            let name = ui.label(&entry.id);
+                            name.on_hover_text(entry.config.display().to_string());
+                            if !entry.enabled {
+                                ui.weak("(off)");
+                            }
+
+                            if ui
+                                .button("Remove")
+                                .on_hover_text("Remove this mod from the profile (asks first)")
+                                .clicked()
+                            {
+                                remove = Some(entry.id.clone());
+                            }
+                        })
+                        .response;
+
+                    if let Some(target) = move_to {
+                        reorder = Some(move_in_list(&order_ids, idx, target));
+                    }
+
+                    // Drag feedback + drop resolution over the whole row rect.
+                    let row_zone = ui.interact(
+                        row.rect,
+                        egui::Id::new(("mod_row", &entry.id)),
+                        egui::Sense::hover(),
+                    );
+                    if row_zone.dnd_hover_payload::<usize>().is_some() {
+                        let center_y = row.rect.center().y;
+                        let pointer_y = ui
+                            .input(|input| input.pointer.interact_pos().map(|pos| pos.y))
+                            .unwrap_or(center_y);
+                        let line_y = if pointer_y < center_y {
+                            row.rect.top()
+                        } else {
+                            row.rect.bottom()
+                        };
+                        ui.painter().hline(
+                            row.rect.x_range(),
+                            line_y,
+                            egui::Stroke::new(2.0, ui.visuals().selection.bg_fill),
+                        );
+                    }
+                    if let Some(payload) = row_zone.dnd_release_payload::<usize>() {
+                        let center_y = row.rect.center().y;
+                        let pointer_y = ui
+                            .input(|input| input.pointer.interact_pos().map(|pos| pos.y))
+                            .unwrap_or(center_y);
+                        drag_from = Some(*payload);
+                        drop_to = Some(if pointer_y < center_y { idx } else { idx + 1 });
+                    }
+                }
+
+                if let (Some(from), Some(to)) = (drag_from, drop_to) {
+                    // A drop onto the source's own slot (or its lower edge) is a no-op.
+                    if to != from && to != from + 1 {
+                        let adjusted = if from < to { to - 1 } else { to };
+                        reorder = Some(move_in_list(&order_ids, from, adjusted));
+                    }
+                }
+            });
+
+        if let Some((mod_id, enabled)) = activation {
             let activation = if enabled {
                 ProfileModActivation::Enabled
             } else {
                 ProfileModActivation::Disabled
             };
-            self.set_mod_activation(&entry.id, activation);
+            self.set_mod_activation(&mod_id, activation);
         }
-        let mut order = entry.load_order;
-        let order_drag = egui::DragValue::new(&mut order).speed(10);
-        if ui
-            .add(order_drag)
-            .on_hover_text("Load order: lower loads first; later mods overwrite earlier files")
-            .changed()
-        {
-            self.set_mod_order(&entry.id, order);
+        if let Some(ordered_ids) = reorder {
+            self.reorder_profile_mods(ordered_ids);
         }
-        ui.label(&entry.id);
-        let config_display = entry.config.display().to_string();
-        ui.monospace(config_display);
-        /* literal: allow external interface text or file-format spelling */
-        /* literal: allow external interface text or file-format spelling */
-        if ui
-            .button("Remove")
-            .on_hover_text("Remove this mod from the profile (asks first)")
-            .clicked()
-        {
-            self.request_remove_mod(&entry.id);
+        if let Some(mod_id) = remove {
+            self.request_remove_mod(&mod_id);
         }
-        ui.end_row();
+    }
+
+    /// Per-profile install-root overrides (disable or retarget a single root),
+    /// previously reachable only via `profile-root`/`profile-root-target`.
+    fn profile_root_overrides_panel(&mut self, ui: &mut egui::Ui, entries: &[ProfileModEntry]) {
+        let mods = self.state.mods.clone();
+        let has_any = entries.iter().any(|entry| {
+            mods.iter()
+                .any(|item| item.config.id == entry.id && !item.config.install_roots.is_empty())
+        });
+        if !has_any {
+            return;
+        }
+        ui.separator();
+        ui.heading("Per-Profile Install Root Overrides");
+        ui.label("Disable or retarget individual install roots for this profile without editing the mod.");
+        for entry in entries {
+            let Some(item) = mods.iter().find(|item| item.config.id == entry.id) else {
+                continue;
+            };
+            if item.config.install_roots.is_empty() {
+                continue;
+            }
+            egui::CollapsingHeader::new(format!(
+                "{} — {} roots",
+                entry.id,
+                item.config.install_roots.len()
+            ))
+            .id_salt(format!("root_overrides_{}", entry.id))
+            .show(ui, |ui| {
+                for root in &item.config.install_roots {
+                    self.profile_root_override_row(ui, &entry.id, entry, root);
+                }
+            });
+        }
+    }
+
+    fn profile_root_override_row(
+        &mut self,
+        ui: &mut egui::Ui,
+        mod_id: &str,
+        entry: &ProfileModEntry,
+        root: &ModInstallRootJson,
+    ) {
+        let key = format!("{mod_id}#{}", root.source);
+        let override_entry = entry.root_overrides.get(&root.source);
+        let mut enabled = override_entry.and_then(|o| o.enabled).unwrap_or(root.enabled);
+        let effective_target = override_entry
+            .and_then(|o| o.target.clone())
+            .unwrap_or_else(|| root.target.clone());
+        let mut enabled_changed = false;
+        let mut save_target = None;
+        // Borrow the edit buffer up front so the closure never touches `self`.
+        let target_buf = self
+            .profile_root_target_edits
+            .entry(key.clone())
+            .or_insert(effective_target);
+        ui.horizontal(|ui| {
+            enabled_changed = ui
+                .checkbox(&mut enabled, "")
+                .on_hover_text("Enable this install root for this profile")
+                .changed();
+            ui.label(&root.source);
+            ui.label("→");
+            ui.add_sized([180.0, ROW_HEIGHT], egui::TextEdit::singleline(target_buf));
+            if ui
+                .button("Retarget")
+                .on_hover_text("Point this root at a different game target for this profile")
+                .clicked()
+            {
+                save_target = Some(target_buf.clone());
+            }
+        });
+        if enabled_changed {
+            self.set_profile_root_enabled(mod_id, &root.source, enabled);
+        }
+        if let Some(target) = save_target {
+            self.save_profile_root_target(mod_id, &root.source, &target);
+            self.profile_root_target_edits.remove(&key);
+        }
     }
 }
 
@@ -762,6 +1045,20 @@ impl SanAndreasModUi {
 
 fn mod_root_edit_key(path: &Path, root_index: usize) -> String {
     format!("{}#{root_index}", path.display())
+}
+
+/// Return a copy of `ids` with the entry at `from` moved so it lands at index
+/// `to`. Out-of-range indices are clamped, so callers can pass a raw drop slot
+/// or a typed priority without extra bounds checks.
+fn move_in_list(ids: &[String], from: usize, to: usize) -> Vec<String> {
+    let mut ids = ids.to_vec();
+    if from >= ids.len() {
+        return ids;
+    }
+    let item = ids.remove(from);
+    let to = to.min(ids.len());
+    ids.insert(to, item);
+    ids
 }
 
 /// The install-root kinds the planner understands. Selecting from this list
@@ -1084,6 +1381,11 @@ impl SanAndreasModUi {
         ui.horizontal_wrapped(|ui| {
             summary_tile(ui, "Imports", &self.telemetry.imports.to_string());
             summary_tile(ui, "Runs", &self.telemetry.run_journals.to_string());
+            summary_tile(
+                ui,
+                "Failed launches",
+                &self.telemetry.failed_launches.to_string(),
+            );
             summary_tile(ui, "Installs", &self.telemetry.install_journals.to_string());
             summary_tile(ui, "Copied files", &self.telemetry.copied_files.to_string());
             summary_tile(

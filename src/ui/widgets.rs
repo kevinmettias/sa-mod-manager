@@ -3,14 +3,6 @@ use eframe::egui;
 
 use super::state::{InfrastructureItem, ModConfigItem, UiState};
 
-pub(super) fn profile_grid_header(ui: &mut egui::Ui) {
-    ui.strong("Use"); // literal: allow external interface text or file-format spelling
-    ui.strong("Order"); // literal: allow external interface text or file-format spelling
-    ui.strong("Mod"); // literal: allow external interface text or file-format spelling
-    ui.strong("Config"); // literal: allow external interface text or file-format spelling
-    ui.end_row();
-}
-
 pub(super) fn infrastructure_grid(ui: &mut egui::Ui, infrastructure: &[InfrastructureItem]) {
     /* literal: allow external interface text or file-format spelling */
     /* literal: allow external interface text or file-format spelling */

@@ -96,7 +96,7 @@ fn list_mod_configs(
 }
 
 fn inspect_infrastructure(game_root: &Path) -> Vec<InfrastructureItem> {
-    let checks = [
+    let builtin = [
         ("Steam executable", "gta-sa.exe"), // literal: allow external interface text or file-format spelling
         ("Classic executable", "gta_sa.exe"), // literal: allow external interface text or file-format spelling
         ("Mod Loader ASI", "modloader.asi"), // literal: allow external interface text or file-format spelling
@@ -105,15 +105,23 @@ fn inspect_infrastructure(game_root: &Path) -> Vec<InfrastructureItem> {
         ("CLEO folder", "CLEO"),  // literal: allow external interface text or file-format spelling
         ("ASI loader DLL", "vorbisFile.dll"), // literal: allow external interface text or file-format spelling
     ];
-    checks
+    let mut items: Vec<InfrastructureItem> = builtin
         .into_iter()
-        .map(|(label, relative)| {
-            let path = game_root.join(relative);
-            InfrastructureItem {
-                label: label.to_string(),
-                present: path.exists(),
-                path,
-            }
-        })
-        .collect()
+        .map(|(label, relative)| infrastructure_item(game_root, label, relative))
+        .collect();
+    // Config-declared checks (e.g. an alternate ASI loader like dinput8.dll) are
+    // appended so the status panel can recognize non-default setups.
+    for (label, relative) in crate::settings::extra_infrastructure_checks() {
+        items.push(infrastructure_item(game_root, label, relative));
+    }
+    items
+}
+
+fn infrastructure_item(game_root: &Path, label: &str, relative: &str) -> InfrastructureItem {
+    let path = game_root.join(relative);
+    InfrastructureItem {
+        label: label.to_string(),
+        present: path.exists(),
+        path,
+    }
 }

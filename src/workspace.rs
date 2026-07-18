@@ -7,9 +7,10 @@ mod scan;
 mod state;
 
 pub(crate) use game::inspect_game;
-pub(crate) use import::{import_package, target_template};
+pub(crate) use import::{import_package, read_import_manifest, target_template};
 pub(crate) use membership::{
-    remove_mod_from_profile_json, set_profile_mod_activation, set_profile_mod_order,
+    remove_mod_from_profile_json, set_all_profile_mods, set_profile_mod_activation,
+    set_profile_mod_order, set_profile_mod_order_list,
 };
 pub(crate) use mod_config::{
     append_mod_config_install_root, update_mod_config_install_root, write_mod_config_json,

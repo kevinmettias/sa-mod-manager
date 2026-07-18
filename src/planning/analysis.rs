@@ -287,9 +287,9 @@ fn add_dry_run_insights(report: &PackageReport, insights: &mut Vec<ReadmeInsight
         }
         let source = instruction.source.as_deref().unwrap_or("unknown source");
         let target = instruction.target.as_deref().unwrap_or("unknown target");
-        let state = if instruction.confidence >= 0.85 {
+        let state = if instruction.confidence >= crate::settings::readme_auto_confidence() {
             "will auto-propose"
-        } else if instruction.confidence >= 0.60 {
+        } else if instruction.confidence >= crate::settings::readme_review_confidence() {
             "needs review before use"
         } else {
             "warning only"
@@ -313,7 +313,7 @@ fn add_override_insights(report: &PackageReport, insights: &mut Vec<ReadmeInsigh
         .iter()
         .any(|instruction| {
             matches!(instruction.action, ReadmeAction::Copy)
-                && (instruction.confidence < 0.85
+                && (instruction.confidence < crate::settings::readme_auto_confidence()
                     || instruction.source.is_none()
                     || instruction.target.is_none())
         });
@@ -1587,7 +1587,13 @@ mod tests {
             excludes: BTreeSet::new(),
             write_manifest: false,
         };
-        let plan = build_install_plan(&report, &options);
+        // Inject explicit thresholds so plan inclusion depends only on the code
+        // under test, not on the developer's local config file.
+        let plan = crate::planning::build::build_install_plan_with(
+            &report,
+            &options,
+            crate::settings::ReadmeThresholds::default(),
+        );
 
         assert_eq!(report.readme_instructions.len(), 1);
         assert_eq!(
@@ -1626,7 +1632,11 @@ mod tests {
             excludes: BTreeSet::new(),
             write_manifest: false,
         };
-        let plan = build_install_plan(&report, &options);
+        let plan = crate::planning::build::build_install_plan_with(
+            &report,
+            &options,
+            crate::settings::ReadmeThresholds::default(),
+        );
 
         assert_eq!(report.readme_instructions.len(), 1);
         assert!(report.readme_instructions[0].confidence < 0.85);

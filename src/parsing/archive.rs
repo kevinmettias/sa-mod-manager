@@ -10,6 +10,14 @@ pub(crate) fn extract_archive_to_named_staging(
     package_id: &str,
 ) -> Result<PathBuf, AppError> {
     let target = state_directory(game_root).join("staging").join(package_id); // literal: allow external interface text or file-format spelling
+    // Reused, per-package staging path: clear any prior extraction first so stale
+    // files from an earlier (possibly different) version of this package cannot
+    // linger and mix into the fresh contents. Import uses unique dirs instead, so
+    // only this named-staging path needs the reset.
+    if target.exists() {
+        fs::remove_dir_all(&target)
+            .with_context(|| format!("clear staging directory {}", target.display()))?;
+    }
     extract_archive_to_directory(package, &target)?;
     Ok(target)
 }
@@ -30,14 +38,24 @@ fn extract_archive_raw(
 ) -> Result<(), AppError> {
     match archive_backend(package) {
         ArchiveBackend::NativeZip => extract_zip_to_directory(package, target, budget),
-        ArchiveBackend::SevenZip => extract_with_seven_zip(package, target),
+        ArchiveBackend::SevenZip => extract_with_seven_zip(package, target, budget),
     }
 }
 
-fn extract_with_seven_zip(package: &Path, target: &Path) -> Result<(), AppError> {
+fn extract_with_seven_zip(
+    package: &Path,
+    target: &Path,
+    budget: &ExtractBudget,
+) -> Result<(), AppError> {
     let seven_zip = find_seven_zip().ok_or_else(|| missing_7zip_error_for_package(package))?;
+    // The external extractor gives no per-entry hook, so the containment and
+    // zip-bomb guarantees the native path enforces inline are made here from the
+    // archive listing *before* `7z x` writes anything: reject path-traversal
+    // entries and charge declared sizes against the shared budget so a classic
+    // decompression bomb is refused before it ever reaches disk.
+    seven_zip_preflight(&seven_zip, package, budget)?;
     fs::create_dir_all(target)?;
-    let output = Command::new(seven_zip)
+    let output = Command::new(&seven_zip)
         .env("LC_ALL", "C") // prefer stable, English tool messages regardless of system locale
         .arg("x") // literal: allow external interface text or file-format spelling
         .arg("-y") // literal: allow external interface text or file-format spelling
@@ -48,6 +66,100 @@ fn extract_with_seven_zip(package: &Path, target: &Path) -> Result<(), AppError>
         return Err(seven_zip_extract_error(package, &output.stderr));
     }
     Ok(())
+}
+
+/// List a `.7z`/`.rar` before extraction, enforcing the same guarantees the
+/// native zip path enforces per entry: reject any entry whose path escapes the
+/// target, and charge the declared uncompressed sizes and entry count against
+/// the shared budget so an over-limit archive (the classic bomb) is refused
+/// before `7z x` writes a single byte.
+fn seven_zip_preflight(
+    seven_zip: &Path,
+    package: &Path,
+    budget: &ExtractBudget,
+) -> Result<(), AppError> {
+    use std::io::BufRead;
+
+    let mut child = Command::new(seven_zip)
+        .env("LC_ALL", "C") // prefer stable tool output regardless of system locale
+        .arg("l") // literal: allow external interface text or file-format spelling
+        .arg("-slt") // literal: allow external interface text or file-format spelling
+        .arg(package)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()?;
+
+    let mut declared_bytes: u64 = 0;
+    let mut declared_entries: usize = 0;
+    // 7-Zip prints an archive-level block first (whose `Path` is the archive's
+    // own, often absolute, path); real entries follow the `----------` divider.
+    let mut past_header = false;
+    if let Some(stdout) = child.stdout.take() {
+        for line in io::BufReader::new(stdout).lines() {
+            let line = line?;
+            if line.starts_with("----------") {
+                past_header = true;
+                continue;
+            }
+            if !past_header {
+                continue;
+            }
+            if let Some(value) = strip_listing_key(&line, "Path = ") {
+                declared_entries = declared_entries.saturating_add(1);
+                ensure_contained_entry(value.trim(), package)?;
+            } else if let Some(value) = strip_listing_key(&line, "Size = ")
+                && let Ok(size) = value.trim().parse::<u64>()
+            {
+                declared_bytes = declared_bytes.saturating_add(size);
+            }
+        }
+    }
+    if !child.wait()?.success() {
+        return Err(list_archive_failed_error(package));
+    }
+
+    if declared_entries > budget.remaining_entries() {
+        return Err(too_many_entries_error(package));
+    }
+    if declared_bytes > budget.remaining_bytes() {
+        return Err(archive_too_large_error(package));
+    }
+    // Charge the declared totals so nested archives draw down the same budget,
+    // mirroring the native path's per-entry accounting.
+    budget.charge(declared_bytes, declared_entries);
+    Ok(())
+}
+
+/// Reject a listed archive entry whose path would extract outside the target —
+/// absolute, drive-qualified (`C:\…`), or containing a `..` component. This is
+/// the 7-Zip-path equivalent of the native backend's `enclosed_name()` guard.
+fn ensure_contained_entry(entry_path: &str, package: &Path) -> Result<(), AppError> {
+    let normalized = entry_path.replace('\\', "/");
+    let drive_qualified = normalized
+        .as_bytes()
+        .get(1)
+        .is_some_and(|&byte| byte == b':');
+    let looks_absolute =
+        normalized.starts_with('/') || Path::new(&normalized).is_absolute() || drive_qualified;
+    let has_parent_escape = normalized.split('/').any(|component| component == "..");
+    if looks_absolute || has_parent_escape {
+        return Err(AppError::Tool(format!(
+            "{} contains an unsafe entry path '{entry_path}' that would extract outside the package; refusing to extract",
+            package.display()
+        )));
+    }
+    Ok(())
+}
+
+/// Strip a 7-Zip `-slt` property key case-insensitively (tolerant of casing and
+/// leading-byte quirks) so listing parsing does not hinge on exact key casing.
+fn strip_listing_key<'a>(line: &'a str, key: &str) -> Option<&'a str> {
+    let head = line.get(..key.len())?;
+    if head.eq_ignore_ascii_case(key) {
+        Some(&line[key.len()..])
+    } else {
+        None
+    }
 }
 
 fn extract_nested_archives(root: &Path, budget: &mut ExtractBudget) -> Result<(), AppError> {
@@ -156,20 +268,36 @@ pub(crate) fn collect_files_recursive(root: &Path) -> Result<Vec<PathBuf>, AppEr
     Ok(files)
 }
 
-fn extract_failed_error(package: &Path) -> AppError {
-    let message = format!("7-Zip failed to extract {}", package.display());
-    AppError::Tool(message)
-}
-
 fn seven_zip_extract_error(package: &Path, stderr: &[u8]) -> AppError {
-    let text = String::from_utf8_lossy(stderr).to_ascii_lowercase();
-    if text.contains("wrong password") || text.contains("password") || text.contains("encrypted") {
+    let text = String::from_utf8_lossy(stderr);
+    let lower = text.to_ascii_lowercase();
+    if lower.contains("wrong password") || lower.contains("password") || lower.contains("encrypted")
+    {
         return AppError::Tool(format!(
             "7-Zip could not extract {} because it is password-protected/encrypted, which is not supported",
             package.display()
         ));
     }
-    extract_failed_error(package)
+    // Keep 7-Zip's own reason instead of collapsing every failure to a generic
+    // line, so a genuinely corrupt archive is diagnosable.
+    AppError::Tool(format!(
+        "7-Zip failed to extract {}{}",
+        package.display(),
+        stderr_snippet(&text)
+    ))
+}
+
+/// A compact, single-line tail of a tool's stderr for use in an error message:
+/// the last non-empty line, length-capped, so we keep the diagnostic without
+/// dumping a multi-line banner.
+fn stderr_snippet(text: &str) -> String {
+    match text.lines().rev().find(|line| !line.trim().is_empty()) {
+        Some(line) => {
+            let capped: String = line.trim().chars().take(200).collect();
+            format!(": {capped}")
+        }
+        None => String::new(),
+    }
 }
 
 fn zip_entry_error(package: &Path, err: &zip::result::ZipError) -> AppError {
@@ -232,6 +360,26 @@ impl ExtractBudget {
 
     fn remaining_bytes(&self) -> u64 {
         self.remaining_bytes.load(Ordering::Relaxed)
+    }
+
+    fn remaining_entries(&self) -> usize {
+        self.remaining_entries.load(Ordering::Relaxed)
+    }
+
+    /// Draw down the budget by an already-validated amount (used by the 7-Zip
+    /// path after its listing has been checked against the remaining budget).
+    /// Saturating, since the caller has already refused anything over budget.
+    fn charge(&self, bytes: u64, entries: usize) {
+        self.remaining_bytes
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |value| {
+                Some(value.saturating_sub(bytes))
+            })
+            .ok();
+        self.remaining_entries
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |value| {
+                Some(value.saturating_sub(entries))
+            })
+            .ok();
     }
 }
 
@@ -394,12 +542,17 @@ fn extract_zip_entry(
     let mut entry = archive
         .by_index(idx)
         .map_err(|err| zip_entry_error(package, &err))?;
+    let raw_name = entry.name().to_string();
     let Some(enclosed) = entry.enclosed_name() else {
+        // A traversal/absolute entry is dropped rather than extracted; surface
+        // it so a partially-skipped archive isn't silently reported as complete.
+        log_warn!("skipped unsafe zip entry path: {raw_name}");
         return Ok(());
     };
     // Skip symlink entries: materializing one would let a later entry write
     // through the link to a path outside the extraction target (zip-slip).
     if is_symlink_mode(entry.unix_mode()) {
+        log_warn!("skipped symlink zip entry: {raw_name}");
         return Ok(());
     }
     let dest = target.join(enclosed);
@@ -585,6 +738,33 @@ mod tests {
         assert!(!is_symlink_mode(Some(0o100644))); // regular file
         assert!(!is_symlink_mode(Some(0o040755))); // directory
         assert!(!is_symlink_mode(None)); // no unix mode recorded
+    }
+
+    #[test]
+    fn seven_zip_entry_containment_rejects_escapes_and_allows_safe_paths() {
+        let package = Path::new("mod.7z");
+        // Safe relative paths pass.
+        for safe in [
+            "modloader/Test/file.txt",
+            "CLEO/script.cs",
+            "readme.txt",
+            "a/b/c.dat",
+        ] {
+            assert!(ensure_contained_entry(safe, package).is_ok(), "{safe}");
+        }
+        // Traversal, absolute, and drive-qualified paths are refused.
+        for unsafe_path in [
+            "../escape.txt",
+            "modloader/../../escape.txt",
+            "/etc/passwd",
+            r"C:\Windows\system32\evil.dll",
+            r"..\..\outside.txt",
+        ] {
+            let err = ensure_contained_entry(unsafe_path, package)
+                .unwrap_err()
+                .to_string();
+            assert!(err.contains("unsafe entry path"), "{unsafe_path}: {err}");
+        }
     }
 
     #[test]
