@@ -35,6 +35,11 @@ fn list_folder_entries(root: &Path) -> Result<Vec<PackageEntry>, AppError> {
     Ok(entries)
 }
 
+/// Cap on how many entries we enumerate from one archive listing. Matches the
+/// extraction entry cap: a listing bigger than what we would ever extract is
+/// hostile, and building the entry vector unbounded would let it dictate memory.
+const MAX_LISTED_ENTRIES: usize = 500_000;
+
 fn list_archive_entries(package: &Path) -> Result<Vec<PackageEntry>, AppError> {
     if let Some(entries) = list_archive_entries_native(package)? {
         return Ok(entries);
@@ -43,9 +48,17 @@ fn list_archive_entries(package: &Path) -> Result<Vec<PackageEntry>, AppError> {
     let mut fields = ArchiveEntryFields::default();
 
     // Parse the `7z l -slt` output as it streams, so we never buffer the whole
-    // listing (which is O(entries)) — only one line plus the entry list we build.
+    // listing (which is O(entries)) — only one line plus the entry list we build,
+    // and that list is bounded by MAX_LISTED_ENTRIES.
     stream_archive_listing(package, |line| {
         parse_archive_listing_line(line, &mut fields, &mut entries);
+        if entries.len() > MAX_LISTED_ENTRIES {
+            return Err(list_archive_failed_error_detail(
+                package,
+                b"archive lists more entries than the manager will enumerate",
+            ));
+        }
+        Ok(())
     })?;
 
     fields.flush_into(&mut entries);
@@ -56,7 +69,7 @@ fn list_archive_entries(package: &Path) -> Result<Vec<PackageEntry>, AppError> {
 
 fn stream_archive_listing(
     package: &Path,
-    mut on_line: impl FnMut(&str),
+    mut on_line: impl FnMut(&str) -> Result<(), AppError>,
 ) -> Result<(), AppError> {
     use std::io::BufRead;
 
@@ -67,15 +80,18 @@ fn stream_archive_listing(
         .arg("-slt") // literal: allow external interface text or file-format spelling
         .arg(package)
         .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
         .spawn()?;
     if let Some(stdout) = child.stdout.take() {
         for line in std::io::BufReader::new(stdout).lines() {
-            on_line(&line?);
+            on_line(&line?)?;
         }
     }
-    if !child.wait()?.success() {
-        return Err(list_archive_failed_error(package));
+    // `wait_with_output` drains the remaining (small) stderr so a genuine 7-Zip
+    // failure reports its own reason instead of a bare generic message.
+    let output = child.wait_with_output()?;
+    if !output.status.success() {
+        return Err(list_archive_failed_error_detail(package, &output.stderr));
     }
     Ok(())
 }
@@ -384,8 +400,8 @@ fn detected_layout_templates(report: &PackageReport) -> Vec<String> {
     {
         layouts.push("modloader mirror: package has game-folder structure suitable for modloader".to_string());
     }
-    if has(Component::Cleo) || has(Component::CleoText) {
-        layouts.push("CLEO script package: .cs/.cleo/.fxt files should map to CLEO/CLEO_TEXT".to_string());
+    if has(Component::Cleo) || has(Component::CleoText) || has(Component::CleoPlugin) {
+        layouts.push("CLEO package: .cs/.cs4/.cs3 → CLEO/, .cleo plugins → CLEO/cleo_plugins/, .fxt → CLEO/cleo_text/".to_string());
     }
     if has(Component::Asi) {
         layouts.push("ASI root package: .asi/.dll/.ini payload likely belongs in the game root or ASI-supported modloader folder".to_string());
@@ -795,9 +811,23 @@ fn infer_source_from_target_and_contents(
     report: &PackageReport,
 ) -> Option<String> {
     let target = target?.to_ascii_lowercase();
+    if target == "cleo_plugins" || target == "cleo_plugin" || target.ends_with("/cleo_plugins") {
+        return source_with_extensions(report, &["cleo"])
+            .or_else(|| source_named_like(report, &["cleo_plugins", "cleo_plugin"]));
+    }
+    if target == "cleo_text" || target.ends_with("/cleo_text") {
+        return source_with_extensions(report, &["fxt"])
+            .or_else(|| source_named_like(report, &["cleo_text"]));
+    }
+    if target == "cleo_modules" || target.ends_with("/cleo_modules") {
+        return source_named_like(report, &["cleo_modules"]);
+    }
+    if target == "cleo_saves" || target.ends_with("/cleo_saves") {
+        return source_named_like(report, &["cleo_saves"]);
+    }
     if target == "cleo" {
-        return source_with_extensions(report, &["cs", "cleo", "fxt"])
-            .or_else(|| source_named_like(report, &["cleo", "cleo_text"]));
+        return source_with_extensions(report, &["cs", "cs4", "cs3", "fxt"])
+            .or_else(|| source_named_like(report, &["cleo"]));
     }
     if target == "modloader" {
         return source_with_game_mirror(report)
@@ -1233,6 +1263,12 @@ fn validate_wrap_kind(manifest_path: &str, idx: usize, kind: &str) -> Result<(),
         "modloader"
             | "cleo"
             | "cleo_text"
+            | "cleo_plugins"
+            | "cleo_plugin"
+            | "cleo_modules"
+            | "cleo_module"
+            | "cleo_saves"
+            | "cleo_save"
             | "asi"
             | "plugin"
             | "bootstrap"
@@ -1319,7 +1355,11 @@ fn manifest_install_root_from_json(root: WrapInstallRootFile) -> ManifestInstall
 
 fn target_kind_from_manifest(kind: &str) -> TargetKind {
     match kind.to_ascii_lowercase().as_str() {
-        "cleo" | "cleo_text" => TargetKind::Cleo,
+        "cleo" => TargetKind::Cleo,
+        "cleo_text" => TargetKind::CleoText,
+        "cleo_plugins" | "cleo_plugin" => TargetKind::CleoPlugin,
+        "cleo_modules" | "cleo_module" => TargetKind::CleoModules,
+        "cleo_saves" | "cleo_save" => TargetKind::CleoSaves,
         "asi" | "plugin" => TargetKind::Asi,
         "bootstrap" | "runtime" => TargetKind::Bootstrap,
         "direct" | "directmanaged" | "direct_managed" => TargetKind::DirectManaged,

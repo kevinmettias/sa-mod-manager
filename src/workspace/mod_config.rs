@@ -38,7 +38,7 @@ pub(crate) fn update_mod_config_install_root(
     root_index: usize,
     root: &ModInstallRootJson,
 ) -> Result<(), AppError> {
-    let text = fs::read_to_string(config_path)?;
+    let text = read_capped(config_path, MAX_CONTROL_FILE_BYTES)?;
     let mut json: serde_json::Value = serde_json::from_str(&text).map_err(|err| {
         AppError::Usage(format!("invalid mod json {}: {err}", config_path.display()))
     })?;
@@ -73,7 +73,7 @@ pub(crate) fn append_mod_config_install_root(
     config_path: &Path,
     root: &ModInstallRootJson,
 ) -> Result<bool, AppError> {
-    let text = fs::read_to_string(config_path)?;
+    let text = read_capped(config_path, MAX_CONTROL_FILE_BYTES)?;
     let mut json: serde_json::Value = serde_json::from_str(&text).map_err(|err| {
         AppError::Usage(format!("invalid mod json {}: {err}", config_path.display()))
     })?;

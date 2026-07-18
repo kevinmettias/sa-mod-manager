@@ -47,6 +47,16 @@ fn resolve_initial_game_root(cli_game_root: Option<PathBuf>, preferences: &UiPre
     crate::settings::default_game_root()
 }
 
+/// How the profile mod list filters by activation state, mirroring MO2's
+/// Checked/Unchecked category shortcuts.
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
+pub(super) enum ModStatusFilter {
+    #[default]
+    All,
+    Enabled,
+    Disabled,
+}
+
 pub(super) struct SanAndreasModUi {
     pub(super) game_root_input: String,
     pub(super) selected_profile: String,
@@ -79,6 +89,32 @@ pub(super) struct SanAndreasModUi {
     /// In-progress per-profile install-root target edits, keyed by
     /// `<mod-id>#<root-source>` (mirrors `mod_root_edits`).
     pub(super) profile_root_target_edits: BTreeMap<String, String>,
+    /// Cached content/conflict index for the selected profile. `None` means it
+    /// has not been scanned yet (walking mod files is deferred to a click);
+    /// reloading state clears it so a stale view is never shown.
+    pub(super) content_index: Option<ContentIndex>,
+    /// ModLoader's own per-folder priorities, read alongside a content scan.
+    pub(super) modloader_priorities: Option<ModLoaderPriorities>,
+    /// Summary of the last run's `modloader.log` (what ModLoader actually loaded
+    /// or failed to), read alongside a content scan. `None` until scanned.
+    pub(super) modloader_log: Option<ModLoaderLogSummary>,
+    /// Active content viewer filter: `None` shows every category.
+    pub(super) content_category: Option<ContentCategory>,
+    pub(super) content_search: String,
+    pub(super) content_conflicts_only: bool,
+    /// Profile mod-list filters (MO2's Categories sidebar + Filter box). While
+    /// any is active, reordering is disabled so hidden rows can't misdirect it.
+    pub(super) mod_filter_text: String,
+    pub(super) mod_filter_status: ModStatusFilter,
+    pub(super) mod_filter_category: Option<ContentCategory>,
+    pub(super) mod_filter_conflicts: bool,
+    /// Configured external run targets (MO2's executables), loaded from disk.
+    pub(super) executables: Vec<Executable>,
+    /// Selected run target: 0 = play the current profile, 1.. = `executables[n-1]`.
+    pub(super) selected_run_target: usize,
+    pub(super) new_tool_name: String,
+    pub(super) new_tool_path: String,
+    pub(super) new_tool_args: String,
     window_size: [f32; 2],
     last_pref_save: Instant,
     prefs_signature: String,
@@ -259,6 +295,21 @@ impl SanAndreasModUi {
             rename_profile_input: String::new(),
             launch_args_input: String::new(),
             profile_root_target_edits: BTreeMap::new(),
+            content_index: None,
+            modloader_priorities: None,
+            modloader_log: None,
+            content_category: None,
+            content_search: String::new(),
+            content_conflicts_only: false,
+            mod_filter_text: String::new(),
+            mod_filter_status: ModStatusFilter::default(),
+            mod_filter_category: None,
+            mod_filter_conflicts: false,
+            executables: Vec::new(),
+            selected_run_target: 0,
+            new_tool_name: String::new(),
+            new_tool_path: String::new(),
+            new_tool_args: String::new(),
             window_size: preferences.window_size(),
             last_pref_save: Instant::now(),
             prefs_signature: String::new(),
@@ -306,6 +357,17 @@ impl SanAndreasModUi {
         self.refresh_pending_runs();
         self.telemetry =
             load_telemetry_summary(&self.game_root(), self.pending_runs.len()).unwrap_or_default();
+        // Any edit that reloads state (toggle, reorder, import, profile switch)
+        // can change what materializes, so drop the cached content index; the
+        // viewer re-scans on demand.
+        self.content_index = None;
+        self.modloader_priorities = None;
+        self.modloader_log = None;
+        self.executables = read_executables(&state_directory(&self.game_root()));
+        // Keep the run-target selection in range if a tool was removed elsewhere.
+        if self.selected_run_target > self.executables.len() {
+            self.selected_run_target = 0;
+        }
         Ok(())
     }
 
@@ -467,13 +529,14 @@ impl SanAndreasModUi {
         if editing || self.pending_confirm.is_some() {
             return;
         }
+        // Detail-pane tabs, matching the strip order in `detail_panel`.
         const TAB_KEYS: [(Key, UiTab); 6] = [
-            (Key::Num1, UiTab::Home),
-            (Key::Num2, UiTab::Profiles),
-            (Key::Num3, UiTab::Mods),
-            (Key::Num4, UiTab::Import),
-            (Key::Num5, UiTab::Run),
-            (Key::Num6, UiTab::Telemetry),
+            (Key::Num1, UiTab::Content),
+            (Key::Num2, UiTab::Import),
+            (Key::Num3, UiTab::Run),
+            (Key::Num4, UiTab::Mods),
+            (Key::Num5, UiTab::Telemetry),
+            (Key::Num6, UiTab::Home),
         ];
         for (key, tab) in TAB_KEYS {
             if ctx.input_mut(|input| input.consume_key(Modifiers::COMMAND, key)) {
@@ -524,22 +587,23 @@ impl eframe::App for SanAndreasModUi {
         self.handle_file_drops(context);
         self.tick_pending_run_watcher();
         context.request_repaint_after(crate::settings::pending_run_watch_interval());
-        egui::TopBottomPanel::top("top_bar").show(context, |ui| self.top_bar(ui)); // literal: allow external interface text or file-format spelling
+        // MO2-style single-page shell: a top toolbar, a left filters column, the
+        // mod list as the always-visible centre, a right tabbed detail pane, and a
+        // bottom status bar — no full-page tab switching.
+        egui::TopBottomPanel::top("toolbar").show(context, |ui| self.toolbar(ui));
         self.error_banner(context);
-        egui::SidePanel::left("navigation") // literal: allow external interface text or file-format spelling
-            .exact_width(184.0)
-            .show(context, |ui| self.navigation(ui));
         egui::TopBottomPanel::bottom("status") // literal: allow external interface text or file-format spelling
             .exact_height(34.0)
             .show(context, |ui| self.status_bar(ui));
-        egui::CentralPanel::default().show(context, |ui| match self.tab {
-            UiTab::Home => self.home_panel(ui),
-            UiTab::Profiles => self.profiles_panel(ui),
-            UiTab::Mods => self.mods_panel(ui),
-            UiTab::Import => self.import_panel(ui),
-            UiTab::Run => self.run_panel(ui),
-            UiTab::Telemetry => self.telemetry_panel(ui),
-        });
+        egui::SidePanel::left("filters")
+            .resizable(true)
+            .default_width(190.0)
+            .show(context, |ui| self.filters_panel(ui));
+        egui::SidePanel::right("detail")
+            .resizable(true)
+            .default_width(560.0)
+            .show(context, |ui| self.detail_panel(ui));
+        egui::CentralPanel::default().show(context, |ui| self.mods_center_panel(ui));
         self.confirm_modal(context);
         self.persist_preferences_if_changed(context);
     }
@@ -628,7 +692,9 @@ fn load_journal_telemetry(
         if !path.is_file() {
             continue;
         }
-        let text = fs::read_to_string(&path)?;
+        // Journals are `key=value` lines, one per installed file; cap the read so
+        // a corrupt/oversized journal can't blow up telemetry aggregation.
+        let text = read_capped(&path, 64 * 1024 * 1024)?;
         summary.journals += 1;
         let mode = telemetry_line_value(&text, "mode").unwrap_or_default();
         let created_unix = telemetry_line_value(&text, "created_unix")

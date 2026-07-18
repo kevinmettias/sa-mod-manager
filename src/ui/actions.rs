@@ -131,6 +131,81 @@ impl SanAndreasModUi {
 }
 
 impl SanAndreasModUi {
+    /// Jump to the Content tab focused on one mod: scan if needed, then filter
+    /// the viewer to that mod's files (optionally only its conflicts). Powers the
+    /// per-mod "Show files / Show conflicts" cross-link from the load-order list.
+    pub(super) fn focus_mod_in_content(&mut self, mod_id: &str, conflicts_only: bool) {
+        if self.content_index.is_none() {
+            self.rescan_content();
+        }
+        self.content_category = None;
+        self.content_search = mod_id.to_string();
+        self.content_conflicts_only = conflicts_only;
+        self.tab = crate::ui::state::UiTab::Content;
+    }
+
+    /// Walk the selected profile's enabled mods (in load order) and rebuild the
+    /// content/conflict index. Deferred to an explicit call because it reads
+    /// every mod's files; the result is cached until state changes.
+    pub(super) fn rescan_content(&mut self) {
+        let entries = super::widgets::selected_profile_entries(&self.state, &self.selected_profile);
+        let mods_by_id: BTreeMap<&str, &super::state::ModConfigItem> = self
+            .state
+            .mods
+            .iter()
+            .map(|item| (item.config.id.as_str(), item))
+            .collect();
+
+        let mut indexed = Vec::new();
+        let mut archive_only = Vec::new();
+        for entry in entries.iter().filter(|entry| entry.enabled) {
+            let Some(item) = mods_by_id.get(entry.id.as_str()) else {
+                continue;
+            };
+            // Prefer the extracted library files; fall back to a folder package.
+            // An archive that was never imported has no readable tree to index.
+            let source_root = item
+                .config
+                .source_root
+                .clone()
+                .filter(|path| path.is_dir())
+                .or_else(|| {
+                    item.config
+                        .package
+                        .is_dir()
+                        .then(|| item.config.package.clone())
+                });
+            let Some(source_root) = source_root else {
+                archive_only.push(entry.id.clone());
+                continue;
+            };
+            let roots = effective_install_roots(&item.config.install_roots, &entry.root_overrides);
+            indexed.push(IndexedMod {
+                id: entry.id.clone(),
+                source_root,
+                roots,
+            });
+        }
+
+        let mut index = build_content_index(&indexed);
+        index.not_indexed.extend(archive_only);
+        index.not_indexed.sort();
+        index.not_indexed.dedup();
+        self.status = format!(
+            "content scan: {} files, {} conflicts",
+            index.entries.len(),
+            index.conflict_count()
+        );
+        self.content_index = Some(index);
+        // ModLoader's own priority config governs load order within modloader/;
+        // read it alongside the scan so the ModLoader viewer can surface it.
+        self.modloader_priorities = read_modloader_priorities(&self.game_root());
+        // And what ModLoader actually did last run, for the after-the-fact check.
+        self.modloader_log = read_modloader_log(&self.game_root());
+    }
+}
+
+impl SanAndreasModUi {
     pub(super) fn remove_mod_from_profile(&mut self, mod_id: &str) {
         let profile = self.selected_profile.clone();
         let mod_id = mod_id.to_string();
@@ -186,6 +261,91 @@ fn validate_install_root_path(label: &str, value: &str) -> Result<(), AppError> 
 }
 
 impl SanAndreasModUi {
+    /// Run the selected target: index 0 plays the current profile (materialize +
+    /// launch + cleanup), any other index launches that external tool directly.
+    pub(super) fn run_selected_target(&mut self, ctx: &egui::Context) {
+        if self.selected_run_target == 0 {
+            self.launch_selected_profile(ctx);
+            return;
+        }
+        let Some(tool) = self.executables.get(self.selected_run_target - 1).cloned() else {
+            self.selected_run_target = 0;
+            return;
+        };
+        match launch_external_tool(&PathBuf::from(&tool.path), &tool.arg_list()) {
+            Ok(_child) => {
+                // The tool runs detached; we neither wait on nor clean up after it.
+                self.last_error = None;
+                self.status = format!("launched tool: {}", tool.name);
+            }
+            Err(err) => self.record_error(err),
+        }
+    }
+
+    pub(super) fn add_executable(&mut self) {
+        let name = self.new_tool_name.trim().to_string();
+        let path = self.new_tool_path.trim().to_string();
+        if name.is_empty() || path.is_empty() {
+            self.record_error(AppError::Usage(
+                "a run target needs both a name and an executable path".to_string(),
+            ));
+            return;
+        }
+        let mut executables = self.executables.clone();
+        executables.push(Executable {
+            name,
+            path,
+            args: self.new_tool_args.trim().to_string(),
+        });
+        let state_root = state_directory(&self.game_root());
+        match write_executables(&state_root, &executables) {
+            Ok(()) => {
+                self.new_tool_name.clear();
+                self.new_tool_path.clear();
+                self.new_tool_args.clear();
+                self.status = "added run target".to_string();
+                if let Err(err) = self.reload_state() {
+                    self.record_error(err);
+                }
+            }
+            Err(err) => self.record_error(err),
+        }
+    }
+
+    pub(super) fn remove_executable(&mut self, index: usize) {
+        if index >= self.executables.len() {
+            return;
+        }
+        let mut executables = self.executables.clone();
+        executables.remove(index);
+        let state_root = state_directory(&self.game_root());
+        match write_executables(&state_root, &executables) {
+            Ok(()) => {
+                self.selected_run_target = 0;
+                self.status = "removed run target".to_string();
+                if let Err(err) = self.reload_state() {
+                    self.record_error(err);
+                }
+            }
+            Err(err) => self.record_error(err),
+        }
+    }
+
+    pub(super) fn browse_tool_path(&mut self) {
+        if let Some(path) = rfd::FileDialog::new()
+            .set_title("Select a tool executable")
+            .add_filter("Executables", &["exe", "bat", "cmd"])
+            .pick_file()
+        {
+            if self.new_tool_name.trim().is_empty() {
+                if let Some(stem) = path.file_stem() {
+                    self.new_tool_name = stem.to_string_lossy().to_string();
+                }
+            }
+            self.new_tool_path = path.display().to_string();
+        }
+    }
+
     pub(super) fn launch_selected_profile(&mut self, ctx: &egui::Context) {
         self.refresh_pending_runs();
         if self.has_unsafe_pending_runs_for_launch() {

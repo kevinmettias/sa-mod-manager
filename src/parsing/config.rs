@@ -5,7 +5,7 @@ use crate::prelude::*;
 const CURRENT_PROFILE_VERSION: u32 = 1;
 
 pub(crate) fn read_profile_json(path: &Path) -> Result<ProfileJson, AppError> {
-    let text = fs::read_to_string(path)?;
+    let text = read_capped(path, MAX_CONTROL_FILE_BYTES)?;
     let raw: ProfileJsonFile = serde_json::from_str(&text).map_err(|err| {
         AppError::Usage(format!("invalid profile json {}: {err}", path.display()))
     })?;
@@ -134,7 +134,7 @@ fn default_mod_config_path(game_root: &Path, id: &str) -> PathBuf {
 }
 
 pub(crate) fn read_mod_config_json(path: &Path) -> Result<ModConfigJson, AppError> {
-    let text = fs::read_to_string(path)?;
+    let text = read_capped(path, MAX_CONTROL_FILE_BYTES)?;
     let raw: ModConfigJsonFile = serde_json::from_str(&text)
         .map_err(|err| AppError::Usage(format!("invalid mod json {}: {err}", path.display())))?;
     let id = raw.id.unwrap_or_else(|| mod_id_from_path(path));

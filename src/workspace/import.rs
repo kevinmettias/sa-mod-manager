@@ -135,7 +135,7 @@ pub(crate) struct ImportManifest {
 /// Read an import manifest, tolerating any valid JSON layout (pretty, minified,
 /// reordered) rather than a fixed line format.
 pub(crate) fn read_import_manifest(path: &Path) -> Result<ImportManifest, AppError> {
-    let text = fs::read_to_string(path)
+    let text = read_capped(path, MAX_CONTROL_FILE_BYTES)
         .with_context(|| format!("read import manifest {}", path.display()))?;
     serde_json::from_str(&text)
         .map_err(|err| AppError::Usage(format!("invalid import json {}: {err}", path.display())))
@@ -171,6 +171,10 @@ pub(crate) fn target_template(kind: &TargetKind, package_id: &str) -> String {
             format!("modloader/{}", crate::settings::modloader_folder_name(package_id))
         }
         TargetKind::Cleo => "CLEO".to_string(), // literal: allow external interface text or file-format spelling
+        TargetKind::CleoText => "CLEO/cleo_text".to_string(), // literal: allow external interface text or file-format spelling
+        TargetKind::CleoPlugin => "CLEO/cleo_plugins".to_string(), // literal: allow external interface text or file-format spelling
+        TargetKind::CleoModules => "CLEO/cleo_modules".to_string(), // literal: allow external interface text or file-format spelling
+        TargetKind::CleoSaves => "CLEO/cleo_saves".to_string(), // literal: allow external interface text or file-format spelling
         TargetKind::Asi | TargetKind::Bootstrap => ".".to_string(), // literal: allow external interface text or file-format spelling
         TargetKind::DirectManaged => ".".to_string(), // literal: allow external interface text or file-format spelling
     }

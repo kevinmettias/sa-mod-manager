@@ -19,6 +19,27 @@ pub(crate) fn launch_game_executable(
     Ok(child)
 }
 
+/// Launch a user-configured external tool (MO2's "executables"): spawn it from
+/// its own directory so relative resources resolve, and detach — unlike the
+/// game, tools are not materialized, watched, or cleaned up.
+pub(crate) fn launch_external_tool(
+    path: &Path,
+    args: &[String],
+) -> Result<std::process::Child, AppError> {
+    if !path.exists() {
+        return Err(AppError::Usage(format!(
+            "tool executable not found: {}",
+            path.display()
+        )));
+    }
+    let working_dir = path.parent().unwrap_or_else(|| Path::new("."));
+    let child = Command::new(path)
+        .current_dir(working_dir)
+        .args(args)
+        .spawn()?;
+    Ok(child)
+}
+
 /// Guard destructive/state-creating operations against a wrong `game_root`.
 ///
 /// Refuses to scaffold manager state or copy files into a directory that does

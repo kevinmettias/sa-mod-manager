@@ -4,6 +4,34 @@ fn strings(items: &[&str]) -> Vec<String> {
     items.iter().map(|item| item.to_string()).collect()
 }
 
+/// CLEO script extensions (no leading dot), the single source of truth shared by
+/// detection, classification, the runtime inventory, and the content viewer so
+/// they can never drift apart. These are the only script extensions the CLEO5
+/// engine recognizes: `.cs` (CLEO5), `.cs4` (CLEO4 compatibility mode), `.cs3`
+/// (CLEO3 compatibility mode). There is no `.cs5`. Plugin modules (`.cleo`) and
+/// text (`.fxt`) are deliberately not here — they are their own subsystems.
+pub(crate) const CLEO_SCRIPT_EXTENSIONS: [&str; 3] = ["cs", "cs4", "cs3"];
+
+/// Whether a lowercased path ends in a CLEO script extension (with its dot), e.g.
+/// `speedo.cs4`. Matches only a real extension boundary, so `discs` is not a hit.
+pub(crate) fn has_cleo_script_extension(lower: &str) -> bool {
+    CLEO_SCRIPT_EXTENSIONS.iter().any(|ext| {
+        let dotted_len = ext.len() + 1;
+        lower.len() >= dotted_len
+            && lower.as_bytes()[lower.len() - dotted_len] == b'.'
+            && lower[lower.len() - ext.len()..].eq_ignore_ascii_case(ext)
+    })
+}
+
+/// The CLEO script extensions as dotted suffixes (`.cs`, `.cs4`, …), for building
+/// classification rules that match on suffix strings.
+pub(crate) fn cleo_script_suffixes() -> Vec<String> {
+    CLEO_SCRIPT_EXTENSIONS
+        .iter()
+        .map(|ext| format!(".{ext}"))
+        .collect()
+}
+
 /// The built-in component-classification rules. Users can add more via the
 /// config file; those are appended to these (see [`crate::settings`]).
 pub(crate) fn builtin_component_rules() -> Vec<ComponentRule> {
@@ -15,10 +43,39 @@ pub(crate) fn builtin_component_rules() -> Vec<ComponentRule> {
             suffixes: strings(&[]),
         },
         ComponentRule {
+            // CLEO5 plugin modules load from CLEO/cleo_plugins/, so they must be
+            // routed there rather than dropped in the CLEO script folder.
+            component: Component::CleoPlugin,
+            contains: strings(&["cleo_plugins"]),
+            prefixes: strings(&[]),
+            suffixes: strings(&[".cleo"]),
+        },
+        ComponentRule {
+            component: Component::CleoText,
+            contains: strings(&["cleo_text"]),
+            prefixes: strings(&[]),
+            suffixes: strings(&[".fxt"]),
+        },
+        ComponentRule {
+            // Shared script modules reached via the `modules:` path prefix.
+            component: Component::CleoModules,
+            contains: strings(&["cleo_modules"]),
+            prefixes: strings(&[]),
+            suffixes: strings(&[]),
+        },
+        ComponentRule {
+            // Runtime-generated per-script save data; a mod shipping it is unusual.
+            component: Component::CleoSaves,
+            contains: strings(&["cleo_saves"]),
+            prefixes: strings(&[]),
+            suffixes: strings(&[]),
+        },
+        ComponentRule {
+            // .cs = CLEO5, .cs4 = CLEO4 compat mode, .cs3 = CLEO3 compat mode.
             component: Component::Cleo,
             contains: strings(&["cleo"]),
             prefixes: strings(&[]),
-            suffixes: strings(&[".cs", ".cleo"]),
+            suffixes: cleo_script_suffixes(),
         },
         ComponentRule {
             component: Component::Asi,

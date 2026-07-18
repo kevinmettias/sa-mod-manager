@@ -69,6 +69,69 @@ pub(super) fn apply_copy_tree_with_journal(
     }
 }
 
+/// Write manager-generated `content` to `dest` as a fully journaled operation,
+/// so an ephemeral run's rollback restores the prior file (or removes it when it
+/// was new) exactly as it does for copied mod files. Used for `modloader.ini`,
+/// whose contents the manager synthesizes rather than copies from a source tree.
+///
+/// The existing file is backed up (or recorded `new`) and the journal is fsynced
+/// *before* the destructive write, matching [`apply_copy_file`]'s crash-safety.
+pub(super) fn apply_generated_file_with_journal(
+    content: &str,
+    dest: &Path,
+    context: &mut CopyJournalContext,
+) -> Result<(), AppError> {
+    if let Some(parent) = dest.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("create directory {}", parent.display()))?;
+    }
+    let game_root = context.game_root;
+    let backup_root = context.backup_root;
+    let journal: SharedJournal = Mutex::new(&mut *context.journal);
+    journal_destination_state(dest, game_root, backup_root, &journal)?;
+    sync_shared_journal(&journal)?;
+    let written_hash = write_and_hash(content.as_bytes(), dest)?;
+    // The synthetic "source" field is only journal metadata (rollback keys on the
+    // destination); naming the dest keeps the line self-describing.
+    write_copy_line(&journal, dest, dest, &written_hash)?;
+    Ok(())
+}
+
+/// Atomically write `content` to `dest` (temp + rename) and return its FNV hash,
+/// mirroring [`copy_and_hash`] but for in-memory bytes rather than a source file.
+fn write_and_hash(content: &[u8], dest: &Path) -> Result<String, AppError> {
+    let temp = temp_sibling(dest);
+    let write_result = (|| -> Result<u64, AppError> {
+        let mut output =
+            fs::File::create(&temp).with_context(|| format!("create {}", temp.display()))?;
+        output
+            .write_all(content)
+            .with_context(|| format!("write {}", temp.display()))?;
+        output
+            .sync_all()
+            .with_context(|| format!("sync {}", temp.display()))?;
+        let mut hash = FNV_OFFSET;
+        for &byte in content {
+            hash ^= u64::from(byte);
+            hash = hash.wrapping_mul(FNV_PRIME);
+        }
+        Ok(hash)
+    })();
+    let hash = match write_result {
+        Ok(hash) => hash,
+        Err(err) => {
+            let _ = fs::remove_file(&temp);
+            return Err(err);
+        }
+    };
+    if let Err(err) = fs::rename(&temp, dest) {
+        let _ = fs::remove_file(&temp);
+        return Err(AppError::from(err)
+            .context(format!("replace {} with generated file", dest.display())));
+    }
+    Ok(format!("fnv64:{hash:016x}"))
+}
+
 fn worker_count(file_count: usize) -> usize {
     if file_count <= 1 {
         return 1;
