@@ -6,18 +6,22 @@ mod model;
 mod parsing;
 mod planning;
 mod reporting;
+mod settings;
 mod ui;
 mod workspace;
 
 mod prelude {
     pub(crate) use crate::cli::usage_error;
     pub(crate) use crate::constants::{
-        COMPONENT_RULES, CONTEXT_RULES, DEFAULT_GAME_ROOT, DEFAULT_MOD_ROOTS,
+        DEFAULT_GAME_ROOT, DEFAULT_MOD_ROOTS, builtin_component_rules, builtin_context_rules,
     };
     pub(crate) use crate::game_launch::{
         ensure_gta_install, game_executable_path, launch_game_executable,
     };
     pub(crate) use crate::logging::{log_debug, log_error, log_info, log_warn};
+    pub(crate) use crate::settings::{
+        component_rules, configured_seven_zip, context_rules, write_example_config,
+    };
     pub(crate) use crate::model::{
         AppError, AppErrorKind, ArchiveEntryFields, CandidateDetection, CandidateMetadata,
         CommandOptions, ErrorContext,

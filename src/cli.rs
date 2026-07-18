@@ -89,6 +89,7 @@ fn dispatch_command(command: &str, arguments: Vec<String>) -> Result<(), AppErro
         "rollback" => handle_rollback_command(arguments), // literal: allow external interface text or file-format spelling
         "recover" => handle_recover_command(arguments), // literal: allow external interface text or file-format spelling
         "init" => handle_init_command(arguments), // literal: allow external interface text or file-format spelling
+        "config-init" => handle_config_init_command(arguments), // literal: allow external interface text or file-format spelling
         "profiles" => handle_profiles_command(arguments), // literal: allow external interface text or file-format spelling
         "profile-new" => handle_profile_new_command(arguments), // literal: allow external interface text or file-format spelling
         "profile-use" => handle_profile_use_command(arguments), // literal: allow external interface text or file-format spelling
@@ -122,7 +123,7 @@ fn handle_scan_command(arguments: Vec<String>) -> Result<(), AppError> {
 }
 
 fn default_mod_roots() -> Vec<PathBuf> {
-    DEFAULT_MOD_ROOTS.iter().map(PathBuf::from).collect()
+    crate::settings::default_mod_roots()
 }
 
 fn handle_ui_command(arguments: Vec<String>) -> Result<(), AppError> {
@@ -377,6 +378,13 @@ fn handle_init_command(arguments: Vec<String>) -> Result<(), AppError> {
     init_state(&game_root)
 }
 
+fn handle_config_init_command(_arguments: Vec<String>) -> Result<(), AppError> {
+    let path = write_example_config()?;
+    println!("wrote example config: {}", path.display());
+    println!("edit it to set default game root, mod roots, 7-Zip path, and detection rules");
+    Ok(())
+}
+
 fn handle_profiles_command(arguments: Vec<String>) -> Result<(), AppError> {
     let game_root = optional_game_root_from_raw_arguments(arguments);
     list_profiles(&game_root)
@@ -454,7 +462,7 @@ fn optional_game_root_from_raw_arguments(arguments: Vec<String>) -> PathBuf {
 }
 
 fn default_game_root_path() -> PathBuf {
-    PathBuf::from(DEFAULT_GAME_ROOT)
+    crate::settings::default_game_root()
 }
 
 fn parse_game_root_from_arguments(
@@ -607,6 +615,7 @@ fn print_global_option_usage() {
 fn print_command_usage() {
     println!("Commands:");
     println!("  ui [game-root]                   Open the desktop manager UI");
+    println!("  config-init                      Write an example user config (paths + detection rules)");
     println!("  game [game-root]                 Inspect installed GTA SA mod infrastructure");
     println!("  init [game-root]                 Create manager state folders");
     println!("  profiles [game-root]             List profiles");
@@ -653,7 +662,17 @@ fn print_plan_option_usage() {
 }
 
 fn print_default_usage() {
-    println!("Defaults:");
-    println!("  game root: {DEFAULT_GAME_ROOT}");
-    println!("  mod roots : {}", DEFAULT_MOD_ROOTS.join(", "));
+    // Resolved defaults after config file + env overrides, not just the
+    // compiled-in fallbacks.
+    let mod_roots = default_mod_roots()
+        .iter()
+        .map(|root| root.display().to_string())
+        .collect::<Vec<_>>()
+        .join(", ");
+    println!("Defaults (config/env overridable):");
+    println!("  game root: {}", default_game_root_path().display());
+    println!("  mod roots : {mod_roots}");
+    if let Some(path) = crate::settings::config_file_path() {
+        println!("  config    : {} (run `config-init` to create)", path.display());
+    }
 }

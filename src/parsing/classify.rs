@@ -1,7 +1,7 @@
 use crate::prelude::*;
 
 pub(crate) fn classify_component(lower: &str, components: &mut BTreeSet<Component>) {
-    for rule in COMPONENT_RULES {
+    for rule in component_rules() {
         insert_component_for_rule(lower, components, rule);
     }
 }
@@ -17,32 +17,32 @@ fn insert_component_for_rule(
 }
 
 fn component_rule_matches(lower: &str, rule: &ComponentRule) -> bool {
-    has_any_contains_match(lower, rule.contains)
-        || has_any_prefix_match(lower, rule.prefixes)
-        || has_any_suffix_match(lower, rule.suffixes)
+    has_any_contains_match(lower, &rule.contains)
+        || has_any_prefix_match(lower, &rule.prefixes)
+        || has_any_suffix_match(lower, &rule.suffixes)
 }
 
-fn has_any_contains_match(lower: &str, needles: &[&str]) -> bool {
-    needles.iter().any(|needle| lower.contains(needle))
+fn has_any_contains_match(lower: &str, needles: &[String]) -> bool {
+    needles.iter().any(|needle| lower.contains(needle.as_str()))
 }
 
-fn has_any_prefix_match(lower: &str, prefixes: &[&str]) -> bool {
-    prefixes.iter().any(|prefix| lower.starts_with(prefix))
+fn has_any_prefix_match(lower: &str, prefixes: &[String]) -> bool {
+    prefixes.iter().any(|prefix| lower.starts_with(prefix.as_str()))
 }
 
-fn has_any_suffix_match(lower: &str, suffixes: &[&str]) -> bool {
-    suffixes.iter().any(|suffix| lower.ends_with(suffix))
+fn has_any_suffix_match(lower: &str, suffixes: &[String]) -> bool {
+    suffixes.iter().any(|suffix| lower.ends_with(suffix.as_str()))
 }
 
 pub(crate) fn classify_context(lower: &str, hints: &mut BTreeSet<String>) {
-    for rule in CONTEXT_RULES {
+    for rule in context_rules() {
         insert_context_for_rule(lower, hints, rule);
     }
 }
 
 fn insert_context_for_rule(lower: &str, hints: &mut BTreeSet<String>, rule: &ContextRule) {
-    if rule.aliases.iter().any(|alias| lower.contains(alias)) {
-        insert_context_hint(hints, rule.hint);
+    if rule.aliases.iter().any(|alias| lower.contains(alias.as_str())) {
+        insert_context_hint(hints, &rule.hint);
     }
 }
 
