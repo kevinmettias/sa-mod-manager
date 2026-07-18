@@ -4,8 +4,8 @@ use crate::workspace::append_mod_config_install_root;
 use eframe::egui;
 
 use super::san_andreas_mod_ui::{
-    ConfirmAction, PendingRunRecord, PendingRunStatus, ReadmeProposal, ReadmeProposalState,
-    SanAndreasModUi, TaskResult, export_telemetry_summary,
+    ActiveRun, ConfirmAction, PendingRunRecord, PendingRunStatus, ReadmeProposal,
+    ReadmeProposalState, SanAndreasModUi, TaskResult, export_telemetry_summary,
 };
 
 impl SanAndreasModUi {
@@ -120,14 +120,12 @@ impl SanAndreasModUi {
 }
 
 impl SanAndreasModUi {
-    pub(super) fn set_mod_order(&mut self, mod_id: &str, order: i32) {
+    /// Persist a full drag/button/index reorder of the profile's mods in one
+    /// write, then reload so the list reflects the new positions immediately.
+    pub(super) fn reorder_profile_mods(&mut self, ordered_ids: Vec<String>) {
         let profile = self.selected_profile.clone();
-        let mod_id = mod_id.to_string();
-        /* literal: allow external interface text or file-format spelling */
-        /* literal: allow external interface text or file-format spelling */
-        self.run_action("updated load order", |game_root| {
-            // literal: allow external interface text or file-format spelling
-            set_profile_mod_order(game_root, &profile, &mod_id, order)
+        self.run_action("updated load order", move |game_root| {
+            set_profile_mod_order_list(game_root, &profile, &ordered_ids)
         });
     }
 }
@@ -209,11 +207,13 @@ impl SanAndreasModUi {
 
     pub(super) fn apply_play(
         &mut self,
-        result: Result<(PathBuf, std::process::Child), AppError>,
+        result: Result<(ActiveRun, std::process::Child), AppError>,
     ) {
         match result {
-            Ok((journal, child)) => {
+            Ok((active, child)) => {
+                let journal = active.journal.clone();
                 self.pending_journal = Some(journal.clone());
+                self.active_run = Some(active);
                 self.game_child = Some(child);
                 self.last_error = None;
                 self.status = format!("playing profile; cleanup record {}", journal.display());
@@ -331,7 +331,7 @@ impl SanAndreasModUi {
 
     pub(super) fn tick_pending_run_watcher(&mut self) {
         self.poll_game_child();
-        if self.last_pending_watch.elapsed() < Duration::from_secs(2) {
+        if self.last_pending_watch.elapsed() < crate::settings::pending_run_watch_interval() {
             return;
         }
         self.last_pending_watch = Instant::now();
@@ -343,9 +343,10 @@ impl SanAndreasModUi {
             return;
         };
         match child.try_wait() {
-            Ok(Some(_status)) => {
+            Ok(Some(status)) => {
                 let journal = self.pending_journal.clone();
                 self.game_child = None;
+                self.record_run_exit_outcome(status);
                 if let Some(journal) = journal {
                     match self.cleanup_journal(&journal) {
                         Ok(()) => {
@@ -365,8 +366,42 @@ impl SanAndreasModUi {
             Ok(None) => {}
             Err(err) => {
                 self.game_child = None;
+                self.active_run = None;
                 self.status = format!("could not check game process: {err}");
             }
+        }
+    }
+
+    /// Persist the full outcome (result, exit code, duration, launch args) of the
+    /// run this session launched, once its game process has exited. Only possible
+    /// while we still hold the `ActiveRun` context; a no-op otherwise.
+    fn record_run_exit_outcome(&mut self, status: ExitStatus) {
+        let Some(active) = self.active_run.take() else {
+            return;
+        };
+        let finished_unix = unix_now();
+        let (result, exit_code) = if status.success() {
+            (RUN_RESULT_SUCCESS, status.code())
+        } else {
+            (RUN_RESULT_GAME_ERROR, status.code())
+        };
+        let outcome = RunOutcome {
+            version: 1,
+            txid: active.txid,
+            profile: active.profile,
+            result: result.to_string(),
+            exit_code,
+            duration_ms: Some(
+                finished_unix
+                    .saturating_sub(active.started_unix)
+                    .saturating_mul(1000),
+            ),
+            launch_args: active.launch_args,
+            started_unix: active.started_unix,
+            finished_unix,
+        };
+        if let Err(err) = write_run_outcome(&state_directory(&self.game_root()), &outcome) {
+            log_warn!("could not record run outcome: {err}");
         }
     }
 
@@ -470,21 +505,136 @@ impl SanAndreasModUi {
 
 impl SanAndreasModUi {
     pub(super) fn create_profile(&mut self) {
-        let trimmed_name = self.new_profile_input.trim();
-        let name = trimmed_name.to_string();
+        let name = self.new_profile_input.trim().to_string();
         if name.is_empty() {
             self.status = "profile name is required".to_string(); // literal: allow external interface text or file-format spelling
             return;
         }
-        let profile_name = safe_name(&name);
+        let (profile_name, note) = safe_profile_name(&name);
         /* literal: allow external interface text or file-format spelling */
         /* literal: allow external interface text or file-format spelling */
         self.run_action("created profile", |game_root| {
             // literal: allow external interface text or file-format spelling
             create_profile(game_root, &profile_name)
         });
-        self.selected_profile = profile_name;
+        // Only follow the picker to the new profile when it was actually created.
+        if self.last_error.is_none() {
+            self.selected_profile = profile_name;
+        }
         self.new_profile_input.clear();
+        self.note_name_normalization(note);
+    }
+
+    /// Surface a profile-name normalization note in the status bar, but only on a
+    /// successful action so it never masks an error banner.
+    fn note_name_normalization(&mut self, note: Option<String>) {
+        if let (Some(note), None) = (note, &self.last_error) {
+            self.status = format!("{}; {note}", self.status);
+        }
+    }
+
+    pub(super) fn set_active_selected_profile(&mut self) {
+        let profile = self.selected_profile.clone();
+        self.run_action("set active profile", |game_root| {
+            set_active_profile(game_root, &profile)
+        });
+    }
+
+    pub(super) fn copy_selected_profile(&mut self) {
+        if self.copy_profile_input.trim().is_empty() {
+            self.status = "destination profile name is required".to_string();
+            return;
+        }
+        let (dest, note) = safe_profile_name(&self.copy_profile_input);
+        let source = self.selected_profile.clone();
+        let target = dest.clone();
+        self.run_action("copied profile", |game_root| {
+            copy_profile(game_root, &source, &target)
+        });
+        if self.last_error.is_none() {
+            self.selected_profile = dest;
+        }
+        self.copy_profile_input.clear();
+        self.note_name_normalization(note);
+    }
+
+    pub(super) fn rename_selected_profile(&mut self) {
+        if self.rename_profile_input.trim().is_empty() {
+            self.status = "new profile name is required".to_string();
+            return;
+        }
+        let (new_name, note) = safe_profile_name(&self.rename_profile_input);
+        let old = self.selected_profile.clone();
+        let target = new_name.clone();
+        self.run_action("renamed profile", |game_root| {
+            rename_profile(game_root, &old, &target)
+        });
+        if self.last_error.is_none() {
+            self.selected_profile = new_name;
+        }
+        self.rename_profile_input.clear();
+        self.note_name_normalization(note);
+    }
+
+    pub(super) fn set_all_selected_profile_mods(&mut self, activation: ProfileModActivation) {
+        let profile = self.selected_profile.clone();
+        let label = activation.label();
+        self.run_action(&format!("{label} all mods"), |game_root| {
+            set_all_profile_mods(game_root, &profile, activation)
+        });
+    }
+
+    pub(super) fn request_delete_profile(&mut self) {
+        let profile = self.selected_profile.clone();
+        self.request_confirm(
+            "Delete profile",
+            &format!("Delete profile `{profile}`? This is not undoable."),
+            "Delete",
+            ConfirmAction::DeleteProfile(profile),
+        );
+    }
+
+    pub(super) fn delete_selected_profile(&mut self, name: &str) {
+        let name = name.to_string();
+        self.run_action("deleted profile", |game_root| {
+            delete_profile(game_root, &name)
+        });
+        // Fall back to `default` only if the delete actually happened.
+        if self.last_error.is_none() {
+            self.selected_profile = "default".to_string(); // literal: allow external interface text or file-format spelling
+        }
+    }
+
+    pub(super) fn save_launch_args(&mut self) {
+        // Space-separated tokens become launch arguments, matching `profile-args`.
+        let args: Vec<String> = self
+            .launch_args_input
+            .split_whitespace()
+            .map(str::to_string)
+            .collect();
+        let profile = self.selected_profile.clone();
+        self.run_action("saved launch args", |game_root| {
+            set_profile_launch_args(game_root, &profile, args)
+        });
+    }
+
+    pub(super) fn set_profile_root_enabled(&mut self, mod_id: &str, source: &str, enabled: bool) {
+        let profile = self.selected_profile.clone();
+        let mod_id = mod_id.to_string();
+        let source = source.to_string();
+        self.run_action("updated root override", |game_root| {
+            set_profile_root_override(game_root, &profile, &mod_id, &source, enabled)
+        });
+    }
+
+    pub(super) fn save_profile_root_target(&mut self, mod_id: &str, source: &str, target: &str) {
+        let profile = self.selected_profile.clone();
+        let mod_id = mod_id.to_string();
+        let source = source.to_string();
+        let target = target.to_string();
+        self.run_action("retargeted install root", |game_root| {
+            set_profile_root_target(game_root, &profile, &mod_id, &source, &target)
+        });
     }
 }
 
@@ -654,14 +804,19 @@ impl SanAndreasModUi {
 }
 
 fn readme_proposals_from_report(report: &PackageReport) -> Vec<ReadmeProposal> {
+    // Resolve the thresholds once, then classify every instruction against them.
+    let thresholds = crate::settings::ReadmeThresholds::from_settings();
     report
         .readme_instructions
         .iter()
-        .map(readme_proposal_from_instruction)
+        .map(|instruction| readme_proposal_from_instruction(instruction, thresholds))
         .collect()
 }
 
-fn readme_proposal_from_instruction(instruction: &ReadmeInstruction) -> ReadmeProposal {
+fn readme_proposal_from_instruction(
+    instruction: &ReadmeInstruction,
+    thresholds: crate::settings::ReadmeThresholds,
+) -> ReadmeProposal {
     let source = instruction.source.as_deref().unwrap_or("unknown source");
     let target = instruction.target.as_deref().unwrap_or("unknown target");
     ReadmeProposal {
@@ -671,7 +826,7 @@ fn readme_proposal_from_instruction(instruction: &ReadmeInstruction) -> ReadmePr
         source_readme: instruction.source_readme.clone(),
         line_number: instruction.line_number,
         confidence: instruction.confidence,
-        review_state: readme_proposal_state(instruction),
+        review_state: readme_proposal_state(instruction, thresholds),
         normalized_text: instruction.normalized_text.clone(),
         reasons: instruction.confidence_reasons.clone(),
         source: instruction.source.clone(),
@@ -679,10 +834,15 @@ fn readme_proposal_from_instruction(instruction: &ReadmeInstruction) -> ReadmePr
     }
 }
 
-fn readme_proposal_state(instruction: &ReadmeInstruction) -> ReadmeProposalState {
-    if matches!(instruction.action, ReadmeAction::Copy) && instruction.confidence >= 0.85 {
+fn readme_proposal_state(
+    instruction: &ReadmeInstruction,
+    thresholds: crate::settings::ReadmeThresholds,
+) -> ReadmeProposalState {
+    if matches!(instruction.action, ReadmeAction::Copy)
+        && instruction.confidence >= thresholds.auto
+    {
         ReadmeProposalState::AutoSelected
-    } else if instruction.confidence >= 0.60 {
+    } else if instruction.confidence >= thresholds.review {
         ReadmeProposalState::NeedsReview
     } else {
         ReadmeProposalState::WarningOnly
@@ -709,16 +869,27 @@ fn remember_pending_run(
 fn materialize_and_launch_profile(
     game_root: &Path,
     profile: &str,
-) -> Result<(PathBuf, std::process::Child), AppError> {
+) -> Result<(ActiveRun, std::process::Child), AppError> {
     let (launch_args, launch_env) = profile_launch_settings(game_root, profile)?;
     let journal = materialize_profile_for_run(game_root, profile)?;
+    let started_unix = unix_now();
     remember_pending_run(game_root, &journal, None)?;
     match launch_game_executable(game_root, &launch_args, &launch_env) {
         Ok(child) => {
             remember_pending_run(game_root, &journal, Some(child.id()))?;
-            Ok((journal, child))
+            let active = ActiveRun {
+                txid: txid_from_journal(&journal),
+                journal,
+                profile: profile.to_string(),
+                launch_args,
+                started_unix,
+            };
+            Ok((active, child))
         }
         Err(launch_error) => {
+            // The executable never started: record a launch-failed outcome so
+            // this rolled-back attempt is not later counted as a run.
+            record_launch_failed_outcome(game_root, &journal, profile, &launch_args, started_unix);
             let rollback_result = rollback_journal(&journal, game_root)
                 .and_then(|_| forget_pending_run(game_root, &journal));
             match rollback_result {
@@ -729,6 +900,30 @@ fn materialize_and_launch_profile(
                 ))),
             }
         }
+    }
+}
+
+fn record_launch_failed_outcome(
+    game_root: &Path,
+    journal: &Path,
+    profile: &str,
+    launch_args: &[String],
+    started_unix: u64,
+) {
+    let finished_unix = unix_now();
+    let outcome = RunOutcome {
+        version: 1,
+        txid: txid_from_journal(journal),
+        profile: profile.to_string(),
+        result: RUN_RESULT_LAUNCH_FAILED.to_string(),
+        exit_code: None,
+        duration_ms: Some(finished_unix.saturating_sub(started_unix).saturating_mul(1000)),
+        launch_args: launch_args.to_vec(),
+        started_unix,
+        finished_unix,
+    };
+    if let Err(err) = write_run_outcome(&state_directory(game_root), &outcome) {
+        log_warn!("could not record launch-failed outcome: {err}");
     }
 }
 
@@ -767,7 +962,9 @@ fn load_pending_run_records(game_root: &Path) -> Result<Vec<PendingRunRecord>, A
 }
 
 fn read_pending_run_record(path: &Path) -> Result<Option<PendingRunRecord>, AppError> {
-    let text = fs::read_to_string(path)?;
+    // A pending-run record is a handful of `key=value` lines; cap the read so a
+    // corrupt/oversized file can't dictate our memory use.
+    let text = read_capped(path, 64 * 1024)?;
     let mut journal = None;
     let mut pid = None;
     for line in text.lines() {
@@ -836,7 +1033,7 @@ fn validate_pending_journal(game_root: &Path, journal: &Path) -> Result<(), AppE
             journals_root.display()
         )));
     }
-    let content = fs::read_to_string(journal)?;
+    let content = read_capped(journal, 64 * 1024 * 1024)?;
     if !content.lines().any(|line| line == "mode=ephemeral-run") {
         return Err(AppError::Usage(format!(
             "pending journal is not an ephemeral run journal: {}",
@@ -869,17 +1066,9 @@ fn pending_record_path(game_root: &Path, journal: &Path) -> PathBuf {
 }
 
 fn process_is_running(pid: u32) -> bool {
-    if pid == 0 {
-        return false;
-    }
-    #[cfg(windows)]
-    {
-        windows_process_is_running(pid)
-    }
-    #[cfg(not(windows))]
-    {
-        false
-    }
+    // Single source of truth: the same OpenProcess-based liveness check the
+    // install lock uses, rather than a second copy that could drift from it.
+    crate::game_launch::process_is_running(pid)
 }
 
 fn pending_run_matches_current_session(
@@ -887,20 +1076,6 @@ fn pending_run_matches_current_session(
     current_pid: Option<u32>,
 ) -> bool {
     current_pid.is_some() && record.status == PendingRunStatus::Running && record.pid == current_pid
-}
-
-#[cfg(windows)]
-fn windows_process_is_running(pid: u32) -> bool {
-    let filter = format!("PID eq {pid}");
-    let output = Command::new("tasklist").arg("/FI").arg(filter).output();
-    let Ok(output) = output else {
-        return false;
-    };
-    if !output.status.success() {
-        return false;
-    }
-    let text = String::from_utf8_lossy(&output.stdout);
-    text.lines().any(|line| line.contains(&pid.to_string()))
 }
 
 #[cfg(test)]
@@ -1004,20 +1179,23 @@ mod tests {
 
     #[test]
     fn readme_proposals_expose_confidence_review_states() {
+        // Explicit thresholds keep the classification independent of any local
+        // config the developer may have set.
+        let thresholds = crate::settings::ReadmeThresholds::default();
         let high = test_readme_instruction(ReadmeAction::Copy, 0.90);
         let medium = test_readme_instruction(ReadmeAction::Copy, 0.72);
         let low = test_readme_instruction(ReadmeAction::Copy, 0.40);
 
         assert_eq!(
-            readme_proposal_from_instruction(&high).review_state,
+            readme_proposal_from_instruction(&high, thresholds).review_state,
             ReadmeProposalState::AutoSelected
         );
         assert_eq!(
-            readme_proposal_from_instruction(&medium).review_state,
+            readme_proposal_from_instruction(&medium, thresholds).review_state,
             ReadmeProposalState::NeedsReview
         );
         assert_eq!(
-            readme_proposal_from_instruction(&low).review_state,
+            readme_proposal_from_instruction(&low, thresholds).review_state,
             ReadmeProposalState::WarningOnly
         );
     }

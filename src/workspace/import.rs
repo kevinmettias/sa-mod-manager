@@ -117,6 +117,30 @@ fn remove_dir_if_exists(path: &Path) -> Result<(), AppError> {
     Ok(())
 }
 
+/// The `import.json` manifest recorded for each imported package. Serialized and
+/// parsed with `serde_json` (like `mod.json`/`profile.json`) so the on-disk form
+/// survives reformatting or minifying instead of relying on one-field-per-line
+/// prefix matching.
+#[derive(Serialize, Deserialize, Default)]
+#[serde(default)]
+pub(crate) struct ImportManifest {
+    pub(crate) version: u32,
+    pub(crate) id: String,
+    pub(crate) package: String,
+    pub(crate) imported_unix: u64,
+    pub(crate) entry_count: usize,
+    pub(crate) operation_count: usize,
+}
+
+/// Read an import manifest, tolerating any valid JSON layout (pretty, minified,
+/// reordered) rather than a fixed line format.
+pub(crate) fn read_import_manifest(path: &Path) -> Result<ImportManifest, AppError> {
+    let text = fs::read_to_string(path)
+        .with_context(|| format!("read import manifest {}", path.display()))?;
+    serde_json::from_str(&text)
+        .map_err(|err| AppError::Usage(format!("invalid import json {}: {err}", path.display())))
+}
+
 fn write_import_manifest(
     package: &Path,
     library_root: &Path,
@@ -125,25 +149,27 @@ fn write_import_manifest(
 ) -> Result<(), AppError> {
     fs::create_dir_all(library_root)?;
     let import_manifest = library_root.join("import.json"); // literal: allow external interface text or file-format spelling
-    let mut file = fs::File::create(import_manifest)?;
-    writeln!(file, "{{")?;
-    writeln!(file, "  \"version\": 1,")?;
-    writeln!(file, "  \"id\": \"{}\",", json_escape(&plan.package_id))?;
-    writeln!(
-        file,
-        "  \"package\": \"{}\",",
-        json_escape(&package.display().to_string())
-    )?;
-    writeln!(file, "  \"imported_unix\": {},", unix_now())?;
-    writeln!(file, "  \"entry_count\": {},", report.entries.len())?;
-    writeln!(file, "  \"operation_count\": {}", plan.operations.len())?;
-    writeln!(file, "}}")?;
+    let manifest = ImportManifest {
+        version: 1,
+        id: plan.package_id.clone(),
+        package: package.display().to_string(),
+        imported_unix: unix_now(),
+        entry_count: report.entries.len(),
+        operation_count: plan.operations.len(),
+    };
+    let mut text = serde_json::to_string_pretty(&manifest)
+        .map_err(|err| AppError::Usage(format!("serialize import json: {err}")))?;
+    text.push('\n');
+    fs::write(&import_manifest, text)
+        .with_context(|| format!("write import manifest {}", import_manifest.display()))?;
     Ok(())
 }
 
 pub(crate) fn target_template(kind: &TargetKind, package_id: &str) -> String {
     match kind {
-        TargetKind::ModLoader => format!("modloader/100_{package_id}"),
+        TargetKind::ModLoader => {
+            format!("modloader/{}", crate::settings::modloader_folder_name(package_id))
+        }
         TargetKind::Cleo => "CLEO".to_string(), // literal: allow external interface text or file-format spelling
         TargetKind::Asi | TargetKind::Bootstrap => ".".to_string(), // literal: allow external interface text or file-format spelling
         TargetKind::DirectManaged => ".".to_string(), // literal: allow external interface text or file-format spelling
@@ -153,6 +179,27 @@ pub(crate) fn target_template(kind: &TargetKind, package_id: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn read_import_manifest_tolerates_minified_and_reordered_json() {
+        let root = test_root("import_manifest_minified");
+        // Minified, fields reordered, whitespace stripped — the old
+        // one-field-per-line parser would have yielded zeros for all of these.
+        let path = root.join("import.json");
+        fs::write(
+            &path,
+            r#"{"operation_count":7,"id":"minified_mod","imported_unix":1234,"version":1,"entry_count":9,"package":"pkg.7z"}"#,
+        )
+        .unwrap();
+
+        let manifest = read_import_manifest(&path).unwrap();
+
+        assert_eq!(manifest.id, "minified_mod");
+        assert_eq!(manifest.imported_unix, 1234);
+        assert_eq!(manifest.entry_count, 9);
+        assert_eq!(manifest.operation_count, 7);
+        remove_dir_if_exists(&root).unwrap();
+    }
 
     #[test]
     fn replace_import_source_removes_stale_files() {

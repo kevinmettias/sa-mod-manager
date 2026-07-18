@@ -1,12 +1,33 @@
 use crate::prelude::*;
 
+/// Highest profile-format version this manager can read. A profile stamped with
+/// a higher version is rejected rather than silently misinterpreted.
+const CURRENT_PROFILE_VERSION: u32 = 1;
+
 pub(crate) fn read_profile_json(path: &Path) -> Result<ProfileJson, AppError> {
     let text = fs::read_to_string(path)?;
     let raw: ProfileJsonFile = serde_json::from_str(&text).map_err(|err| {
         AppError::Usage(format!("invalid profile json {}: {err}", path.display()))
     })?;
+    if let Some(version) = raw.version
+        && version > CURRENT_PROFILE_VERSION
+    {
+        return Err(AppError::Usage(format!(
+            "profile {} is format version {version}, newer than this manager supports (max {CURRENT_PROFILE_VERSION}); update sa-mod-manager",
+            path.display()
+        )));
+    }
     let name = raw.name.unwrap_or_else(|| profile_name_from_path(path));
-    let game_root = game_root_from_profile_path(path);
+    // An explicit `game_root` makes a profile portable; otherwise derive it from
+    // the profile's location under `<game>/.sa-mod-manager/profiles/`. The explicit
+    // value is retained so it round-trips through a manager edit.
+    let game_root_override = raw
+        .game_root
+        .filter(|root| !root.trim().is_empty())
+        .map(PathBuf::from);
+    let game_root = game_root_override
+        .clone()
+        .unwrap_or_else(|| game_root_from_profile_path(path));
     let mods = raw
         .mods
         .into_iter()
@@ -19,16 +40,24 @@ pub(crate) fn read_profile_json(path: &Path) -> Result<ProfileJson, AppError> {
         mods,
         launch_args,
         launch_env,
+        extra: raw.extra,
+        game_root_override,
     })
 }
 
 #[derive(Deserialize)]
 struct ProfileJsonFile {
+    version: Option<u32>,
     name: Option<String>,
+    game_root: Option<String>,
     #[serde(default)]
     mods: Vec<ProfileModEntryFile>,
     launch_args: Option<Vec<String>>,
     launch_env: Option<BTreeMap<String, String>>,
+    /// Any field this manager does not model, kept so hand-added profile data is
+    /// preserved verbatim across edits instead of silently dropped.
+    #[serde(flatten)]
+    extra: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Deserialize)]
@@ -167,5 +196,63 @@ fn mod_install_root_from_json(object: ModInstallRootJsonFile) -> ModInstallRootJ
         kind,
         enabled,
         optional,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_profile(name: &str, contents: &str) -> PathBuf {
+        let root = env::temp_dir().join(format!(
+            "sa-mod-manager-cfg-{name}-{}-{}",
+            std::process::id(),
+            unix_now()
+        ));
+        let path = root
+            .join(".sa-mod-manager")
+            .join("profiles")
+            .join(format!("{name}.json"));
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, contents).unwrap();
+        path
+    }
+
+    #[test]
+    fn rejects_profile_with_future_format_version() {
+        let path = temp_profile(
+            "future",
+            "{\"version\": 99, \"name\": \"future\", \"mods\": []}",
+        );
+        let err = read_profile_json(&path).unwrap_err().to_string();
+        assert!(err.contains("newer than this manager supports"), "{err}");
+        fs::remove_dir_all(path.parent().unwrap().parent().unwrap().parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn honors_explicit_game_root_and_preserves_unknown_fields() {
+        // An explicit game_root overrides the location-derived one, and a mod
+        // entry with no config path resolves under it.
+        let path = temp_profile(
+            "portable",
+            "{\"name\": \"portable\", \"game_root\": \"Z:/Custom Install\", \"custom_note\": \"keep me\", \"mods\": [{\"id\": \"cleo\"}]}",
+        );
+        let profile = read_profile_json(&path).unwrap();
+        // The mod config resolves under the explicit game root (the `Z:/…` prefix
+        // is preserved verbatim in the joined path root).
+        assert!(
+            profile.mods[0]
+                .config
+                .to_string_lossy()
+                .starts_with("Z:/Custom Install"),
+            "config was {}",
+            profile.mods[0].config.display()
+        );
+        // The unmodeled top-level field is preserved.
+        assert_eq!(
+            profile.extra.get("custom_note").and_then(serde_json::Value::as_str),
+            Some("keep me")
+        );
+        fs::remove_dir_all(path.parent().unwrap().parent().unwrap().parent().unwrap()).unwrap();
     }
 }

@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicU8, Ordering};
 
 /// Severity of a diagnostic message. Ordered so `Error` is the most severe and
 /// always shown; higher variants are progressively more verbose.
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub(crate) enum Level {
     Error = 0,
     Warn = 1,
@@ -31,6 +31,19 @@ impl Level {
             2 => Level::Info,
             3 => Level::Debug,
             _ => Level::Trace,
+        }
+    }
+
+    /// Parse a config `log_level` name, ignoring case; unrecognized names yield
+    /// `None` so the caller can fall back to the default.
+    pub(crate) fn from_name(name: &str) -> Option<Self> {
+        match name.trim().to_ascii_lowercase().as_str() {
+            "error" => Some(Level::Error),
+            "warn" | "warning" => Some(Level::Warn),
+            "info" => Some(Level::Info),
+            "debug" => Some(Level::Debug),
+            "trace" => Some(Level::Trace),
+            _ => None,
         }
     }
 }
@@ -119,7 +132,9 @@ fn write_to_file(level: Level, args: fmt::Arguments) {
         return;
     };
     if let Some(file) = guard.as_mut() {
-        let _ = writeln!(file, "{} {} {args}", unix_now(), level.label());
+        // Human-readable UTC timestamp, matching how times are shown in the UI,
+        // rather than a raw unix-seconds integer.
+        let _ = writeln!(file, "{} {} {args}", human_datetime(unix_now()), level.label());
     }
 }
 

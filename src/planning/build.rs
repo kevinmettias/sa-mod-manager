@@ -1,6 +1,18 @@
 use crate::prelude::*;
+use crate::settings::ReadmeThresholds;
 
 pub(crate) fn build_install_plan(report: &PackageReport, options: &CommandOptions) -> InstallPlan {
+    build_install_plan_with(report, options, ReadmeThresholds::from_settings())
+}
+
+/// Build a plan with explicit readme thresholds instead of the process-global
+/// config. Production calls [`build_install_plan`]; tests pass fixed thresholds so
+/// their assertions do not depend on the developer's local config file.
+pub(crate) fn build_install_plan_with(
+    report: &PackageReport,
+    options: &CommandOptions,
+    thresholds: ReadmeThresholds,
+) -> InstallPlan {
     let package_id = package_id(&report.package);
     let mut operations = Vec::new();
     let mut warnings = build_plan_warnings(report);
@@ -13,7 +25,8 @@ pub(crate) fn build_install_plan(report: &PackageReport, options: &CommandOption
     let index = SourceStatsIndex::new(report);
     if !report.manifest_roots.is_empty() {
         add_manifest_operations(report, &index, options, &mut collections);
-    } else if add_readme_operations(report, &index, options, &mut collections) == 0 {
+    } else if add_readme_operations(report, &index, options, thresholds.auto, &mut collections) == 0
+    {
         add_candidate_operations(report, options, &package_id, &mut collections);
     }
 
@@ -32,11 +45,12 @@ fn add_readme_operations(
     report: &PackageReport,
     index: &SourceStatsIndex,
     options: &CommandOptions,
+    auto_confidence: f32,
     collections: &mut PlanBuildCollections,
 ) -> usize {
     let mut count = 0;
     for instruction in &report.readme_instructions {
-        if push_readme_operation(instruction, index, options, collections) {
+        if push_readme_operation(instruction, index, options, auto_confidence, collections) {
             count += 1;
         }
     }
@@ -47,9 +61,12 @@ fn push_readme_operation(
     instruction: &ReadmeInstruction,
     index: &SourceStatsIndex,
     options: &CommandOptions,
+    auto_confidence: f32,
     collections: &mut PlanBuildCollections,
 ) -> bool {
-    if !matches!(instruction.action, ReadmeAction::Copy) || instruction.confidence < 0.85 {
+    if !matches!(instruction.action, ReadmeAction::Copy)
+        || instruction.confidence < auto_confidence
+    {
         return false;
     }
     let source = match &instruction.source {
@@ -318,7 +335,7 @@ fn target_root_for(kind: &TargetKind, game_root: &Path, package_id: &str) -> Pat
     match kind {
         TargetKind::ModLoader => game_root
             .join("modloader") // literal: allow external interface text or file-format spelling
-            .join(format!("100_{package_id}")),
+            .join(crate::settings::modloader_folder_name(package_id)),
         TargetKind::Cleo => game_root.join("CLEO"), // literal: allow external interface text or file-format spelling
         TargetKind::Asi => game_root.to_path_buf(),
         TargetKind::Bootstrap => game_root.to_path_buf(),

@@ -78,14 +78,22 @@ pub(crate) fn write_profile_json_file(
 ) -> Result<(), AppError> {
     // Serialize with serde so the writer and the serde reader cannot drift and
     // hand-edits round-trip. The round-trip is locked by a test below.
+    // Preserve a portable profile's own game root; otherwise stamp the install the
+    // manager is operating in.
+    let effective_game_root = profile
+        .game_root_override
+        .as_deref()
+        .unwrap_or(game_root)
+        .display()
+        .to_string();
     let document = ProfileDocument {
-        version: 1,
+        version: CURRENT_PROFILE_VERSION,
         name: &profile.name,
-        game_root: game_root.display().to_string(),
-        ephemeral: true,
+        game_root: effective_game_root,
         launch_args: &profile.launch_args,
         launch_env: &profile.launch_env,
         mods: profile.mods.iter().map(profile_mod_document).collect(),
+        extra: &profile.extra,
     };
     let text = serde_json::to_string_pretty(&document)
         .map_err(|err| AppError::Tool(format!("failed to serialize profile: {err}")))?;
@@ -93,15 +101,21 @@ pub(crate) fn write_profile_json_file(
     Ok(())
 }
 
+/// The profile-format version this manager writes; kept in sync with the reader's
+/// `CURRENT_PROFILE_VERSION` so a written profile always round-trips.
+const CURRENT_PROFILE_VERSION: u32 = 1;
+
 #[derive(Serialize)]
 struct ProfileDocument<'a> {
     version: u32,
     name: &'a str,
     game_root: String,
-    ephemeral: bool,
     launch_args: &'a [String],
     launch_env: &'a BTreeMap<String, String>,
     mods: Vec<ProfileModDocument<'a>>,
+    /// Preserved unmodeled fields, re-emitted alongside the known ones.
+    #[serde(flatten)]
+    extra: &'a BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Serialize)]
@@ -232,12 +246,13 @@ pub(crate) fn read_active_profile(game_root: &Path) -> String {
         Ok(text) => {
             let name = text.trim();
             if name.is_empty() {
-                "default".to_string()
+                crate::settings::configured_default_profile()
             } else {
                 safe_name(name)
             }
         }
-        Err(_) => "default".to_string(),
+        // No active profile selected yet: fall back to the configured default.
+        Err(_) => crate::settings::configured_default_profile(),
     }
 }
 
@@ -260,11 +275,38 @@ pub(crate) fn profile_launch_settings(
     profile_name: &str,
 ) -> Result<(Vec<String>, BTreeMap<String, String>), AppError> {
     let profile_path = profile_json_path(game_root, profile_name);
-    if !profile_path.exists() {
-        return Ok((Vec::new(), BTreeMap::new()));
+    let (profile_args, profile_env) = if profile_path.exists() {
+        let profile = read_profile_json(&profile_path)?;
+        (profile.launch_args, profile.launch_env)
+    } else {
+        (Vec::new(), BTreeMap::new())
+    };
+    Ok((
+        resolve_launch_args(profile_args, crate::settings::default_launch_args()),
+        resolve_launch_env(profile_env, crate::settings::default_launch_env()),
+    ))
+}
+
+/// A profile's own launch args take precedence; a profile that sets none falls
+/// back to the config-level default so a global flag (e.g. `-nointro`) can apply
+/// everywhere without editing each profile.
+fn resolve_launch_args(profile_args: Vec<String>, defaults: &[String]) -> Vec<String> {
+    if profile_args.is_empty() {
+        defaults.to_vec()
+    } else {
+        profile_args
     }
-    let profile = read_profile_json(&profile_path)?;
-    Ok((profile.launch_args, profile.launch_env))
+}
+
+/// Merge the config default launch env under the profile's own env; a key set by
+/// the profile overrides the same key from the default.
+fn resolve_launch_env(
+    profile_env: BTreeMap<String, String>,
+    defaults: &BTreeMap<String, String>,
+) -> BTreeMap<String, String> {
+    let mut merged = defaults.clone();
+    merged.extend(profile_env);
+    merged
 }
 
 pub(crate) fn set_profile_launch_args(
@@ -348,6 +390,9 @@ pub(crate) fn copy_profile(
         mods: source.mods,
         launch_args: source.launch_args,
         launch_env: source.launch_env,
+        // Preserve hand-added fields and an explicit game root when copying.
+        extra: source.extra,
+        game_root_override: source.game_root_override,
     };
     write_profile_json(game_root, &profile)?;
     println!("copied profile {source_name} -> {dest_safe}");
@@ -399,6 +444,28 @@ pub(crate) fn delete_profile(game_root: &Path, name: &str) -> Result<(), AppErro
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn launch_defaults_apply_under_profile_settings() {
+        // Explicit defaults keep this independent of the developer's config file.
+        let defaults = vec!["-nointro".to_string()];
+        // A profile with its own args ignores the default; an empty profile uses it.
+        assert_eq!(
+            resolve_launch_args(vec!["-window".to_string()], &defaults),
+            vec!["-window".to_string()]
+        );
+        assert_eq!(resolve_launch_args(Vec::new(), &defaults), defaults);
+
+        // Env merges with the config default as the base; a profile key overrides.
+        let default_env =
+            BTreeMap::from([("A".to_string(), "1".to_string()), ("B".to_string(), "1".to_string())]);
+        let profile_env =
+            BTreeMap::from([("B".to_string(), "2".to_string()), ("C".to_string(), "3".to_string())]);
+        let merged = resolve_launch_env(profile_env, &default_env);
+        assert_eq!(merged.get("A").map(String::as_str), Some("1"));
+        assert_eq!(merged.get("B").map(String::as_str), Some("2"));
+        assert_eq!(merged.get("C").map(String::as_str), Some("3"));
+    }
 
     #[test]
     fn active_profile_defaults_then_persists() {
@@ -495,6 +562,12 @@ mod tests {
         );
         let mut launch_env = BTreeMap::new();
         launch_env.insert("SA_TEST".to_string(), "1".to_string());
+        // A hand-added custom field the manager does not model.
+        let mut extra = BTreeMap::new();
+        extra.insert(
+            "notes".to_string(),
+            serde_json::Value::String("my custom profile note".to_string()),
+        );
         let profile = ProfileJson {
             name: "roundtrip".to_string(),
             mods: vec![ProfileModEntry {
@@ -510,6 +583,8 @@ mod tests {
             }],
             launch_args: vec!["-windowed".to_string(), "-nointro".to_string()],
             launch_env,
+            extra,
+            game_root_override: Some(PathBuf::from("Z:/Custom Install")),
         };
 
         write_profile_json(&game_root, &profile).unwrap();
@@ -525,6 +600,17 @@ mod tests {
         let over = read.mods[0].root_overrides.get("cleo").unwrap();
         assert_eq!(over.enabled, Some(false));
         assert_eq!(over.target.as_deref(), Some("CLEO_custom"));
+        // The unmodeled field survived the write/read round-trip.
+        assert_eq!(
+            read.extra.get("notes").and_then(serde_json::Value::as_str),
+            Some("my custom profile note")
+        );
+        // A portable profile's explicit game root survives the round-trip instead
+        // of being overwritten with the operating install.
+        assert_eq!(
+            read.game_root_override,
+            Some(PathBuf::from("Z:/Custom Install"))
+        );
         remove(&game_root);
     }
 

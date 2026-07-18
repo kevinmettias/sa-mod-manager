@@ -1,6 +1,6 @@
 use crate::prelude::*;
 
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Debug)]
 pub(crate) struct ModEntry {
     pub(crate) id: String,
     pub(crate) enabled: bool,

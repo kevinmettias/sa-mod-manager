@@ -57,28 +57,113 @@ pub(crate) fn process_is_running(pid: u32) -> bool {
     if pid == 0 {
         return false;
     }
+    process_start_ticks(pid).is_some()
+}
+
+/// A Windows creation-time fingerprint for `pid`, used to tell a live process
+/// apart from a *different* process that later reused the same PID.
+///
+/// Returns `None` when the process cannot be opened (gone, or not ours to
+/// query) and always `None` off Windows. This replaces spawning `tasklist`:
+/// `OpenProcess` is cheaper, needs no output parsing, and cannot be fooled by a
+/// PID's digits appearing in another column of a text table.
+pub(crate) fn process_start_ticks(pid: u32) -> Option<u64> {
+    if pid == 0 {
+        return None;
+    }
     #[cfg(windows)]
     {
-        windows_process_is_running(pid)
+        winproc::process_start_ticks(pid)
     }
     #[cfg(not(windows))]
     {
-        false
+        None
     }
 }
 
-#[cfg(windows)]
-fn windows_process_is_running(pid: u32) -> bool {
-    let filter = format!("PID eq {pid}");
-    let output = Command::new("tasklist").arg("/FI").arg(filter).output();
-    let Ok(output) = output else {
-        return false;
-    };
-    if !output.status.success() {
-        return false;
+/// Creation-time fingerprint of the current process, recorded in the install
+/// lock so a later PID reuse can be detected on recovery. `None` off Windows.
+pub(crate) fn current_process_start_ticks() -> Option<u64> {
+    #[cfg(windows)]
+    {
+        winproc::current_process_start_ticks()
     }
-    let text = String::from_utf8_lossy(&output.stdout);
-    text.lines().any(|line| line.contains(&pid.to_string()))
+    #[cfg(not(windows))]
+    {
+        None
+    }
+}
+
+/// Minimal, dependency-free FFI to `kernel32` for process liveness and the
+/// creation-time fingerprint used to detect PID reuse. Declared inline rather
+/// than pulling in the `windows`/`winapi` crates, matching this project's
+/// deliberately small dependency set.
+#[cfg(windows)]
+mod winproc {
+    use std::os::raw::c_void;
+
+    type Handle = *mut c_void;
+    type Bool = i32;
+    type Dword = u32;
+
+    #[repr(C)]
+    #[derive(Clone, Copy, Default)]
+    struct Filetime {
+        low_date_time: Dword,
+        high_date_time: Dword,
+    }
+
+    // Enough access to read process timing; grantable for our own install
+    // processes without elevated rights (unlike PROCESS_QUERY_INFORMATION).
+    const PROCESS_QUERY_LIMITED_INFORMATION: Dword = 0x1000;
+
+    unsafe extern "system" {
+        fn OpenProcess(desired_access: Dword, inherit_handle: Bool, process_id: Dword) -> Handle;
+        fn CloseHandle(object: Handle) -> Bool;
+        fn GetCurrentProcess() -> Handle;
+        fn GetProcessTimes(
+            process: Handle,
+            creation: *mut Filetime,
+            exit: *mut Filetime,
+            kernel: *mut Filetime,
+            user: *mut Filetime,
+        ) -> Bool;
+    }
+
+    fn creation_ticks(handle: Handle) -> Option<u64> {
+        let mut creation = Filetime::default();
+        let mut exit = Filetime::default();
+        let mut kernel = Filetime::default();
+        let mut user = Filetime::default();
+        // SAFETY: `handle` is a valid process handle for the call's duration and
+        // every out-pointer references distinct stack storage we own.
+        let ok = unsafe {
+            GetProcessTimes(handle, &mut creation, &mut exit, &mut kernel, &mut user)
+        };
+        if ok == 0 {
+            return None;
+        }
+        Some((u64::from(creation.high_date_time) << 32) | u64::from(creation.low_date_time))
+    }
+
+    pub(super) fn process_start_ticks(pid: u32) -> Option<u64> {
+        // SAFETY: FFI call taking a plain PID; returns a null handle on failure.
+        let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
+        if handle.is_null() {
+            return None;
+        }
+        let ticks = creation_ticks(handle);
+        // SAFETY: `handle` came from the `OpenProcess` above and is closed once.
+        unsafe { CloseHandle(handle) };
+        ticks
+    }
+
+    pub(super) fn current_process_start_ticks() -> Option<u64> {
+        // `GetCurrentProcess` returns a pseudo-handle that must NOT be closed.
+        // SAFETY: the pseudo-handle is always valid for the current process.
+        let handle = unsafe { GetCurrentProcess() };
+        creation_ticks(handle)
+    }
 }
 
 #[cfg(test)]
