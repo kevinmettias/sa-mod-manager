@@ -9,6 +9,7 @@ const DEFAULT_HEIGHT: f32 = 760.0;
 /// unusable; clamp restored dimensions into a sane range.
 const MIN_WINDOW_SIDE: f32 = 480.0;
 const MAX_WINDOW_SIDE: f32 = 8192.0;
+const WINDOW_SIZE_DIMENSIONS: usize = 2;
 
 /// UI-only session state persisted between runs: last game folder, profile,
 /// open tab, dark-mode choice, and window size. Kept separate from the settings
@@ -83,7 +84,8 @@ impl UiPreferences {
 
     /// The restored window size, clamped so a bad file cannot open an unusable
     /// window.
-    pub(super) fn window_size(&self) -> [f32; 2] {
+    pub(super) fn window_size(&self) -> [f32; WINDOW_SIZE_DIMENSIONS] {
+        // literal: allow UI tuning threshold is local to this control
         [
             self.width.clamp(MIN_WINDOW_SIDE, MAX_WINDOW_SIDE),
             self.height.clamp(MIN_WINDOW_SIDE, MAX_WINDOW_SIDE),
@@ -131,7 +133,7 @@ mod tests {
         // Out-of-range or malformed sizes are clamped into a usable window.
         let hostile = UiPreferences {
             width: 1.0,
-            height: 999_999.0,
+            height: 999_999.0, // literal: allow test fixture value is the specimen under judgment
             ..UiPreferences::default()
         };
         assert_eq!(hostile.window_size(), [MIN_WINDOW_SIDE, MAX_WINDOW_SIDE]);

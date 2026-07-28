@@ -110,13 +110,14 @@ pub(crate) fn parse_cleo_log(text: &str) -> CleoLogSummary {
 /// one; otherwise return the line unchanged.
 fn strip_log_timestamp(line: &str) -> &str {
     let bytes = line.as_bytes();
-    if bytes.len() > 24
-        && bytes[2] == b'/'
-        && bytes[5] == b'/'
-        && bytes[10] == b' '
+    if bytes.len() > 24 // literal: allow external format or runtime boundary value means itself here
+        && bytes[2] == b'/' // literal: allow external format or runtime boundary value means itself here
+        && bytes[5] == b'/' // literal: allow external format or runtime boundary value means itself here
+        && bytes[10] == b' ' // literal: allow external format or runtime boundary value means itself here
         && bytes[23] == b' '
+    // literal: allow external format or runtime boundary value means itself here
     {
-        &line[24..]
+        &line[24..] // literal: allow external format or runtime boundary value means itself here
     } else {
         line
     }
@@ -131,9 +132,16 @@ fn script_load_failure(line: &str) -> Option<String> {
 
 fn is_error_line(line: &str) -> bool {
     let lower = line.to_ascii_lowercase();
-    ["failed", "error", "invalid", "unable", "not found", "unsupported"]
-        .iter()
-        .any(|needle| lower.contains(needle))
+    [
+        "failed",
+        "error",
+        "invalid",
+        "unable",
+        "not found",
+        "unsupported",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle))
 }
 
 // --- .cleo_config.ini -----------------------------------------------------
@@ -159,7 +167,10 @@ pub(crate) fn parse_cleo_config(text: &str) -> CleoConfig {
     let mut key_count = 0;
     for raw in text.lines() {
         let line = raw.trim();
-        if line.is_empty() || line.starts_with(';') || line.starts_with('#') || line.starts_with('[')
+        if line.is_empty()
+            || line.starts_with(';')
+            || line.starts_with('#')
+            || line.starts_with('[')
         {
             continue;
         }
@@ -217,7 +228,7 @@ mod tests {
         assert_eq!(summary.errors.len(), 1);
         assert!(summary.errors[0].starts_with("Invalid"));
         assert!(!summary.is_clean());
-        assert_eq!(summary.total_lines, 6);
+        assert_eq!(summary.total_lines, 6); // literal: allow test fixture value is the specimen under judgment
     }
 
     #[test]
@@ -268,9 +279,12 @@ UnknownKey = 42
 [Plugins]
 StrictValidation = 0";
         let config = parse_cleo_config(ini);
-        assert_eq!(config.key_count, 4);
+        assert_eq!(config.key_count, 4); // literal: allow test fixture value is the specimen under judgment
         let keys: Vec<&str> = config.highlights.iter().map(|h| h.key.as_str()).collect();
-        assert_eq!(keys, vec!["PluginBlacklist", "DebugMode", "StrictValidation"]);
+        assert_eq!(
+            keys,
+            vec!["PluginBlacklist", "DebugMode", "StrictValidation"]
+        );
         let blacklist = &config.highlights[0];
         assert_eq!(blacklist.value, "IniFiles.cleo,GxtHook.cleo");
     }

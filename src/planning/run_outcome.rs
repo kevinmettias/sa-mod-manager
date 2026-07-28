@@ -35,7 +35,7 @@ pub(crate) const RUN_RESULT_GAME_ERROR: &str = "game_error";
 pub(crate) const RUN_RESULT_LAUNCH_FAILED: &str = "launch_failed";
 
 fn outcomes_directory(state_root: &Path) -> PathBuf {
-    state_root.join("outcomes") // literal: allow external interface text or file-format spelling
+    state_root.join("outcomes")
 }
 
 /// The transaction id embedded in a run journal's file name (its stem), used to
@@ -68,12 +68,16 @@ pub(crate) fn write_run_outcome(state_root: &Path, outcome: &RunOutcome) -> Resu
 /// Read the outcome paired with a run journal, if one was recorded. A missing or
 /// unreadable record yields `None` so telemetry degrades gracefully rather than
 /// failing to load.
-pub(crate) fn read_run_outcome_for_journal(state_root: &Path, journal: &Path) -> Option<RunOutcome> {
+pub(crate) fn read_run_outcome_for_journal(
+    state_root: &Path,
+    journal: &Path,
+) -> Option<RunOutcome> {
     let txid = txid_from_journal(journal);
     if txid.is_empty() {
         return None;
     }
-    let text = read_capped(&outcome_path(state_root, &txid), MAX_CONTROL_FILE_BYTES).ok()?;
+    let path = outcome_path(state_root, &txid);
+    let text = read_capped(&path, MAX_CONTROL_FILE_BYTES).ok()?;
     serde_json::from_str(&text).ok()
 }
 
@@ -96,7 +100,9 @@ mod tests {
 
     #[test]
     fn txid_from_journal_uses_the_file_stem() {
-        let journal = PathBuf::from("state").join("journals").join("run-default-42.journal");
+        let journal = PathBuf::from("state")
+            .join("journals")
+            .join("run-default-42.journal");
         assert_eq!(txid_from_journal(&journal), "run-default-42");
     }
 
@@ -109,19 +115,19 @@ mod tests {
             txid: txid_from_journal(&journal),
             profile: "default".to_string(),
             result: RUN_RESULT_GAME_ERROR.to_string(),
-            exit_code: Some(3),
-            duration_ms: Some(42_000),
+            exit_code: Some(3), // literal: allow test fixture value is the specimen under judgment
+            duration_ms: Some(42_000), // literal: allow test fixture value is the specimen under judgment
             launch_args: vec!["-w".to_string()],
-            started_unix: 100,
-            finished_unix: 142,
+            started_unix: 100, // literal: allow test fixture value is the specimen under judgment
+            finished_unix: 142, // literal: allow test fixture value is the specimen under judgment
         };
 
         write_run_outcome(&state_root, &outcome).unwrap();
         let read = read_run_outcome_for_journal(&state_root, &journal).unwrap();
 
         assert_eq!(read.result, RUN_RESULT_GAME_ERROR);
-        assert_eq!(read.exit_code, Some(3));
-        assert_eq!(read.duration_ms, Some(42_000));
+        assert_eq!(read.exit_code, Some(3)); // literal: allow test fixture value is the specimen under judgment
+        assert_eq!(read.duration_ms, Some(42_000)); // literal: allow test fixture value is the specimen under judgment
         assert_eq!(read.launch_args, vec!["-w".to_string()]);
         fs::remove_dir_all(&state_root).unwrap();
     }

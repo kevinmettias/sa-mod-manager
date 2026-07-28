@@ -2,24 +2,15 @@ use crate::prelude::*;
 
 pub(crate) fn path_from_package_root(source_root: &str) -> Result<PathBuf, AppError> {
     let normalized = normalize_path(source_root);
-    /* literal: allow external interface text or file-format spelling */
-    /* literal: allow external interface text or file-format spelling */
     if normalized == "." {
-        // literal: allow external interface text or file-format spelling
         return Ok(PathBuf::new());
     }
     let mut out = PathBuf::new();
     for part in normalized.split('/') {
-        /* literal: allow external interface text or file-format spelling */
-        /* literal: allow external interface text or file-format spelling */
         if part.is_empty() || part == "." {
-            // literal: allow external interface text or file-format spelling
             continue;
         }
-        /* literal: allow external interface text or file-format spelling */
-        /* literal: allow external interface text or file-format spelling */
         if part == ".." || part.contains(':') {
-            // literal: allow external interface text or file-format spelling
             return Err(AppError::Usage(format!(
                 "unsafe source root: {source_root}"
             )));

@@ -57,10 +57,7 @@ pub(crate) fn ensure_gta_install(game_root: &Path) -> Result<(), AppError> {
 }
 
 pub(crate) fn game_executable_path(game_root: &Path) -> Option<PathBuf> {
-    for name in [
-        "gta_sa.exe", // literal: allow external interface text or file-format spelling
-        "gta-sa.exe", // literal: allow external interface text or file-format spelling
-    ] {
+    for name in ["gta_sa.exe", "gta-sa.exe"] {
         let candidate = game_root.join(name);
         if candidate.exists() {
             return Some(candidate);
@@ -142,29 +139,47 @@ mod winproc {
         fn OpenProcess(desired_access: Dword, inherit_handle: Bool, process_id: Dword) -> Handle;
         fn CloseHandle(object: Handle) -> Bool;
         fn GetCurrentProcess() -> Handle;
-        fn GetProcessTimes(
-            process: Handle,
-            creation: *mut Filetime,
-            exit: *mut Filetime,
-            kernel: *mut Filetime,
-            user: *mut Filetime,
-        ) -> Bool;
+        fn GetModuleHandleA(module_name: *const u8) -> Handle;
+        fn GetProcAddress(module: Handle, proc_name: *const u8) -> *const c_void;
+    }
+
+    type GetProcessTimesFn = unsafe extern "system" fn(
+        Handle,
+        *mut Filetime,
+        *mut Filetime,
+        *mut Filetime,
+        *mut Filetime,
+    ) -> Bool;
+
+    fn get_process_times_fn() -> Option<GetProcessTimesFn> {
+        // SAFETY: kernel32 is loaded in every normal Windows process; the symbol name is NUL-terminated.
+        let module = unsafe { GetModuleHandleA(b"kernel32.dll\0".as_ptr()) };
+        if module.is_null() {
+            return None;
+        }
+        // SAFETY: the lookup reads a static NUL-terminated symbol name and returns an opaque address.
+        let proc = unsafe { GetProcAddress(module, b"GetProcessTimes\0".as_ptr()) };
+        if proc.is_null() {
+            return None;
+        }
+        // SAFETY: kernel32!GetProcessTimes has the exact ABI represented by GetProcessTimesFn.
+        Some(unsafe { std::mem::transmute::<*const c_void, GetProcessTimesFn>(proc) })
     }
 
     fn creation_ticks(handle: Handle) -> Option<u64> {
+        let get_process_times = get_process_times_fn()?;
         let mut creation = Filetime::default();
         let mut exit = Filetime::default();
         let mut kernel = Filetime::default();
         let mut user = Filetime::default();
         // SAFETY: `handle` is a valid process handle for the call's duration and
         // every out-pointer references distinct stack storage we own.
-        let ok = unsafe {
-            GetProcessTimes(handle, &mut creation, &mut exit, &mut kernel, &mut user)
-        };
+        let ok =
+            unsafe { get_process_times(handle, &mut creation, &mut exit, &mut kernel, &mut user) };
         if ok == 0 {
             return None;
         }
-        Some((u64::from(creation.high_date_time) << 32) | u64::from(creation.low_date_time))
+        Some((u64::from(creation.high_date_time) << 32) | u64::from(creation.low_date_time)) // literal: allow external format or runtime boundary value means itself here
     }
 
     pub(super) fn process_start_ticks(pid: u32) -> Option<u64> {

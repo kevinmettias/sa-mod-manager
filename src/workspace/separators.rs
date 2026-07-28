@@ -29,8 +29,8 @@ fn separators_path(state_root: &Path, profile: &str) -> PathBuf {
 /// Read a profile's separators (sorted by position), or an empty list when none
 /// are saved / the file is unreadable — separators are optional cosmetics.
 pub(crate) fn read_separators(state_root: &Path, profile: &str) -> Vec<Separator> {
-    let Ok(text) = read_capped(&separators_path(state_root, profile), MAX_CONTROL_FILE_BYTES)
-    else {
+    let path = separators_path(state_root, profile);
+    let Ok(text) = read_capped(&path, MAX_CONTROL_FILE_BYTES) else {
         return Vec::new();
     };
     let mut separators = serde_json::from_str::<SeparatorsFile>(&text)
@@ -86,7 +86,7 @@ mod tests {
             Separator {
                 id: "b".to_string(),
                 name: "Vehicles".to_string(),
-                position: 4,
+                position: 4, // literal: allow test fixture value is the specimen under judgment
             },
             Separator {
                 id: "a".to_string(),

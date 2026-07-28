@@ -1,7 +1,9 @@
-use crate::prelude::*;
 use super::cleo_deps::{analyze_script, load_opcode_db};
-use super::cleo_diagnostics::{parse_cleo_config, parse_cleo_log, parse_fxt_keys, plugin_blacklist};
+use super::cleo_diagnostics::{
+    parse_cleo_config, parse_cleo_log, parse_fxt_keys, plugin_blacklist,
+};
 use super::game_version::detect_game_version;
+use crate::prelude::*;
 
 pub(crate) fn inspect_game(game_root: &Path) -> Result<(), AppError> {
     println!("game: {}", game_root.display());
@@ -25,13 +27,13 @@ fn print_interrupted_install_notice(game_root: &Path) -> Result<(), AppError> {
 
 fn print_game_infrastructure(game_root: &Path) {
     let checks = [
-        ("classic exe", "gta_sa.exe"), // literal: allow external interface text or file-format spelling
-        ("steam exe", "gta-sa.exe"), // literal: allow external interface text or file-format spelling
-        ("modloader asi", "modloader.asi"), // literal: allow external interface text or file-format spelling
-        ("modloader dir", "modloader"), // literal: allow external interface text or file-format spelling
-        ("cleo asi", "CLEO.asi"), // literal: allow external interface text or file-format spelling
-        ("cleo dir", "CLEO"),     // literal: allow external interface text or file-format spelling
-        ("silent asi loader candidate", "vorbisFile.dll"), // literal: allow external interface text or file-format spelling
+        ("classic exe", "gta_sa.exe"),
+        ("steam exe", "gta-sa.exe"),
+        ("modloader asi", "modloader.asi"),
+        ("modloader dir", "modloader"),
+        ("cleo asi", "CLEO.asi"),
+        ("cleo dir", "CLEO"),
+        ("silent asi loader candidate", "vorbisFile.dll"),
     ];
 
     for (label, rel) in checks {
@@ -41,14 +43,14 @@ fn print_game_infrastructure(game_root: &Path) {
             if path.exists() { "present" } else { "missing" }
         );
     }
-    println!("{:28} {}", "cleo runtime", detect_cleo_runtime(game_root)); // literal: allow external interface text or file-format spelling
+    println!("{:28} {}", "cleo runtime", detect_cleo_runtime(game_root));
     print_game_version(game_root);
 }
 
 /// Report the executable version CLEO would detect, and warn if it is one CLEO
 /// cannot load. CLEO5 supports US 1.0, EU 1.0/1.01 and Steam.
 fn print_game_version(game_root: &Path) {
-    let exe = ["gta_sa.exe", "gta-sa.exe"] // literal: allow external interface text or file-format spelling
+    let exe = ["gta_sa.exe", "gta-sa.exe"]
         .into_iter()
         .map(|name| game_root.join(name))
         .find(|path| path.exists());
@@ -56,7 +58,7 @@ fn print_game_version(game_root: &Path) {
         return;
     };
     let version = detect_game_version(&exe);
-    println!("{:28} {version}", "game version"); // literal: allow external interface text or file-format spelling
+    println!("{:28} {version}", "game version");
     if !version.is_cleo_supported() {
         // The check reads the exe on disk. A modern Steam/retail build genuinely
         // needs a downgrade for CLEO; but a Steam-DRM-packed exe can also read as
@@ -117,7 +119,7 @@ pub(crate) fn detect_cleo_runtime(game_root: &Path) -> CleoRuntime {
 }
 
 fn print_game_script_inventory(game_root: &Path) -> Result<(), AppError> {
-    let asi_files = list_matching(game_root, |path| extension_eq(path, "asi"))?; // literal: allow external interface text or file-format spelling
+    let asi_files = list_matching(game_root, |path| extension_eq(path, "asi"))?;
     let cleo_scripts = collect_cleo_scripts(game_root);
     let cleo_plugins = collect_cleo_plugins(game_root);
 
@@ -142,7 +144,7 @@ fn print_game_script_inventory(game_root: &Path) -> Result<(), AppError> {
 /// Read `CLEO/.cleo_config.ini` text, if present — shared by the blacklist check
 /// and the config viewer.
 fn read_cleo_config_text(game_root: &Path) -> Option<String> {
-    fs::read_to_string(game_root.join("CLEO").join(".cleo_config.ini")).ok() // literal: allow external interface text or file-format spelling
+    fs::read_to_string(game_root.join("CLEO").join(".cleo_config.ini")).ok()
 }
 
 /// A GXT text key defined by more than one `.fxt` file (last loaded wins).
@@ -212,9 +214,8 @@ fn blacklisted_plugin_paths(game_root: &Path, cleo_plugins: &[PathBuf]) -> Vec<P
 
 /// GXT keys defined by more than one `.fxt` file in `cleo_text/`.
 fn collect_fxt_conflicts(game_root: &Path) -> Vec<FxtKeyConflict> {
-    let text_dir = game_root.join("CLEO").join("cleo_text"); // literal: allow external interface text or file-format spelling
-    let files = list_matching(&text_dir, |path| extension_eq(path, "fxt")) // literal: allow external interface text or file-format spelling
-        .unwrap_or_default();
+    let text_dir = game_root.join("CLEO").join("cleo_text");
+    let files = list_matching(&text_dir, |path| extension_eq(path, "fxt")).unwrap_or_default();
     let mut by_key: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for file in &files {
         let Ok(text) = fs::read_to_string(file) else {
@@ -245,7 +246,7 @@ fn collect_script_issues(game_root: &Path) -> Vec<CleoScriptIssue> {
     if detect_cleo_runtime(game_root) != CleoRuntime::Cleo5 {
         return Vec::new();
     }
-    let sa_json = game_root.join("CLEO").join(".config").join("sa.json"); // literal: allow external interface text or file-format spelling
+    let sa_json = game_root.join("CLEO").join(".config").join("sa.json");
     let Some(db) = load_opcode_db(&sa_json) else {
         return Vec::new();
     };
@@ -265,8 +266,11 @@ fn collect_script_issues(game_root: &Path) -> Vec<CleoScriptIssue> {
             .filter(|plugin| !installed.contains(&plugin.to_ascii_lowercase()))
             .cloned()
             .collect();
-        let capabilities: Vec<String> =
-            deps.capabilities.iter().map(|cap| cap.to_string()).collect();
+        let capabilities: Vec<String> = deps
+            .capabilities
+            .iter()
+            .map(|cap| cap.to_string())
+            .collect();
         if missing.is_empty() && capabilities.is_empty() {
             continue;
         }
@@ -320,22 +324,29 @@ fn print_fxt_key_conflicts(game_root: &Path) {
 
 /// The folders directly under `CLEO/` that legitimately hold `.cs*` files which
 /// are not top-level scripts (modules, or the CLEO config folder).
-const CLEO_NON_SCRIPT_SUBDIRS: [&str; 5] =
-    ["cleo_modules", "cleo_plugins", "cleo_text", "cleo_saves", ".config"];
+const CLEO_NON_SCRIPT_SUBDIRS: [&str; 5] = [
+    "cleo_modules",
+    "cleo_plugins",
+    "cleo_text",
+    "cleo_saves",
+    ".config",
+];
 
 /// Warn about `.cs`/`.cs4`/`.cs3` scripts sitting in an arbitrary subfolder of
 /// `CLEO/`. CLEO scans only the CLEO root non-recursively, so such scripts never
 /// load — a common packaging mistake. Scripts under the known module/config
 /// folders are intentional and excluded.
 fn print_cleo_subfolder_scripts(game_root: &Path) {
-    let cleo_dir = game_root.join("CLEO"); // literal: allow external interface text or file-format spelling
+    let cleo_dir = game_root.join("CLEO");
     let Ok(all) = collect_files_recursive(&cleo_dir) else {
         return;
     };
     let stray: Vec<PathBuf> = all
         .into_iter()
         .filter(|path| {
-            CLEO_SCRIPT_EXTENSIONS.iter().any(|ext| extension_eq(path, ext))
+            CLEO_SCRIPT_EXTENSIONS
+                .iter()
+                .any(|ext| extension_eq(path, ext))
                 && script_is_in_stray_subfolder(&cleo_dir, path)
         })
         .collect();
@@ -372,7 +383,7 @@ fn script_is_in_stray_subfolder(cleo_dir: &Path, path: &Path) -> bool {
 
 /// Surface the mod-management-relevant settings from `CLEO/.cleo_config.ini`.
 fn print_cleo_config(game_root: &Path) {
-    let path = game_root.join("CLEO").join(".cleo_config.ini"); // literal: allow external interface text or file-format spelling
+    let path = game_root.join("CLEO").join(".cleo_config.ini");
     let Ok(text) = fs::read_to_string(&path) else {
         return;
     };
@@ -392,25 +403,34 @@ fn print_cleo_config(game_root: &Path) {
 
 /// Surface script load failures and errors CLEO recorded in `cleo.log`.
 fn print_cleo_log_diagnostics(game_root: &Path) {
-    let path = game_root.join("cleo.log"); // literal: allow external interface text or file-format spelling
+    let path = game_root.join("cleo.log");
     let Ok(text) = fs::read_to_string(&path) else {
         return;
     };
     let summary = parse_cleo_log(&text);
     if summary.is_clean() {
-        println!("cleo.log        : {} lines, no script load failures", summary.total_lines);
+        println!(
+            "cleo.log        : {} lines, no script load failures",
+            summary.total_lines
+        );
         return;
     }
     println!("cleo.log        : {} lines", summary.total_lines);
     if !summary.failed_scripts.is_empty() {
-        println!("  {} script(s) FAILED to load:", summary.failed_scripts.len());
+        println!(
+            "  {} script(s) FAILED to load:",
+            summary.failed_scripts.len()
+        );
         for name in &summary.failed_scripts {
             println!("    {name}");
         }
     }
     if !summary.errors.is_empty() {
-        let shown = summary.errors.len().min(10);
-        println!("  {} error line(s) (showing {shown}):", summary.errors.len());
+        let shown = summary.errors.len().min(10); // literal: allow external format or runtime boundary value means itself here
+        println!(
+            "  {} error line(s) (showing {shown}):",
+            summary.errors.len()
+        );
         for line in summary.errors.iter().take(shown) {
             println!("    {line}");
         }
@@ -420,30 +440,23 @@ fn print_cleo_log_diagnostics(game_root: &Path) {
 /// CLEO scripts live directly in `CLEO/`: `.cs` (CLEO5) and the `.cs4`/`.cs3`
 /// compatibility-mode scripts, per the shared extension list.
 fn collect_cleo_scripts(game_root: &Path) -> Vec<PathBuf> {
-    list_matching(
-        &game_root.join(
-            /* literal: allow external interface text or file-format spelling */ "CLEO",
-        ),
-        |path| {
-            // literal: allow external interface text or file-format spelling
-            CLEO_SCRIPT_EXTENSIONS
-                .iter()
-                .any(|ext| extension_eq(path, ext))
-        },
-    )
+    list_matching(&game_root.join("CLEO"), |path| {
+        CLEO_SCRIPT_EXTENSIONS
+            .iter()
+            .any(|ext| extension_eq(path, ext))
+    })
     .unwrap_or_default()
 }
 
 /// CLEO5 plugin modules (`.cleo`) load from `CLEO/cleo_plugins/`. Some also sit
 /// loose in `CLEO/` on older setups, so scan both.
 fn collect_cleo_plugins(game_root: &Path) -> Vec<PathBuf> {
-    let cleo_dir = game_root.join("CLEO"); // literal: allow external interface text or file-format spelling
+    let cleo_dir = game_root.join("CLEO");
     let mut plugins = list_matching(&cleo_dir.join("cleo_plugins"), |path| {
-        extension_eq(path, "cleo") // literal: allow external interface text or file-format spelling
+        extension_eq(path, "cleo")
     })
     .unwrap_or_default();
-    let loose = list_matching(&cleo_dir, |path| extension_eq(path, "cleo")) // literal: allow external interface text or file-format spelling
-        .unwrap_or_default();
+    let loose = list_matching(&cleo_dir, |path| extension_eq(path, "cleo")).unwrap_or_default();
     plugins.extend(loose);
     plugins
 }
@@ -464,10 +477,10 @@ fn cleo_script_version(path: &Path) -> &'static str {
         .map(|ext| ext.to_ascii_lowercase())
         .as_deref()
     {
-        Some("cs") => "CLEO5",         // literal: allow external interface text or file-format spelling
-        Some("cs4") => "CLEO4 compat", // literal: allow external interface text or file-format spelling
-        Some("cs3") => "CLEO3 compat", // literal: allow external interface text or file-format spelling
-        _ => "CLEO",                    // literal: allow external interface text or file-format spelling
+        Some("cs") => "CLEO5",
+        Some("cs4") => "CLEO4 compat",
+        Some("cs3") => "CLEO3 compat",
+        _ => "CLEO",
     }
 }
 
@@ -491,7 +504,7 @@ fn print_cleo_scripts(cleo_scripts: &[PathBuf]) {
 /// the `modules:` path prefix. Only printed when the folder exists. `.s` modules
 /// are validated against their header magic.
 fn print_cleo_modules(game_root: &Path) {
-    let dir = game_root.join("CLEO").join("cleo_modules"); // literal: allow external interface text or file-format spelling
+    let dir = game_root.join("CLEO").join("cleo_modules");
     if !dir.is_dir() {
         return;
     }
@@ -499,7 +512,7 @@ fn print_cleo_modules(game_root: &Path) {
     println!("CLEO modules   : {}", files.len());
     for path in &files {
         let tag = if extension_eq(path, "s") && !is_cleo_module(path) {
-            "  [invalid module header]" // literal: allow external interface text or file-format spelling
+            "  [invalid module header]"
         } else {
             ""
         };
@@ -515,14 +528,14 @@ fn is_cleo_module(path: &Path) -> bool {
     let Ok(mut file) = fs::File::open(path) else {
         return false;
     };
-    let mut magic = [0u8; 5];
-    file.read_exact(&mut magic).is_ok() && magic == [0xFF, 0x7F, 0xFE, 0x00, 0x00]
+    let mut magic = [0u8; 5]; // literal: allow external format or runtime boundary value means itself here
+    file.read_exact(&mut magic).is_ok() && magic == [0xFF, 0x7F, 0xFE, 0x00, 0x00] // literal: allow external format or runtime boundary value means itself here
 }
 
 /// Inventory of `CLEO/cleo_saves/` — runtime-generated per-script save data, not
 /// mod content. Only printed when the folder exists.
 fn print_cleo_saves(game_root: &Path) {
-    let dir = game_root.join("CLEO").join("cleo_saves"); // literal: allow external interface text or file-format spelling
+    let dir = game_root.join("CLEO").join("cleo_saves");
     if !dir.is_dir() {
         return;
     }
@@ -535,7 +548,7 @@ fn print_cleo_saves(game_root: &Path) {
 
 fn print_cleo_plugins(game_root: &Path, cleo_plugins: &[PathBuf]) {
     println!("CLEO plugins   : {}", cleo_plugins.len());
-    let cleo_plugins_dir = game_root.join("CLEO").join("cleo_plugins"); // literal: allow external interface text or file-format spelling
+    let cleo_plugins_dir = game_root.join("CLEO").join("cleo_plugins");
     for path in cleo_plugins {
         println!("  {}", path.display());
     }
@@ -642,10 +655,7 @@ fn print_cleo_script_dependencies(game_root: &Path, scripts: &[PathBuf], plugins
     if detect_cleo_runtime(game_root) != CleoRuntime::Cleo5 || scripts.is_empty() {
         return;
     }
-    let sa_json = game_root
-        .join("CLEO")
-        .join(".config")
-        .join("sa.json"); // literal: allow external interface text or file-format spelling
+    let sa_json = game_root.join("CLEO").join(".config").join("sa.json");
     let Some(db) = load_opcode_db(&sa_json) else {
         println!(
             "CLEO script dependencies: skipped (opcode database CLEO/.config/sa.json not found or unreadable)"
@@ -696,7 +706,10 @@ fn print_one_script_dependencies(
         .unwrap_or("<script>");
     let mut parts = Vec::new();
     if !deps.plugins.is_empty() {
-        parts.push(format!("needs {}", deps.plugins.iter().cloned().collect::<Vec<_>>().join(", ")));
+        parts.push(format!(
+            "needs {}",
+            deps.plugins.iter().cloned().collect::<Vec<_>>().join(", ")
+        ));
     }
     if !missing.is_empty() {
         let names: Vec<&str> = missing.iter().map(|plugin| plugin.as_str()).collect();
@@ -705,13 +718,21 @@ fn print_one_script_dependencies(
     if !deps.unmapped_extensions.is_empty() {
         parts.push(format!(
             "uses {} (no bundled file mapping)",
-            deps.unmapped_extensions.iter().cloned().collect::<Vec<_>>().join(", ")
+            deps.unmapped_extensions
+                .iter()
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(", ")
         ));
     }
     if !deps.capabilities.is_empty() {
         parts.push(format!(
             "elevated: {}",
-            deps.capabilities.iter().copied().collect::<Vec<_>>().join(", ")
+            deps.capabilities
+                .iter()
+                .copied()
+                .collect::<Vec<_>>()
+                .join(", ")
         ));
     }
     if !deps.complete {
@@ -727,7 +748,7 @@ fn is_pe_image(path: &Path) -> bool {
     let Ok(mut file) = fs::File::open(path) else {
         return false;
     };
-    let mut magic = [0u8; 2];
+    let mut magic = [0u8; 2]; // literal: allow external format or runtime boundary value means itself here
     file.read_exact(&mut magic).is_ok() && &magic == b"MZ"
 }
 
@@ -767,8 +788,14 @@ mod tests {
     #[test]
     fn cleo_script_version_maps_extension_to_runtime() {
         assert_eq!(cleo_script_version(Path::new("a/speedo.cs")), "CLEO5");
-        assert_eq!(cleo_script_version(Path::new("a/legacy.cs4")), "CLEO4 compat");
-        assert_eq!(cleo_script_version(Path::new("a/older.cs3")), "CLEO3 compat");
+        assert_eq!(
+            cleo_script_version(Path::new("a/legacy.cs4")),
+            "CLEO4 compat"
+        );
+        assert_eq!(
+            cleo_script_version(Path::new("a/older.cs3")),
+            "CLEO3 compat"
+        );
     }
 
     #[test]
@@ -812,7 +839,7 @@ mod tests {
     fn is_cleo_module_checks_header_magic() {
         let dir = temp_dir("module");
         let good = dir.join("lib.s");
-        fs::write(&good, [0xFF, 0x7F, 0xFE, 0x00, 0x00, 0x01, 0x02]).unwrap();
+        fs::write(&good, [0xFF, 0x7F, 0xFE, 0x00, 0x00, 0x01, 0x02]).unwrap(); // literal: allow test fixture value is the specimen under judgment
         let bad = dir.join("bad.s");
         fs::write(&bad, b"not a module").unwrap();
         assert!(is_cleo_module(&good));

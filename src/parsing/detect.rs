@@ -29,16 +29,10 @@ pub(crate) fn detect_install_candidate(path: &str, size: u64) -> Option<InstallC
 }
 
 fn detect_modloader_candidate(detection: &CandidateDetection) -> Option<InstallCandidate> {
-    /* literal: allow external interface text or file-format spelling */
-    /* literal: allow external interface text or file-format spelling */
     if detection.parts[0] == "modloader" {
-        // literal: allow external interface text or file-format spelling
         return Some(modloader_content_candidate(detection));
     }
-    /* literal: allow external interface text or file-format spelling */
-    /* literal: allow external interface text or file-format spelling */
     if detection.lower.ends_with(".asi") && detection.lower.contains("modloader") {
-        // literal: allow external interface text or file-format spelling
         return Some(modloader_runtime_candidate(detection));
     }
     None
@@ -50,7 +44,7 @@ fn modloader_content_candidate(detection: &CandidateDetection) -> InstallCandida
     let notes = BTreeSet::new();
     let source_root = modloader_content_source_root(detection);
     let metadata = CandidateMetadata { components, notes };
-    install_candidate_from_detection(&source_root, "modloader content", detection.size, metadata) // literal: allow external interface text or file-format spelling
+    install_candidate_from_detection(&source_root, "modloader content", detection.size, metadata)
 }
 
 fn modloader_content_source_root(detection: &CandidateDetection) -> String {
@@ -78,7 +72,7 @@ fn modloader_runtime_candidate(detection: &CandidateDetection) -> InstallCandida
         .copied()
         .unwrap_or(detection.path);
     let metadata = CandidateMetadata { components, notes };
-    install_candidate_from_detection(source_root, "game root", detection.size, metadata) // literal: allow external interface text or file-format spelling
+    install_candidate_from_detection(source_root, "game root", detection.size, metadata)
 }
 
 fn detect_cleo_plugin_candidate(
@@ -89,18 +83,15 @@ fn detect_cleo_plugin_candidate(
 ) -> Option<InstallCandidate> {
     let mut components = BTreeSet::new();
     let mut notes = BTreeSet::new();
-    /* literal: allow external interface text or file-format spelling */
-    /* literal: allow external interface text or file-format spelling */
     if lower.ends_with(".cleo") || parts.contains(&"cleo_plugins") {
-        // literal: allow external interface text or file-format spelling
         components.insert(Component::CleoPlugin);
-        let note = "CLEO5 plugin module; loads from CLEO/cleo_plugins".to_string(); // literal: allow external interface text or file-format spelling
+        let note = "CLEO5 plugin module; loads from CLEO/cleo_plugins".to_string();
         notes.insert(note);
         let source_root = component_root(path);
         let metadata = CandidateMetadata { components, notes };
         return Some(install_candidate_from_detection(
             source_root,
-            "CLEO/cleo_plugins", // literal: allow external interface text or file-format spelling
+            "CLEO/cleo_plugins",
             size,
             metadata,
         ));
@@ -115,18 +106,16 @@ fn detect_cleo_modules_candidate(
 ) -> Option<InstallCandidate> {
     let mut components = BTreeSet::new();
     let mut notes = BTreeSet::new();
-    /* literal: allow external interface text or file-format spelling */
-    /* literal: allow external interface text or file-format spelling */
     if parts.contains(&"cleo_modules") {
-        // literal: allow external interface text or file-format spelling
         components.insert(Component::CleoModules);
-        let note = "CLEO script module; loads from CLEO/cleo_modules (the modules: path)".to_string(); // literal: allow external interface text or file-format spelling
+        let note =
+            "CLEO script module; loads from CLEO/cleo_modules (the modules: path)".to_string();
         notes.insert(note);
         let source_root = component_root(path);
         let metadata = CandidateMetadata { components, notes };
         return Some(install_candidate_from_detection(
             source_root,
-            "CLEO/cleo_modules", // literal: allow external interface text or file-format spelling
+            "CLEO/cleo_modules",
             size,
             metadata,
         ));
@@ -134,25 +123,18 @@ fn detect_cleo_modules_candidate(
     None
 }
 
-fn detect_cleo_saves_candidate(
-    path: &str,
-    parts: &[&str],
-    size: u64,
-) -> Option<InstallCandidate> {
+fn detect_cleo_saves_candidate(path: &str, parts: &[&str], size: u64) -> Option<InstallCandidate> {
     let mut components = BTreeSet::new();
     let mut notes = BTreeSet::new();
-    /* literal: allow external interface text or file-format spelling */
-    /* literal: allow external interface text or file-format spelling */
     if parts.contains(&"cleo_saves") {
-        // literal: allow external interface text or file-format spelling
         components.insert(Component::CleoSaves);
-        let note = "CLEO save data is runtime-generated user data; shipping it in a mod can overwrite the player's own saves".to_string(); // literal: allow external interface text or file-format spelling
+        let note = "CLEO save data is runtime-generated user data; shipping it in a mod can overwrite the player's own saves".to_string();
         notes.insert(note);
         let source_root = component_root(path);
         let metadata = CandidateMetadata { components, notes };
         return Some(install_candidate_from_detection(
             source_root,
-            "CLEO/cleo_saves", // literal: allow external interface text or file-format spelling
+            "CLEO/cleo_saves",
             size,
             metadata,
         ));
@@ -168,16 +150,13 @@ fn detect_cleo_candidate(
 ) -> Option<InstallCandidate> {
     let mut components = BTreeSet::new();
     let notes = BTreeSet::new();
-    /* literal: allow external interface text or file-format spelling */
-    /* literal: allow external interface text or file-format spelling */
     if parts[0] == "cleo" || has_cleo_script_extension(lower) {
-        // literal: allow external interface text or file-format spelling
         components.insert(Component::Cleo);
         let source_root = component_root(path);
         let metadata = CandidateMetadata { components, notes };
         return Some(install_candidate_from_detection(
             source_root,
-            "CLEO or game root", // literal: allow external interface text or file-format spelling
+            "CLEO or game root",
             size,
             metadata,
         ));
@@ -188,21 +167,18 @@ fn detect_cleo_candidate(
 fn detect_asi_candidate(path: &str, lower: &str, size: u64) -> Option<InstallCandidate> {
     let mut components = BTreeSet::new();
     let mut notes = BTreeSet::new();
-    /* literal: allow external interface text or file-format spelling */
-    /* literal: allow external interface text or file-format spelling */
     if lower.ends_with(".asi") {
-        // literal: allow external interface text or file-format spelling
         components.insert(Component::Asi);
         // Mod Loader's std.asi loads .asi/.cleo/.dll (and CLEO scripts) straight
         // from a mod folder, so an ASI can live in the game root beside a loader,
         // or self-contained inside a modloader/<mod> sandbox.
-        let note = "ASI loads from the game root (with an ASI loader) or directly from a modloader/<mod> folder via Mod Loader's std.asi".to_string(); // literal: allow external interface text or file-format spelling
+        let note = "ASI loads from the game root (with an ASI loader) or directly from a modloader/<mod> folder via Mod Loader's std.asi".to_string();
         notes.insert(note);
         let source_root = component_root(path);
         let metadata = CandidateMetadata { components, notes };
         return Some(install_candidate_from_detection(
             source_root,
-            "game root or modloader/<mod>", // literal: allow external interface text or file-format spelling
+            "game root or modloader/<mod>",
             size,
             metadata,
         ));
@@ -213,18 +189,15 @@ fn detect_asi_candidate(path: &str, lower: &str, size: u64) -> Option<InstallCan
 fn detect_plugin_config_candidate(path: &str, lower: &str, size: u64) -> Option<InstallCandidate> {
     let mut components = BTreeSet::new();
     let mut notes = BTreeSet::new();
-    /* literal: allow external interface text or file-format spelling */
-    /* literal: allow external interface text or file-format spelling */
     if lower.ends_with(".ini") && looks_like_plugin_config(&lower) {
-        // literal: allow external interface text or file-format spelling
         components.insert(Component::Asi);
-        let note = "Config file should stay beside its matching ASI/plugin".to_string(); // literal: allow external interface text or file-format spelling
+        let note = "Config file should stay beside its matching ASI/plugin".to_string();
         notes.insert(note);
         let source_root = component_root(path);
         let metadata = CandidateMetadata { components, notes };
         return Some(install_candidate_from_detection(
             source_root,
-            "same target as plugin", // literal: allow external interface text or file-format spelling
+            "same target as plugin",
             size,
             metadata,
         ));
@@ -233,13 +206,13 @@ fn detect_plugin_config_candidate(path: &str, lower: &str, size: u64) -> Option<
 }
 
 fn looks_like_plugin_config(lower: &str) -> bool {
-    lower.contains("streaming") // literal: allow external interface text or file-format spelling
-        || lower.contains("skygfx") // literal: allow external interface text or file-format spelling
-        || lower.contains("mixsets") // literal: allow external interface text or file-format spelling
-        || lower.contains("silentpatch") // literal: allow external interface text or file-format spelling
-        || lower.contains("crashinfo") // literal: allow external interface text or file-format spelling
-        || lower.contains("limit") // literal: allow external interface text or file-format spelling
-        || lower.contains("ola") // literal: allow external interface text or file-format spelling
+    lower.contains("streaming")
+        || lower.contains("skygfx")
+        || lower.contains("mixsets")
+        || lower.contains("silentpatch")
+        || lower.contains("crashinfo")
+        || lower.contains("limit")
+        || lower.contains("ola")
 }
 
 fn detect_cleo_text_candidate(
@@ -250,16 +223,13 @@ fn detect_cleo_text_candidate(
 ) -> Option<InstallCandidate> {
     let mut components = BTreeSet::new();
     let notes = BTreeSet::new();
-    /* literal: allow external interface text or file-format spelling */
-    /* literal: allow external interface text or file-format spelling */
     if lower.ends_with(".fxt") || parts.contains(&"cleo_text") {
-        // literal: allow external interface text or file-format spelling
         components.insert(Component::CleoText);
         let source_root = top_install_root(path);
         let metadata = CandidateMetadata { components, notes };
         return Some(install_candidate_from_detection(
             source_root,
-            "CLEO/cleo_text", // literal: allow external interface text or file-format spelling
+            "CLEO/cleo_text",
             size,
             metadata,
         ));
@@ -280,7 +250,7 @@ fn detect_game_directory_candidate(
         let metadata = CandidateMetadata { components, notes };
         return Some(install_candidate_from_detection(
             &source_root,
-            "modloader/<mod>", // literal: allow external interface text or file-format spelling
+            "modloader/<mod>",
             size,
             metadata,
         ));
@@ -292,7 +262,7 @@ fn has_known_game_directory(parts: &[&str]) -> bool {
     parts.iter().any(|part| {
         matches!(
             *part,
-            "data" | "models" | "text" | "anim" | "audio" | "movies" | "scripts" | "txd" // literal: allow external interface text or file-format spelling
+            "data" | "models" | "text" | "anim" | "audio" | "movies" | "scripts" | "txd"
         )
     })
 }
@@ -303,12 +273,12 @@ fn root_before_known_game_directory(path: &str) -> String {
         let lower = part.to_ascii_lowercase();
         if matches!(
             lower.as_str(),
-            "data" | "models" | "text" | "anim" | "audio" | "movies" | "scripts" | "txd" // literal: allow external interface text or file-format spelling
+            "data" | "models" | "text" | "anim" | "audio" | "movies" | "scripts" | "txd"
         ) {
             if idx == 0 {
-                return ".".to_string(); // literal: allow external interface text or file-format spelling
+                return ".".to_string();
             }
-            return parts[..idx].join("/"); // literal: allow external interface text or file-format spelling
+            return parts[..idx].join("/");
         }
     }
     top_install_root(path).to_string()
@@ -317,21 +287,18 @@ fn root_before_known_game_directory(path: &str) -> String {
 fn detect_img_candidate(path: &str, lower: &str, size: u64) -> Option<InstallCandidate> {
     let mut components = BTreeSet::new();
     let mut notes = BTreeSet::new();
-    /* literal: allow external interface text or file-format spelling */
-    /* literal: allow external interface text or file-format spelling */
     if lower.contains("gta3.img/") || lower.ends_with(".dff") || lower.ends_with(".txd") {
-        // literal: allow external interface text or file-format spelling
         components.insert(Component::ImgReplacement);
         // Mod Loader's std.stream injects loose DFF/TXD from the mod folder into
         // the correct archive automatically, so the default is the sandbox root;
         // a `gta3.img/` subfolder is only needed to pin a specific archive.
-        let note = "Loose DFF/TXD load from the Mod Loader mod folder — std.stream routes them into the right archive; no gta3.img subfolder needed".to_string(); // literal: allow external interface text or file-format spelling
+        let note = "Loose DFF/TXD load from the Mod Loader mod folder — std.stream routes them into the right archive; no gta3.img subfolder needed".to_string();
         notes.insert(note);
         let source_root = top_install_root(path);
         let metadata = CandidateMetadata { components, notes };
         return Some(install_candidate_from_detection(
             source_root,
-            "modloader/<mod>", // literal: allow external interface text or file-format spelling
+            "modloader/<mod>",
             size,
             metadata,
         ));
@@ -342,18 +309,15 @@ fn detect_img_candidate(path: &str, lower: &str, size: u64) -> Option<InstallCan
 fn detect_script_candidate(path: &str, lower: &str, size: u64) -> Option<InstallCandidate> {
     let mut components = BTreeSet::new();
     let mut notes = BTreeSet::new();
-    /* literal: allow external interface text or file-format spelling */
-    /* literal: allow external interface text or file-format spelling */
     if lower.ends_with(".scm") || lower.ends_with("script.img") {
-        // literal: allow external interface text or file-format spelling
         components.insert(Component::ScriptData);
-        let note = "Main script replacements conflict heavily with mission/story mods".to_string(); // literal: allow external interface text or file-format spelling
+        let note = "Main script replacements conflict heavily with mission/story mods".to_string();
         notes.insert(note);
         let source_root = top_install_root(path);
         let metadata = CandidateMetadata { components, notes };
         return Some(install_candidate_from_detection(
             source_root,
-            "modloader/<mod>/data/script", // literal: allow external interface text or file-format spelling
+            "modloader/<mod>/data/script",
             size,
             metadata,
         ));
@@ -366,26 +330,25 @@ pub(crate) fn detect_option_group(path: &str) -> Option<String> {
     let parts: Vec<&str> = path.split('/').filter(|p| !p.is_empty()).collect();
     for (idx, part) in parts.iter().enumerate() {
         let lower = part.to_ascii_lowercase();
-        let is_option = lower.contains("optional") // literal: allow external interface text or file-format spelling
-            || lower.contains("settings") // literal: allow external interface text or file-format spelling
-            || lower.contains("recommended") // literal: allow external interface text or file-format spelling
-            || lower.contains("bonus") // literal: allow external interface text or file-format spelling
-            || lower.contains("compatibility") // literal: allow external interface text or file-format spelling
-            || lower == "en" // literal: allow external interface text or file-format spelling
-            || lower == "pt"; // literal: allow external interface text or file-format spelling
+        let is_option = lower.contains("optional")
+            || lower.contains("settings")
+            || lower.contains("recommended")
+            || lower.contains("bonus")
+            || lower.contains("compatibility")
+            || lower == "en"
+            || lower == "pt";
 
         if is_option {
             let part_count = parts.len();
             let depth =
-                /* literal: allow external interface text or file-format spelling */ if lower == "optionals" || lower == "(optionals)" || lower == "en" || lower == "pt"
-                // literal: allow external interface text or file-format spelling
+                if lower == "optionals" || lower == "(optionals)" || lower == "en" || lower == "pt"
                 {
-                    (idx + 2).min(part_count)
+                    (idx + 2).min(part_count) // literal: allow domain threshold is documented by the surrounding code
                 } else {
                     (idx + 1).min(part_count)
                 };
             if depth > 0 {
-                let option_group = parts[..depth].join("/"); // literal: allow external interface text or file-format spelling
+                let option_group = parts[..depth].join("/");
                 return Some(option_group);
             }
         }
@@ -427,7 +390,7 @@ mod tests {
     use super::*;
 
     fn components(path: &str) -> BTreeSet<Component> {
-        detect_install_candidate(path, 100)
+        detect_install_candidate(path, 100) // literal: allow test fixture value is the specimen under judgment
             .unwrap_or_else(|| panic!("no candidate detected for {path}"))
             .components
     }
@@ -478,7 +441,11 @@ mod tests {
 
     #[test]
     fn fxt_and_cleo_text_folder_route_to_cleo_text() {
-        for path in ["cleo/cleo_text/strings.fxt", "cleo_text/lang.fxt", "loose.fxt"] {
+        for path in [
+            "cleo/cleo_text/strings.fxt",
+            "cleo_text/lang.fxt",
+            "loose.fxt",
+        ] {
             assert_eq!(
                 components(path),
                 BTreeSet::from([Component::CleoText]),

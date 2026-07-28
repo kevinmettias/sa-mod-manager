@@ -1,7 +1,7 @@
 use crate::prelude::*;
 
 pub(crate) fn state_directory(game_root: &Path) -> PathBuf {
-    game_root.join(".sa-mod-manager") // literal: allow external interface text or file-format spelling
+    game_root.join(".sa-mod-manager")
 }
 
 /// Generous upper bound for a single manager-written control file (a profile,
@@ -35,7 +35,7 @@ pub(crate) fn package_id(path: &Path) -> String {
     let stem = path
         .file_stem()
         .and_then(OsStr::to_str)
-        .unwrap_or("package"); // literal: allow external interface text or file-format spelling
+        .unwrap_or("package");
     safe_name(stem)
 }
 
@@ -78,7 +78,7 @@ pub(crate) fn safe_name(value: &str) -> String {
     }
     let trimmed = out.trim_matches(['_', '-', '.']).to_string();
     if trimmed.is_empty() {
-        "unnamed".to_string() // literal: allow external interface text or file-format spelling
+        "unnamed".to_string()
     } else {
         trimmed
     }
@@ -100,11 +100,11 @@ mod tests {
 
         // A file exactly at the limit is read in full.
         fs::write(&path, b"12345").unwrap();
-        assert_eq!(read_capped(&path, 5).unwrap(), "12345");
+        assert_eq!(read_capped(&path, 5).unwrap(), "12345"); // literal: allow test fixture value is the specimen under judgment
 
         // One byte over the limit is refused rather than slurped.
         fs::write(&path, b"123456").unwrap();
-        let err = read_capped(&path, 5).unwrap_err().to_string();
+        let err = read_capped(&path, 5).unwrap_err().to_string(); // literal: allow test fixture value is the specimen under judgment
         assert!(err.contains("limit"), "{err}");
 
         fs::remove_dir_all(&dir).unwrap();

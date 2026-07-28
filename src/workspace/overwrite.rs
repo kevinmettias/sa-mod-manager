@@ -77,7 +77,10 @@ mod tests {
             unix_now()
         ));
         // Unmanaged: present in modloader/ but not owned.
-        write_file(&root.join("modloader").join("HandInstalled").join("a.dff"), "x");
+        write_file(
+            &root.join("modloader").join("HandInstalled").join("a.dff"),
+            "x",
+        );
         // Owned by an enabled mod → excluded.
         write_file(&root.join("modloader").join("FromMod").join("b.dff"), "x");
         // Loader internals / infrastructure → excluded.

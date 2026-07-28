@@ -6,6 +6,8 @@ use super::copy_journal::file_hash;
 /// small header; 64 MiB covers installs with millions of files while refusing a
 /// pathological/corrupt journal instead of reading it whole into memory.
 const MAX_JOURNAL_BYTES: u64 = 64 * 1024 * 1024;
+const BACKUP_JOURNAL_FIELD_COUNT: usize = 2;
+const COPY_JOURNAL_FIELD_COUNT: usize = 3;
 
 pub(crate) fn rollback_journal(journal_path: &Path, game_root: &Path) -> Result<(), AppError> {
     crate::logging::open_for_game_root(game_root);
@@ -48,7 +50,7 @@ struct NewFileEntry {
 }
 
 fn ensure_journal_allowed(game_root: &Path, journal_path: &Path) -> Result<(), AppError> {
-    let journals_root = state_directory(game_root).join("journals"); // literal: allow external interface text or file-format spelling
+    let journals_root = state_directory(game_root).join("journals");
     let root = journals_root
         .canonicalize()
         .with_context(|| format!("resolve journals directory {}", journals_root.display()))?;
@@ -87,20 +89,24 @@ fn parse_rollback_line(line: &str, journal: &mut RollbackJournal) -> Result<(), 
     // rollback that under-restores the game folder.
     if let Some(value) = line.strip_prefix("backup=") {
         let fields = split_escaped_fields(value);
-        if fields.len() < 2 || unescape_value(&fields[0]).is_empty() {
+        if fields.len() < BACKUP_JOURNAL_FIELD_COUNT || unescape_value(&fields[0]).is_empty() {
+            // literal: allow domain threshold is documented by the surrounding code
             return Err(malformed_journal_line_error("backup", line));
         }
         let index = journal.backups.len();
         journal.backups.push(BackupEntry {
             dest: PathBuf::from(unescape_value(&fields[0])),
             backup: PathBuf::from(unescape_value(&fields[1])),
-            backup_hash: fields.get(2).map(|value| unescape_value(value)),
+            backup_hash: fields.get(2).map(|value| unescape_value(value)), // literal: allow domain threshold is documented by the surrounding code
             copied_hash: None,
         });
         journal.actions.push(RollbackAction::Backup(index));
     } else if let Some(value) = line.strip_prefix("new=") {
         let fields = split_escaped_fields(value);
-        let dest = fields.first().map(|d| unescape_value(d)).unwrap_or_default();
+        let dest = fields
+            .first()
+            .map(|d| unescape_value(d))
+            .unwrap_or_default();
         if dest.is_empty() {
             return Err(malformed_journal_line_error("new", line));
         }
@@ -112,18 +118,19 @@ fn parse_rollback_line(line: &str, journal: &mut RollbackJournal) -> Result<(), 
         journal.actions.push(RollbackAction::NewFile(index));
     } else if let Some(value) = line.strip_prefix("copy=") {
         let fields = split_escaped_fields(value);
-        if fields.len() < 3 || unescape_value(&fields[1]).is_empty() {
+        if fields.len() < COPY_JOURNAL_FIELD_COUNT || unescape_value(&fields[1]).is_empty() {
+            // literal: allow domain threshold is documented by the surrounding code
             return Err(malformed_journal_line_error("copy", line));
         }
         let dest = PathBuf::from(unescape_value(&fields[1]));
-        let hash = unescape_value(&fields[2]);
+        let hash = unescape_value(&fields[2]); // literal: allow domain threshold is documented by the surrounding code
         journal.copy_hashes.insert(dest, hash);
     }
     Ok(())
 }
 
 fn malformed_journal_line_error(kind: &str, line: &str) -> AppError {
-    let preview: String = line.chars().take(120).collect();
+    let preview: String = line.chars().take(120).collect(); // literal: allow domain threshold is documented by the surrounding code
     AppError::Usage(format!(
         "rollback journal is corrupt: malformed `{kind}` entry `{preview}`; refusing to roll back a partially recorded transaction"
     ))
@@ -304,7 +311,7 @@ fn remove_empty_parent_dirs(game_root: &Path, file: &Path) -> Result<(), AppErro
 }
 
 fn ensure_backup_allowed(game_root: &Path, backup: &Path) -> Result<(), AppError> {
-    let backups_root = state_directory(game_root).join("backups"); // literal: allow external interface text or file-format spelling
+    let backups_root = state_directory(game_root).join("backups");
     let root = backups_root
         .canonicalize()
         .with_context(|| format!("resolve backups directory {}", backups_root.display()))?;

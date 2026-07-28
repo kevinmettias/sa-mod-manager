@@ -1,0 +1,53 @@
+{
+  "schema_version": "1.0",
+  "tool": "run-all",
+  "tool_version": "0.1.0",
+  "gate": "code",
+  "target": "F:\\SteamLibrary\\steamapps\\common\\Grand Theft Auto San Andreas\\sa-mod-manager",
+  "result": "success",
+  "checks": [
+    {
+      "name": "check-nested-call",
+      "phase": "clean a file",
+      "tier": "blocking",
+      "verdict": "passed",
+      "ms": 1111
+    },
+    {
+      "name": "check-nesting-depth",
+      "phase": "clean a file",
+      "tier": "blocking",
+      "verdict": "passed",
+      "ms": 1139
+    },
+    {
+      "name": "check-function-size",
+      "phase": "clean a file",
+      "tier": "blocking",
+      "verdict": "passed",
+      "ms": 1158
+    },
+    {
+      "name": "check-literals",
+      "phase": "clean a file",
+      "tier": "blocking",
+      "verdict": "passed",
+      "ms": 1133
+    },
+    {
+      "name": "check-parameter-count",
+      "phase": "clean a file",
+      "tier": "blocking",
+      "verdict": "passed",
+      "ms": 1137
+    },
+    {
+      "name": "check-intrafile-duplication",
+      "phase": "clean a file",
+      "tier": "blocking",
+      "verdict": "passed",
+      "ms": 1480
+    }
+  ],
+  "findings": []
+}

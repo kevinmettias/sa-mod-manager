@@ -1,5 +1,7 @@
 use crate::prelude::*;
 
+const MAX_PRINTED_SKIPPED_OPTIONS: usize = 60;
+
 pub(crate) fn print_install_plan(plan: &InstallPlan) {
     print_install_plan_header(plan);
     print_plan_operations(plan);
@@ -52,11 +54,20 @@ fn print_plan_skipped_options(plan: &InstallPlan) {
     if plan.skipped_options.is_empty() {
         println!("  none");
     } else {
-        for option in plan.skipped_options.iter().take(60) {
+        for option in plan
+            .skipped_options
+            .iter()
+            .take(MAX_PRINTED_SKIPPED_OPTIONS)
+        {
+            // literal: allow domain threshold is documented by the surrounding code
             println!("  {option}");
         }
-        if plan.skipped_options.len() > 60 {
-            println!("  ... {} more", plan.skipped_options.len() - 60);
+        if plan.skipped_options.len() > MAX_PRINTED_SKIPPED_OPTIONS {
+            // literal: allow domain threshold is documented by the surrounding code
+            println!(
+                "  ... {} more",
+                plan.skipped_options.len() - MAX_PRINTED_SKIPPED_OPTIONS
+            ); // literal: allow domain threshold is documented by the surrounding code
         }
     }
     println!();

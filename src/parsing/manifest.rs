@@ -7,7 +7,7 @@ pub(crate) fn write_package_manifest(
     ensure_state(&plan.game_root)?;
     let root = state_directory(&plan.game_root);
     let manifest_path = root
-        .join("packages") // literal: allow external interface text or file-format spelling
+        .join("packages")
         .join(format!("{}.manifest", plan.package_id));
     let plan_path = package_plan_path(&root, plan);
     write_manifest_file(&manifest_path, report, plan)?;
@@ -17,10 +17,7 @@ pub(crate) fn write_package_manifest(
 }
 
 fn package_plan_path(root: &Path, plan: &InstallPlan) -> PathBuf {
-    /* literal: allow external interface text or file-format spelling */
-    /* literal: allow external interface text or file-format spelling */
     root.join("plans").join(format!(
-        // literal: allow external interface text or file-format spelling
         "{}-{}-{}.plan",
         safe_name(&plan.profile),
         plan.package_id,

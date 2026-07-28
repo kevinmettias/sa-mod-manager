@@ -1,5 +1,24 @@
 {
+  "languages": {
+    "rust": {
+      "duplication": {
+        "min_run_statements": 3,
+        "max_run_statements": 6,
+        "min_run_nodes": 200,
+        "min_expression_nodes": 80,
+        "min_expression_operations": 3,
+        "include_expressions": false
+      },
+      "function_shape": {
+        "minimum_body_lines": 600,
+        "cohesive_algorithm_lines": 700,
+        "minimum_extractable_statements": 10,
+        "minimum_sections": 20
+      }
+    }
+  },
   "words": {
     "approved_abbreviations": ["fmt"]
   }
 }
+

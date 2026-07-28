@@ -6,24 +6,84 @@ use super::san_andreas_mod_ui::{
     ReadmeProposalState, SanAndreasModUi, TelemetryEvent,
 };
 use super::state::{ModConfigItem, UiTab};
-use super::widgets::{
-    infrastructure_grid, selected_profile_entries, should_add_mod_to_profile,
-};
-
+use super::widgets::{infrastructure_grid, selected_profile_entries, should_add_mod_to_profile};
+const UI_TINY_GAP: f32 = 2.0;
+const UI_SMALL_GAP: f32 = 4.0;
+const PROFILE_COMBO_WIDTH: f32 = 160.0;
+const NEW_PROFILE_FIELD_WIDTH: f32 = 110.0;
+const RUN_TARGET_COMBO_WIDTH: f32 = 200.0;
+const GAME_ROOT_FIELD_WIDTH: f32 = 340.0;
+const RUNNING_STATUS_RED: u8 = 120;
+const RUNNING_STATUS_GREEN: u8 = 190;
+const RUNNING_STATUS_BLUE: u8 = 120;
+const DETAILS_PANEL_MAX_HEIGHT: f32 = 360.0;
+const DETAIL_ROW_GAP: f32 = 8.0;
+const COMPACT_FIELD_WIDTH: f32 = 140.0;
+const MEDIUM_FIELD_WIDTH: f32 = 160.0;
+const WIDE_FIELD_WIDTH: f32 = 260.0;
+const TOOL_PATH_FIELD_WIDTH: f32 = 320.0;
+const MOD_ROW_DRAG_SPEED: f64 = 0.1;
+const MODLOADER_DEFAULT_PRIORITY: i32 = 50;
+const MODLOADER_MIN_PRIORITY: i32 = 0;
+const MODLOADER_MAX_PRIORITY: i32 = 100;
+const MODLOADER_PRIORITY_STEP: f64 = 0.25;
+const MODLOADER_GRID_COLUMNS: usize = 3;
+const GRID_MIN_COL_WIDTH: f32 = 64.0;
+const OVERWRITE_PANEL_MAX_HEIGHT: f32 = 200.0;
+const OVERWRITE_VISIBLE_FILE_LIMIT: usize = 2000;
+const PENDING_RUN_GRID_MIN_COL_WIDTH: f32 = 88.0;
+const TELEMETRY_FILTER_WIDTH: f32 = 240.0;
+const TELEMETRY_GRID_MIN_COL_WIDTH: f32 = 48.0;
+const TELEMETRY_VISIBLE_EVENT_LIMIT: usize = 50;
+const TELEMETRY_TITLE_CLIP: usize = 40;
+const TELEMETRY_DETAIL_CLIP: usize = 72;
+const MAX_LOG_PREVIEW_BYTES: usize = 5000;
+const MOD_CONFIG_PANEL_WIDTH: f32 = 440.0;
+const MOD_CONFIG_PANEL_HEIGHT: f32 = 560.0;
+const ERROR_BANNER_RED: u8 = 200;
+const ERROR_BANNER_GREEN: u8 = 64;
+const ERROR_BANNER_BLUE: u8 = 64;
+const CONFIRM_MODAL_MAX_WIDTH: f32 = 360.0;
+const SUMMARY_TILE_MIN_WIDTH: f32 = 136.0;
+const WORKFLOW_GRID_MIN_COL_WIDTH: f32 = 120.0;
+const LAUNCH_ARGS_FIELD_WIDTH: f32 = 360.0;
+const MOD_ROW_NAME_RESERVED_WIDTH: f32 = 160.0;
+const MOD_ROW_NAME_MIN_WIDTH: f32 = 140.0;
+const MODLOADER_BADGE_RED: u8 = 90;
+const MODLOADER_BADGE_GREEN: u8 = 150;
+const MODLOADER_BADGE_BLUE: u8 = 220;
+const ASI_BADGE_RED: u8 = 220;
+const ASI_BADGE_GREEN: u8 = 140;
+const ASI_BADGE_BLUE: u8 = 60;
+const ROOT_OVERRIDE_TARGET_WIDTH: f32 = 180.0;
+const CARD_VERTICAL_GAP: f32 = 6.0;
+const DROP_TARGET_STROKE_WIDTH: f32 = 2.0;
+const SEPARATOR_EDIT_WIDTH: f32 = 220.0;
+const CONTENT_GRID_COLUMNS: usize = 4;
+const CONTENT_GRID_MIN_COL_WIDTH: f32 = 90.0;
+const DEFAULT_OPEN_GROUP_LIMIT: usize = 8;
+const LOG_PREVIEW_GRID_MIN_COL_WIDTH: f32 = 60.0;
+const MOD_COLOR_SWATCH_WIDTH: f32 = 22.0;
+const MOD_COLOR_SWATCH_HEIGHT: f32 = 18.0;
+const IMPORT_PATH_FIELD_WIDTH: f32 = 470.0;
+const PERCENT_SCALE: f32 = 100.0;
+const CATEGORY_INPUT_WIDTH: f32 = 160.0;
+const NOTE_EDITOR_ROWS: usize = 4;
+const README_EVIDENCE_CLIP: usize = 100;
 impl SanAndreasModUi {
     /// The top toolbar: profile + run target on the first row (the things you
     /// reach for constantly), game folder + maintenance on the second.
     pub(super) fn toolbar(&mut self, ui: &mut egui::Ui) {
-        ui.add_space(2.0);
+        ui.add_space(UI_TINY_GAP);
         ui.horizontal_wrapped(|ui| {
-            ui.strong("SA Mod Manager"); // literal: allow external interface text or file-format spelling
+            ui.strong("SA Mod Manager");
             ui.separator();
 
-            ui.label("Profile"); // literal: allow external interface text or file-format spelling
+            ui.label("Profile");
             let mut changed_profile = false;
             egui::ComboBox::from_id_salt("toolbar_profile")
                 .selected_text(&self.selected_profile)
-                .width(160.0)
+                .width(PROFILE_COMBO_WIDTH)
                 .show_ui(ui, |ui| {
                     for profile in &self.state.profiles {
                         let choice = profile.clone();
@@ -39,7 +99,7 @@ impl SanAndreasModUi {
                 self.refresh();
             }
             ui.add_sized(
-                [110.0, ROW_HEIGHT],
+                [NEW_PROFILE_FIELD_WIDTH, ROW_HEIGHT],
                 egui::TextEdit::singleline(&mut self.new_profile_input).hint_text("new profile"),
             );
             if ui.button("New").clicked() {
@@ -57,11 +117,14 @@ impl SanAndreasModUi {
                     .map(|tool| tool.name.clone())
                     .unwrap_or_else(|| "▶ Play current profile".to_string())
             };
-            let tool_names: Vec<String> =
-                self.executables.iter().map(|tool| tool.name.clone()).collect();
+            let tool_names: Vec<String> = self
+                .executables
+                .iter()
+                .map(|tool| tool.name.clone())
+                .collect();
             egui::ComboBox::from_id_salt("toolbar_run_target")
                 .selected_text(selected_label)
-                .width(200.0)
+                .width(RUN_TARGET_COMBO_WIDTH)
                 .show_ui(ui, |ui| {
                     ui.selectable_value(&mut self.selected_run_target, 0, "▶ Play current profile");
                     for (index, name) in tool_names.iter().enumerate() {
@@ -84,9 +147,9 @@ impl SanAndreasModUi {
             }
         });
         ui.horizontal_wrapped(|ui| {
-            ui.label("Game"); // literal: allow external interface text or file-format spelling
+            ui.label("Game");
             ui.add_sized(
-                [340.0, ROW_HEIGHT],
+                [GAME_ROOT_FIELD_WIDTH, ROW_HEIGHT],
                 egui::TextEdit::singleline(&mut self.game_root_input),
             );
             if ui
@@ -134,20 +197,28 @@ impl SanAndreasModUi {
     /// The left filters column (MO2's Categories/filters pane): narrows the mod
     /// list by status, text, category, and conflicts, and hosts the content scan.
     pub(super) fn filters_panel(&mut self, ui: &mut egui::Ui) {
-        ui.add_space(4.0);
-        ui.strong("Game Setup"); // literal: allow external interface text or file-format spelling
+        ui.add_space(UI_SMALL_GAP);
+        ui.strong("Game Setup");
         game_setup_summary(ui, &self.state.infrastructure);
         ui.separator();
-        ui.strong("Filters"); // literal: allow external interface text or file-format spelling
+        ui.strong("Filters");
         ui.separator();
 
-        ui.label("Status"); // literal: allow external interface text or file-format spelling
+        ui.label("Status");
         ui.selectable_value(&mut self.mod_filter_status, ModStatusFilter::All, "All");
-        ui.selectable_value(&mut self.mod_filter_status, ModStatusFilter::Enabled, "Enabled");
-        ui.selectable_value(&mut self.mod_filter_status, ModStatusFilter::Disabled, "Disabled");
+        ui.selectable_value(
+            &mut self.mod_filter_status,
+            ModStatusFilter::Enabled,
+            "Enabled",
+        );
+        ui.selectable_value(
+            &mut self.mod_filter_status,
+            ModStatusFilter::Disabled,
+            "Disabled",
+        );
         ui.separator();
 
-        ui.label("Search"); // literal: allow external interface text or file-format spelling
+        ui.label("Search");
         ui.add(
             egui::TextEdit::singleline(&mut self.mod_filter_text)
                 .hint_text("mod id")
@@ -156,7 +227,7 @@ impl SanAndreasModUi {
         ui.separator();
 
         ui.horizontal(|ui| {
-            ui.label("Category"); // literal: allow external interface text or file-format spelling
+            ui.label("Category");
             if ui.small_button("clear").clicked() {
                 self.mod_filter_category = None;
             }
@@ -183,7 +254,7 @@ impl SanAndreasModUi {
             .collect();
         if !user_categories.is_empty() {
             ui.horizontal(|ui| {
-                ui.label("My categories"); // literal: allow external interface text or file-format spelling
+                ui.label("My categories");
                 if ui.small_button("clear").clicked() {
                     self.mod_filter_user_category = None;
                 }
@@ -195,8 +266,7 @@ impl SanAndreasModUi {
                 self.mod_filter_user_category = None;
             }
             for category in &user_categories {
-                let selected =
-                    self.mod_filter_user_category.as_deref() == Some(category.as_str());
+                let selected = self.mod_filter_user_category.as_deref() == Some(category.as_str());
                 if ui.selectable_label(selected, category).clicked() {
                     self.mod_filter_user_category = Some(category.clone());
                 }
@@ -235,7 +305,7 @@ impl SanAndreasModUi {
         }
 
         ui.separator();
-        ui.strong("Diagnostics"); // literal: allow external interface text or file-format spelling
+        ui.strong("Diagnostics");
         self.diagnostics_summary(ui);
     }
 
@@ -251,7 +321,9 @@ impl SanAndreasModUi {
         let cleo = self.cleo_diagnostics.as_ref().map(|diag| {
             (
                 diag.is_empty(),
-                diag.blacklisted_plugins.len() + diag.fxt_conflicts.len() + diag.script_issues.len(),
+                diag.blacklisted_plugins.len()
+                    + diag.fxt_conflicts.len()
+                    + diag.script_issues.len(),
             )
         });
         let warn = ui.visuals().warn_fg_color;
@@ -328,7 +400,7 @@ impl SanAndreasModUi {
     pub(super) fn mods_center_panel(&mut self, ui: &mut egui::Ui) {
         let entries = selected_profile_entries(&self.state, &self.selected_profile);
         let enabled = entries.iter().filter(|entry| entry.enabled).count();
-        ui.add_space(4.0);
+        ui.add_space(UI_SMALL_GAP);
         ui.horizontal(|ui| {
             ui.heading(format!("Mods — {}", self.selected_profile));
             ui.label(format!("{enabled}/{} enabled", entries.len()));
@@ -341,7 +413,7 @@ impl SanAndreasModUi {
             });
         ui.separator();
         if entries.is_empty() {
-            ui.label("No mods in this profile."); // literal: allow external interface text or file-format spelling
+            ui.label("No mods in this profile.");
             ui.horizontal(|ui| {
                 if ui.button("Import a mod").clicked() {
                     self.tab = UiTab::Import;
@@ -366,7 +438,7 @@ impl SanAndreasModUi {
     /// The right detail pane: a top tab strip over the secondary views. The mod
     /// list stays put in the centre; only this pane changes with the tab.
     pub(super) fn detail_panel(&mut self, ui: &mut egui::Ui) {
-        ui.add_space(2.0);
+        ui.add_space(UI_TINY_GAP);
         ui.horizontal_wrapped(|ui| {
             ui.selectable_value(&mut self.tab, UiTab::Content, "Content");
             ui.selectable_value(&mut self.tab, UiTab::ModLoader, "ModLoader");
@@ -420,7 +492,12 @@ impl SanAndreasModUi {
 
             if self.game_child.is_some() {
                 ui.separator();
-                ui.colored_label(egui::Color32::from_rgb(120, 190, 120), "▶ running");
+                let running_color = egui::Color32::from_rgb(
+                    RUNNING_STATUS_RED,
+                    RUNNING_STATUS_GREEN,
+                    RUNNING_STATUS_BLUE,
+                );
+                ui.colored_label(running_color, "? running");
             }
             if let Some(index) = &self.content_index {
                 ui.separator();
@@ -445,7 +522,9 @@ impl SanAndreasModUi {
                     ui.separator();
                     let warn = ui.visuals().warn_fg_color;
                     ui.colored_label(warn, format!("ML {} err", log.errors.len()))
-                        .on_hover_text("ModLoader reported errors last run — see the ModLoader viewer");
+                        .on_hover_text(
+                            "ModLoader reported errors last run — see the ModLoader viewer",
+                        );
                 }
             }
             if let Some(diag) = &self.cleo_diagnostics {
@@ -473,7 +552,8 @@ impl SanAndreasModUi {
         let Some(message) = self.last_error.clone() else {
             return;
         };
-        let color = egui::Color32::from_rgb(200, 64, 64);
+        let color =
+            egui::Color32::from_rgb(ERROR_BANNER_RED, ERROR_BANNER_GREEN, ERROR_BANNER_BLUE);
         egui::TopBottomPanel::top("error_banner").show(ctx, |ui| {
             ui.horizontal_wrapped(|ui| {
                 if ui.button("Dismiss").clicked() {
@@ -499,10 +579,10 @@ impl SanAndreasModUi {
         // A real modal dims and blocks the background, so destructive-action
         // buttons behind it cannot be clicked while the prompt is open.
         let modal = egui::Modal::new(egui::Id::new("confirm_modal")).show(ctx, |ui| {
-            ui.set_max_width(360.0);
+            ui.set_max_width(CONFIRM_MODAL_MAX_WIDTH);
             ui.heading(title);
             ui.label(message);
-            ui.add_space(8.0);
+            ui.add_space(DETAIL_ROW_GAP);
             ui.horizontal(|ui| {
                 if ui.button(confirm_label).clicked() {
                     confirmed = Some(true);
@@ -543,8 +623,13 @@ impl SanAndreasModUi {
                     });
                 });
         }
-        let dropped =
-            ctx.input(|input| input.raw.dropped_files.iter().find_map(|file| file.path.clone()));
+        let dropped = ctx.input(|input| {
+            input
+                .raw
+                .dropped_files
+                .iter()
+                .find_map(|file| file.path.clone())
+        });
         if let Some(path) = dropped {
             self.handle_dropped_path(path);
         }
@@ -568,7 +653,7 @@ impl SanAndreasModUi {
 
 fn summary_tile(ui: &mut egui::Ui, label: &str, value: &str) {
     ui.group(|ui| {
-        ui.set_min_width(136.0);
+        ui.set_min_width(SUMMARY_TILE_MIN_WIDTH);
         ui.label(label);
         ui.strong(value);
     });
@@ -602,7 +687,11 @@ fn game_setup_summary(ui: &mut egui::Ui, infrastructure: &[super::state::Infrast
         ui.weak("Set the game folder to detect components.");
         return;
     }
-    let present_color = egui::Color32::from_rgb(120, 190, 120);
+    let present_color = egui::Color32::from_rgb(
+        RUNNING_STATUS_RED,
+        RUNNING_STATUS_GREEN,
+        RUNNING_STATUS_BLUE,
+    );
     let missing_color = ui.visuals().warn_fg_color;
     for item in infrastructure {
         let (mark, color) = if item.present {
@@ -654,7 +743,7 @@ impl SanAndreasModUi {
         // here — the workflow starts from importing mods.
         egui::Grid::new("home_workflow")
             .striped(true)
-            .min_col_width(120.0)
+            .min_col_width(WORKFLOW_GRID_MIN_COL_WIDTH)
             .show(ui, |ui| {
                 workflow_row(
                     ui,
@@ -874,7 +963,7 @@ impl SanAndreasModUi {
             ui.horizontal(|ui| {
                 ui.label("Copy to");
                 ui.add_sized(
-                    [140.0, ROW_HEIGHT],
+                    [COMPACT_FIELD_WIDTH, ROW_HEIGHT],
                     egui::TextEdit::singleline(&mut self.copy_profile_input),
                 );
                 if ui.button("Copy").clicked() {
@@ -882,7 +971,7 @@ impl SanAndreasModUi {
                 }
                 ui.label("Rename to");
                 ui.add_sized(
-                    [140.0, ROW_HEIGHT],
+                    [COMPACT_FIELD_WIDTH, ROW_HEIGHT],
                     egui::TextEdit::singleline(&mut self.rename_profile_input),
                 );
                 if ui.button("Rename").clicked() {
@@ -898,7 +987,7 @@ impl SanAndreasModUi {
         ui.horizontal(|ui| {
             ui.label("Launch args");
             ui.add_sized(
-                [360.0, ROW_HEIGHT],
+                [LAUNCH_ARGS_FIELD_WIDTH, ROW_HEIGHT],
                 egui::TextEdit::singleline(&mut self.launch_args_input)
                     .hint_text("-nointro -windowed"),
             );
@@ -946,18 +1035,19 @@ impl SanAndreasModUi {
                     ModStatusFilter::Disabled => !entry.enabled,
                 };
                 let mod_flags = flags.as_ref().and_then(|map| map.get(&entry.id));
-                let category_ok = self
-                    .mod_filter_category
-                    .is_none_or(|category| mod_flags.is_some_and(|f| f.categories.contains(&category)));
+                let category_ok = self.mod_filter_category.is_none_or(|category| {
+                    mod_flags.is_some_and(|f| f.categories.contains(&category))
+                });
                 let conflict_ok = !self.mod_filter_conflicts
                     || mod_flags.is_some_and(|f| f.overwrites_others || f.overwritten);
-                let user_category_ok = self.mod_filter_user_category.as_ref().is_none_or(|wanted| {
-                    self.mod_meta.get(&entry.id).is_some_and(|meta| {
-                        meta.categories
-                            .iter()
-                            .any(|category| category.eq_ignore_ascii_case(wanted))
-                    })
-                });
+                let user_category_ok =
+                    self.mod_filter_user_category.as_ref().is_none_or(|wanted| {
+                        self.mod_meta.get(&entry.id).is_some_and(|meta| {
+                            meta.categories
+                                .iter()
+                                .any(|category| category.eq_ignore_ascii_case(wanted))
+                        })
+                    });
                 text_ok && status_ok && category_ok && conflict_ok && user_category_ok
             })
             .map(|entry| entry.id.clone())
@@ -976,7 +1066,11 @@ impl SanAndreasModUi {
         // Per-mod content flags come from the last content scan (if any). Cheap
         // to derive from the cached index; absent until the user analyzes.
         let flags_map = self.content_index.as_ref().map(per_mod_flags);
-        let overwrite_color = egui::Color32::from_rgb(120, 190, 120);
+        let overwrite_color = egui::Color32::from_rgb(
+            RUNNING_STATUS_RED,
+            RUNNING_STATUS_GREEN,
+            RUNNING_STATUS_BLUE,
+        );
         let overwritten_color = ui.visuals().warn_fg_color;
         // Subsystem badges (ModLoader / CLEO / ASI) derived from each mod's
         // install-root kinds — always shown, no content scan required.
@@ -1063,8 +1157,8 @@ impl SanAndreasModUi {
             - MOVE_W
             - SUBSYS_W
             - FLAGS_W
-            - 160.0)
-            .max(140.0);
+            - MOD_ROW_NAME_RESERVED_WIDTH)
+            .max(MOD_ROW_NAME_MIN_WIDTH);
 
         ui.horizontal(|ui| {
             table_cell(ui, GRIP_W, |_ui| {});
@@ -1101,15 +1195,20 @@ impl SanAndreasModUi {
                     // Any separators anchored to this display slot render above it.
                     for sep in separators.iter().filter(|sep| sep.position == idx) {
                         let editing = sep_edit.as_ref().is_some_and(|(id, _)| *id == sep.id);
-                        let mut buf =
-                            sep_edit.as_ref().map(|(_, name)| name.clone()).unwrap_or_default();
-                        let action =
-                            separator_header(ui, sep, collapsed.contains(&sep.id), editing, &mut buf);
-                        if editing {
-                            if let Some((_, name)) = sep_edit.as_mut() {
-                                *name = buf.clone();
-                            }
-                        }
+                        let mut buf = sep_edit
+                            .as_ref()
+                            .map(|(_, name)| name.clone())
+                            .unwrap_or_default();
+                        let action = separator_header(
+                            ui,
+                            sep,
+                            SeparatorHeaderState {
+                                collapsed: collapsed.contains(&sep.id),
+                                editing,
+                                buf: &mut buf,
+                            },
+                        );
+                        update_separator_edit_buffer(editing, sep_edit.as_mut(), &buf);
                         match action {
                             Some(SepAction::ToggleCollapse) => sep_collapse = Some(sep.id.clone()),
                             Some(SepAction::StartEdit) => sep_start_edit = Some(sep.id.clone()),
@@ -1159,7 +1258,9 @@ impl SanAndreasModUi {
                                 let mut enabled = entry.enabled;
                                 if ui
                                     .checkbox(&mut enabled, "")
-                                    .on_hover_text("Enable or disable this mod in the current profile")
+                                    .on_hover_text(
+                                        "Enable or disable this mod in the current profile",
+                                    )
                                     .changed()
                                 {
                                     activation = Some((entry.id.clone(), enabled));
@@ -1174,7 +1275,7 @@ impl SanAndreasModUi {
                                         .add(
                                             egui::DragValue::new(&mut position)
                                                 .range(1..=count.max(1))
-                                                .speed(0.1),
+                                                .speed(MOD_ROW_DRAG_SPEED),
                                         )
                                         .on_hover_text(
                                             "Priority — type a number to move this mod there",
@@ -1204,7 +1305,10 @@ impl SanAndreasModUi {
                                         move_to = Some(idx - 1);
                                     }
                                     if ui
-                                        .add_enabled(idx + 1 < count, egui::Button::new("▼").small())
+                                        .add_enabled(
+                                            idx + 1 < count,
+                                            egui::Button::new("▼").small(),
+                                        )
                                         .on_hover_text("Move down (loads later, overwrites)")
                                         .clicked()
                                     {
@@ -1237,8 +1341,7 @@ impl SanAndreasModUi {
                                 } else {
                                     egui::Sense::click()
                                 };
-                                let name =
-                                    ui.add(egui::Label::new(text).truncate().sense(sense));
+                                let name = ui.add(egui::Label::new(text).truncate().sense(sense));
                                 if reorderable && name.dragged() {
                                     egui::DragAndDrop::set_payload(ui.ctx(), idx);
                                 }
@@ -1258,15 +1361,30 @@ impl SanAndreasModUi {
                                     subsystems.get(&entry.id).copied()
                                 {
                                     if modloader {
-                                        ui.colored_label(egui::Color32::from_rgb(90, 150, 220), "M")
+                                        let modloader_color = egui::Color32::from_rgb(
+                                            MODLOADER_BADGE_RED,
+                                            MODLOADER_BADGE_GREEN,
+                                            MODLOADER_BADGE_BLUE,
+                                        );
+                                        ui.colored_label(modloader_color, "M")
                                             .on_hover_text("ModLoader mod");
                                     }
                                     if cleo {
-                                        ui.colored_label(egui::Color32::from_rgb(120, 190, 120), "C")
+                                        let cleo_color = egui::Color32::from_rgb(
+                                            RUNNING_STATUS_RED,
+                                            RUNNING_STATUS_GREEN,
+                                            RUNNING_STATUS_BLUE,
+                                        );
+                                        ui.colored_label(cleo_color, "C")
                                             .on_hover_text("CLEO script");
                                     }
                                     if asi {
-                                        ui.colored_label(egui::Color32::from_rgb(220, 140, 60), "A")
+                                        let asi_color = egui::Color32::from_rgb(
+                                            ASI_BADGE_RED,
+                                            ASI_BADGE_GREEN,
+                                            ASI_BADGE_BLUE,
+                                        );
+                                        ui.colored_label(asi_color, "A")
                                             .on_hover_text("ASI plugin");
                                     }
                                 }
@@ -1338,29 +1456,10 @@ impl SanAndreasModUi {
                             egui::Id::new(("mod_row", &entry.id)),
                             egui::Sense::hover(),
                         );
-                        if row_zone.dnd_hover_payload::<usize>().is_some() {
-                            let center_y = row.rect.center().y;
-                            let pointer_y = ui
-                                .input(|input| input.pointer.interact_pos().map(|pos| pos.y))
-                                .unwrap_or(center_y);
-                            let line_y = if pointer_y < center_y {
-                                row.rect.top()
-                            } else {
-                                row.rect.bottom()
-                            };
-                            ui.painter().hline(
-                                row.rect.x_range(),
-                                line_y,
-                                egui::Stroke::new(2.0, ui.visuals().selection.bg_fill),
-                            );
-                        }
-                        if let Some(payload) = row_zone.dnd_release_payload::<usize>() {
-                            let center_y = row.rect.center().y;
-                            let pointer_y = ui
-                                .input(|input| input.pointer.interact_pos().map(|pos| pos.y))
-                                .unwrap_or(center_y);
-                            drag_from = Some(*payload);
-                            drop_to = Some(if pointer_y < center_y { idx } else { idx + 1 });
+                        draw_mod_row_drop_hover(ui, &row, &row_zone);
+                        if let Some((from, to)) = mod_row_drop_release(ui, &row, &row_zone, idx) {
+                            drag_from = Some(from);
+                            drop_to = Some(to);
                         }
                     }
                 }
@@ -1368,14 +1467,20 @@ impl SanAndreasModUi {
                 // Separators positioned at or past the end sit below every mod.
                 for sep in separators.iter().filter(|sep| sep.position >= entries_len) {
                     let editing = sep_edit.as_ref().is_some_and(|(id, _)| *id == sep.id);
-                    let mut buf = sep_edit.as_ref().map(|(_, name)| name.clone()).unwrap_or_default();
-                    let action =
-                        separator_header(ui, sep, collapsed.contains(&sep.id), editing, &mut buf);
-                    if editing {
-                        if let Some((_, name)) = sep_edit.as_mut() {
-                            *name = buf.clone();
-                        }
-                    }
+                    let mut buf = sep_edit
+                        .as_ref()
+                        .map(|(_, name)| name.clone())
+                        .unwrap_or_default();
+                    let action = separator_header(
+                        ui,
+                        sep,
+                        SeparatorHeaderState {
+                            collapsed: collapsed.contains(&sep.id),
+                            editing,
+                            buf: &mut buf,
+                        },
+                    );
+                    update_separator_edit_buffer(editing, sep_edit.as_mut(), &buf);
                     match action {
                         Some(SepAction::ToggleCollapse) => sep_collapse = Some(sep.id.clone()),
                         Some(SepAction::StartEdit) => sep_start_edit = Some(sep.id.clone()),
@@ -1491,7 +1596,9 @@ impl SanAndreasModUi {
     ) {
         let key = format!("{mod_id}#{}", root.source);
         let override_entry = entry.root_overrides.get(&root.source);
-        let mut enabled = override_entry.and_then(|o| o.enabled).unwrap_or(root.enabled);
+        let mut enabled = override_entry
+            .and_then(|o| o.enabled)
+            .unwrap_or(root.enabled);
         let effective_target = override_entry
             .and_then(|o| o.target.clone())
             .unwrap_or_else(|| root.target.clone());
@@ -1509,7 +1616,10 @@ impl SanAndreasModUi {
                 .changed();
             ui.label(&root.source);
             ui.label("→");
-            ui.add_sized([180.0, ROW_HEIGHT], egui::TextEdit::singleline(target_buf));
+            ui.add_sized(
+                [ROOT_OVERRIDE_TARGET_WIDTH, ROW_HEIGHT],
+                egui::TextEdit::singleline(target_buf),
+            );
             if ui
                 .button("Retarget")
                 .on_hover_text("Point this root at a different game target for this profile")
@@ -1530,7 +1640,7 @@ impl SanAndreasModUi {
 
 impl SanAndreasModUi {
     pub(super) fn mods_panel(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Library"); // literal: allow external interface text or file-format spelling
+        ui.heading("Library");
         ui.separator();
         ui.horizontal_wrapped(|ui| {
             summary_tile(ui, "Imported mods", &self.state.mods.len().to_string());
@@ -1562,7 +1672,7 @@ impl SanAndreasModUi {
         );
         ui.separator();
         if self.state.mods.is_empty() {
-            ui.label("No imported mods."); // literal: allow external interface text or file-format spelling
+            ui.label("No imported mods.");
             if ui.button("Import a mod").clicked() {
                 self.tab = UiTab::Import;
             }
@@ -1571,7 +1681,7 @@ impl SanAndreasModUi {
         egui::ScrollArea::vertical().show(ui, |ui| {
             for item in self.state.mods.clone() {
                 self.mod_config_card(ui, &item);
-                ui.add_space(6.0);
+                ui.add_space(CARD_VERTICAL_GAP);
             }
         });
     }
@@ -1622,12 +1732,12 @@ impl SanAndreasModUi {
             ui.horizontal(|ui| {
                 ui.label("source");
                 ui.add_sized(
-                    [260.0, ROW_HEIGHT],
+                    [WIDE_FIELD_WIDTH, ROW_HEIGHT],
                     egui::TextEdit::singleline(&mut edit.source),
                 );
                 ui.label("target");
                 ui.add_sized(
-                    [260.0, ROW_HEIGHT],
+                    [WIDE_FIELD_WIDTH, ROW_HEIGHT],
                     egui::TextEdit::singleline(&mut edit.target),
                 );
             });
@@ -1660,10 +1770,27 @@ fn mod_root_edit_key(path: &Path, root_index: usize) -> String {
 /// MO2's color labels. Names are what get persisted.
 const MOD_COLORS: [(&str, egui::Color32); 7] = [
     ("red", egui::Color32::from_rgb(210, 80, 80)),
-    ("orange", egui::Color32::from_rgb(220, 140, 60)),
+    (
+        "orange",
+        egui::Color32::from_rgb(ASI_BADGE_RED, ASI_BADGE_GREEN, ASI_BADGE_BLUE),
+    ),
     ("yellow", egui::Color32::from_rgb(210, 190, 80)),
-    ("green", egui::Color32::from_rgb(120, 190, 120)),
-    ("blue", egui::Color32::from_rgb(90, 150, 220)),
+    (
+        "green",
+        egui::Color32::from_rgb(
+            RUNNING_STATUS_RED,
+            RUNNING_STATUS_GREEN,
+            RUNNING_STATUS_BLUE,
+        ),
+    ),
+    (
+        "blue",
+        egui::Color32::from_rgb(
+            MODLOADER_BADGE_RED,
+            MODLOADER_BADGE_GREEN,
+            MODLOADER_BADGE_BLUE,
+        ),
+    ),
     ("purple", egui::Color32::from_rgb(170, 120, 210)),
     ("gray", egui::Color32::from_rgb(150, 150, 150)),
 ];
@@ -1689,24 +1816,69 @@ enum SepAction {
 
 /// Render one separator (group divider) row: collapse toggle, name or rename
 /// field, and move/remove controls. Returns the action the user requested.
+struct SeparatorHeaderState<'a> {
+    collapsed: bool,
+    editing: bool,
+    buf: &'a mut String,
+}
+fn mod_row_drop_release(
+    ui: &egui::Ui,
+    row: &egui::Response,
+    row_zone: &egui::Response,
+    idx: usize,
+) -> Option<(usize, usize)> {
+    let payload = row_zone.dnd_release_payload::<usize>()?;
+    let center_y = row.rect.center().y;
+    let pointer_y = ui
+        .input(|input| input.pointer.interact_pos().map(|pos| pos.y))
+        .unwrap_or(center_y);
+    let drop_index = if pointer_y < center_y { idx } else { idx + 1 };
+    Some((*payload, drop_index))
+}
+fn draw_mod_row_drop_hover(ui: &egui::Ui, row: &egui::Response, row_zone: &egui::Response) {
+    if row_zone.dnd_hover_payload::<usize>().is_none() {
+        return;
+    }
+    let center_y = row.rect.center().y;
+    let pointer_y = ui
+        .input(|input| input.pointer.interact_pos().map(|pos| pos.y))
+        .unwrap_or(center_y);
+    let line_y = if pointer_y < center_y {
+        row.rect.top()
+    } else {
+        row.rect.bottom()
+    };
+    let selection_stroke =
+        egui::Stroke::new(DROP_TARGET_STROKE_WIDTH, ui.visuals().selection.bg_fill);
+    ui.painter()
+        .hline(row.rect.x_range(), line_y, selection_stroke);
+}
+fn update_separator_edit_buffer(editing: bool, current: Option<&mut (String, String)>, buf: &str) {
+    if !editing {
+        return;
+    }
+    let Some((_, name)) = current else {
+        return;
+    };
+    *name = buf.to_string();
+}
 fn separator_header(
     ui: &mut egui::Ui,
     separator: &Separator,
-    collapsed: bool,
-    editing: bool,
-    buf: &mut String,
+    state: SeparatorHeaderState<'_>,
 ) -> Option<SepAction> {
     let mut action = None;
     ui.horizontal(|ui| {
         if ui
-            .small_button(if collapsed { "▶" } else { "▼" })
+            .small_button(if state.collapsed { "▶" } else { "▼" })
             .on_hover_text("Collapse or expand this section")
             .clicked()
         {
             action = Some(SepAction::ToggleCollapse);
         }
-        if editing {
-            let response = ui.add(egui::TextEdit::singleline(buf).desired_width(220.0));
+        if state.editing {
+            let response =
+                ui.add(egui::TextEdit::singleline(state.buf).desired_width(SEPARATOR_EDIT_WIDTH));
             let committed_with_enter =
                 response.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
             if ui.small_button("✔").on_hover_text("Save name").clicked() || committed_with_enter {
@@ -1718,13 +1890,25 @@ fn separator_header(
                 action = Some(SepAction::StartEdit);
             }
         }
-        if ui.small_button("▲").on_hover_text("Move divider up").clicked() {
+        if ui
+            .small_button("▲")
+            .on_hover_text("Move divider up")
+            .clicked()
+        {
             action = Some(SepAction::MoveUp);
         }
-        if ui.small_button("▼").on_hover_text("Move divider down").clicked() {
+        if ui
+            .small_button("▼")
+            .on_hover_text("Move divider down")
+            .clicked()
+        {
             action = Some(SepAction::MoveDown);
         }
-        if ui.small_button("✕").on_hover_text("Remove divider").clicked() {
+        if ui
+            .small_button("✕")
+            .on_hover_text("Remove divider")
+            .clicked()
+        {
             action = Some(SepAction::Remove);
         }
     });
@@ -1761,8 +1945,9 @@ fn collapsed_hidden_indices(
 /// A fixed-width, vertically-centred table cell, so the mod list's columns line
 /// up row-to-row instead of drifting with each row's content.
 fn table_cell(ui: &mut egui::Ui, width: f32, add: impl FnOnce(&mut egui::Ui)) {
+    let cell_size = egui::vec2(width, ROW_HEIGHT);
     ui.allocate_ui_with_layout(
-        egui::vec2(width, ROW_HEIGHT),
+        cell_size,
         egui::Layout::left_to_right(egui::Align::Center),
         |ui| add(ui),
     );
@@ -1804,7 +1989,7 @@ const INSTALL_KIND_OPTIONS: [&str; 12] = [
 fn install_kind_combo(ui: &mut egui::Ui, id_source: &str, kind: &mut String) {
     egui::ComboBox::from_id_salt(format!("kind_{id_source}"))
         .selected_text(kind.clone())
-        .width(160.0)
+        .width(PROFILE_COMBO_WIDTH)
         .show_ui(ui, |ui| {
             for option in INSTALL_KIND_OPTIONS {
                 ui.selectable_value(kind, option.to_string(), option);
@@ -1822,9 +2007,9 @@ impl SanAndreasModUi {
                 item.config.install_roots.len()
             ));
             ui.label(if item.in_selected_profile {
-                "selected" // literal: allow external interface text or file-format spelling
+                "selected"
             } else {
-                "not selected" // literal: allow external interface text or file-format spelling
+                "not selected"
             });
             if should_add_mod_to_profile(ui, item) {
                 self.add_mod_to_profile(&item.config.id);
@@ -1838,7 +2023,7 @@ impl SanAndreasModUi {
     /// grouped by category (ModLoader / CLEO / ASI / direct resources) with the
     /// load-order winner for every file and the mods it overwrites.
     pub(super) fn content_panel(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Content"); // literal: allow external interface text or file-format spelling
+        ui.heading("Content");
         ui.label(
             "Everything the selected profile materializes, by San Andreas category, with the \
              load-order winner for each file. Later mods (lower in the load order) overwrite earlier ones.",
@@ -1861,7 +2046,7 @@ impl SanAndreasModUi {
         // Take the cached index out so the filter controls can mutate `self`
         // freely while the (borrowed) index is rendered; it is restored after.
         let Some(index) = self.content_index.take() else {
-            ui.add_space(8.0);
+            ui.add_space(DETAIL_ROW_GAP);
             ui.weak(
                 "No content scanned yet. Click Scan / refresh to analyze the profile's enabled mods.",
             );
@@ -1916,7 +2101,7 @@ impl SanAndreasModUi {
             ui.separator();
             ui.label("Filter");
             ui.add_sized(
-                [260.0, ROW_HEIGHT],
+                [WIDE_FIELD_WIDTH, ROW_HEIGHT],
                 egui::TextEdit::singleline(&mut self.content_search)
                     .hint_text("target path or mod id"),
             );
@@ -1949,7 +2134,7 @@ impl SanAndreasModUi {
         if let Some(category) = selected_category {
             ui.weak(category.description());
         }
-        ui.add_space(4.0);
+        ui.add_space(UI_SMALL_GAP);
 
         let conflict_color = ui.visuals().warn_fg_color;
         // Cloned out so the tailored viewers can borrow them inside the closure.
@@ -1965,10 +2150,12 @@ impl SanAndreasModUi {
                     ui,
                     category,
                     &rows,
-                    conflict_color,
-                    priorities.as_ref(),
-                    modloader_log.as_ref(),
-                    cleo_diagnostics.as_ref(),
+                    ContentViewContext {
+                        conflict_color,
+                        priorities: priorities.as_ref(),
+                        modloader_log: modloader_log.as_ref(),
+                        cleo_diagnostics: cleo_diagnostics.as_ref(),
+                    },
                 ),
                 // "All" stays a single flat table across every category.
                 None => content_table(ui, "content_grid_all", &rows, conflict_color),
@@ -1988,8 +2175,8 @@ fn content_table(
     const ROW_CAP: usize = 3000;
     egui::Grid::new(id.to_string())
         .striped(true)
-        .num_columns(4)
-        .min_col_width(90.0)
+        .num_columns(CONTENT_GRID_COLUMNS)
+        .min_col_width(CONTENT_GRID_MIN_COL_WIDTH)
         .show(ui, |ui| {
             ui.strong("Category");
             ui.strong("Target file");
@@ -2024,22 +2211,41 @@ fn content_table(
 /// Route a category to its tailored viewer. CLEO, ASI, and ModLoader get bespoke
 /// layouts (scripts+companions; plugins vs loaders; folders by ModLoader
 /// priority); everything else groups into collapsing sections by winning mod.
+#[derive(Clone, Copy)]
+struct ContentViewContext<'a> {
+    conflict_color: egui::Color32,
+    priorities: Option<&'a ModLoaderPriorities>,
+    modloader_log: Option<&'a ModLoaderLogSummary>,
+    cleo_diagnostics: Option<&'a CleoDiagnostics>,
+}
+
+#[derive(Clone, Copy)]
+struct ModLoaderViewContext<'a> {
+    conflict_color: egui::Color32,
+    priorities: Option<&'a ModLoaderPriorities>,
+    modloader_log: Option<&'a ModLoaderLogSummary>,
+}
 fn content_group_view(
     ui: &mut egui::Ui,
     category: ContentCategory,
     rows: &[&ContentEntry],
-    conflict_color: egui::Color32,
-    priorities: Option<&ModLoaderPriorities>,
-    modloader_log: Option<&ModLoaderLogSummary>,
-    cleo_diagnostics: Option<&CleoDiagnostics>,
+    context: ContentViewContext<'_>,
 ) {
     match category {
-        ContentCategory::Cleo => content_cleo_view(ui, rows, conflict_color, cleo_diagnostics),
-        ContentCategory::Asi => content_asi_view(ui, rows, conflict_color),
-        ContentCategory::ModLoader => {
-            content_modloader_view(ui, rows, conflict_color, priorities, modloader_log)
+        ContentCategory::Cleo => {
+            content_cleo_view(ui, rows, context.conflict_color, context.cleo_diagnostics)
         }
-        _ => content_grouped(ui, category, rows, conflict_color),
+        ContentCategory::Asi => content_asi_view(ui, rows, context.conflict_color),
+        ContentCategory::ModLoader => content_modloader_view(
+            ui,
+            rows,
+            ModLoaderViewContext {
+                conflict_color: context.conflict_color,
+                priorities: context.priorities,
+                modloader_log: context.modloader_log,
+            },
+        ),
+        _ => content_grouped(ui, category, rows, context.conflict_color),
     }
 }
 
@@ -2057,8 +2263,10 @@ fn content_modloader_log_summary(
         .map(|v| format!("Mod Loader {v}"))
         .unwrap_or_else(|| "Mod Loader".to_string());
     if log.is_clean() {
-        ui.weak(format!("Last run: {version} — loaded cleanly (no warnings or errors)."));
-        ui.add_space(4.0);
+        ui.weak(format!(
+            "Last run: {version} — loaded cleanly (no warnings or errors)."
+        ));
+        ui.add_space(UI_SMALL_GAP);
         return;
     }
     let header = format!(
@@ -2082,7 +2290,7 @@ fn content_modloader_log_summary(
                 ui.label(line);
             }
         });
-    ui.add_space(4.0);
+    ui.add_space(UI_SMALL_GAP);
 }
 
 /// The ModLoader viewer: one section per sandboxed folder, ordered and labeled by
@@ -2091,14 +2299,12 @@ fn content_modloader_log_summary(
 fn content_modloader_view(
     ui: &mut egui::Ui,
     rows: &[&ContentEntry],
-    conflict_color: egui::Color32,
-    priorities: Option<&ModLoaderPriorities>,
-    modloader_log: Option<&ModLoaderLogSummary>,
+    context: ModLoaderViewContext<'_>,
 ) {
-    if let Some(log) = modloader_log {
-        content_modloader_log_summary(ui, log, conflict_color);
+    if let Some(log) = context.modloader_log {
+        content_modloader_log_summary(ui, log, context.conflict_color);
     }
-    match priorities {
+    match context.priorities {
         Some(_) => {
             ui.weak(
                 "ModLoader applies these folders by its own priority (higher = later = wins), \
@@ -2117,7 +2323,7 @@ fn content_modloader_view(
     // underlying asset never collide on disk, so they are invisible in the plain
     // file tables below — ModLoader resolves them by priority at runtime. Surface
     // them explicitly, since this is the conflict class the viewer exists to show.
-    let effective_priorities = priorities.cloned().unwrap_or_default();
+    let effective_priorities = context.priorities.cloned().unwrap_or_default();
     let conflicts = modloader_conflicts(rows, &effective_priorities);
     if !conflicts.is_empty() {
         // Mergeable data files (handling.cfg, *.ide…) are soft: ModLoader combines
@@ -2125,7 +2331,10 @@ fn content_modloader_view(
         // rest are hard: the highest-priority folder wins the whole file.
         let override_count = conflicts.iter().filter(|c| !c.mergeable).count();
         let merge_count = conflicts.len() - override_count;
-        let ambiguous = conflicts.iter().filter(|c| c.ambiguous && !c.mergeable).count();
+        let ambiguous = conflicts
+            .iter()
+            .filter(|c| c.ambiguous && !c.mergeable)
+            .count();
         let mut parts = Vec::new();
         if override_count > 0 {
             parts.push(format!("{override_count} override"));
@@ -2149,7 +2358,7 @@ fn content_modloader_view(
                 );
                 egui::Grid::new("modloader_conflict_grid")
                     .striped(true)
-                    .num_columns(4)
+                    .num_columns(CONTENT_GRID_COLUMNS)
                     .show(ui, |ui| {
                         ui.strong("Asset");
                         ui.strong("Kind");
@@ -2174,9 +2383,9 @@ fn content_modloader_view(
                                      priority.",
                                 );
                             } else if conflict.ambiguous {
-                                ui.colored_label(conflict_color, "override");
+                                ui.colored_label(context.conflict_color, "override");
                                 ui.colored_label(
-                                    conflict_color,
+                                    context.conflict_color,
                                     format!("{winner} (priority {winner_priority}, tied)"),
                                 )
                                 .on_hover_text(
@@ -2208,19 +2417,22 @@ fn content_modloader_view(
         group_entries(ContentCategory::ModLoader, rows)
             .into_iter()
             .map(|(folder, folder_rows)| {
-                let priority = priorities.map(|table| table.for_folder(&folder));
+                let priority = context.priorities.map(|table| table.for_folder(&folder));
                 (priority, folder, folder_rows)
             })
             .collect();
     groups.sort_by(|a, b| {
-        a.0.unwrap_or(50)
-            .cmp(&b.0.unwrap_or(50))
+        a.0.unwrap_or(MODLOADER_DEFAULT_PRIORITY)
+            .cmp(&b.0.unwrap_or(MODLOADER_DEFAULT_PRIORITY))
             .then_with(|| a.1.cmp(&b.1))
     });
 
-    let default_open = groups.len() <= 8;
+    let default_open = groups.len() <= DEFAULT_OPEN_GROUP_LIMIT;
     for (priority, folder, folder_rows) in groups {
-        let conflicts = folder_rows.iter().filter(|entry| entry.is_conflict()).count();
+        let conflicts = folder_rows
+            .iter()
+            .filter(|entry| entry.is_conflict())
+            .count();
         let priority_label = match priority {
             Some(value) => format!("priority {value}"),
             None => "priority —".to_string(),
@@ -2241,7 +2453,7 @@ fn content_modloader_view(
                     ui,
                     &format!("modloader_grid_{folder}"),
                     &folder_rows,
-                    conflict_color,
+                    context.conflict_color,
                 );
             });
     }
@@ -2258,11 +2470,17 @@ fn content_grouped(
     let groups = group_entries(category, rows);
     // Open every section when there are only a handful, so small profiles read at
     // a glance; collapse by default once the list would get long.
-    let default_open = groups.len() <= 8;
+    let default_open = groups.len() <= DEFAULT_OPEN_GROUP_LIMIT;
     for (label, group_rows) in groups {
-        let conflicts = group_rows.iter().filter(|entry| entry.is_conflict()).count();
+        let conflicts = group_rows
+            .iter()
+            .filter(|entry| entry.is_conflict())
+            .count();
         let header = if conflicts > 0 {
-            format!("{label} — {} files, {conflicts} conflicts", group_rows.len())
+            format!(
+                "{label} — {} files, {conflicts} conflicts",
+                group_rows.len()
+            )
         } else {
             format!("{label} — {} files", group_rows.len())
         };
@@ -2317,7 +2535,11 @@ fn content_cleo_diagnostics(
                     ),
                 );
                 for conflict in &diagnostics.fxt_conflicts {
-                    ui.label(format!("    {}: {}", conflict.key, conflict.files.join(", ")));
+                    ui.label(format!(
+                        "    {}: {}",
+                        conflict.key,
+                        conflict.files.join(", ")
+                    ));
                 }
             }
             if !diagnostics.script_issues.is_empty() {
@@ -2342,7 +2564,7 @@ fn content_cleo_diagnostics(
                 }
             }
         });
-    ui.add_space(6.0);
+    ui.add_space(CARD_VERTICAL_GAP);
 }
 
 /// The CLEO viewer: an installed-folder health panel (blacklisted plugins, text
@@ -2362,13 +2584,13 @@ fn content_cleo_view(
         ui.strong(format!("{} plugin modules (.cleo)", view.plugins.len()));
         ui.weak("CLEO5 loads these from CLEO/cleo_plugins. Scripts may require a matching plugin (e.g. SA.IniFiles).");
         content_table(ui, "cleo_plugins_grid", &view.plugins, conflict_color);
-        ui.add_space(6.0);
+        ui.add_space(CARD_VERTICAL_GAP);
     }
     ui.strong(format!("{} scripts", view.scripts.len()));
     egui::Grid::new("cleo_scripts_grid")
         .striped(true)
-        .num_columns(4)
-        .min_col_width(90.0)
+        .num_columns(CONTENT_GRID_COLUMNS)
+        .min_col_width(CONTENT_GRID_MIN_COL_WIDTH)
         .show(ui, |ui| {
             ui.strong("Script");
             ui.strong("Winner");
@@ -2408,7 +2630,7 @@ fn content_cleo_view(
             }
         });
     if !view.loose.is_empty() {
-        ui.add_space(6.0);
+        ui.add_space(CARD_VERTICAL_GAP);
         ui.strong(format!(
             "{} loose files (no matching script)",
             view.loose.len()
@@ -2428,13 +2650,13 @@ fn content_asi_view(ui: &mut egui::Ui, rows: &[&ContentEntry], conflict_color: e
         content_table(ui, "asi_plugins_grid", &view.plugins, conflict_color);
     }
     if !view.loaders.is_empty() {
-        ui.add_space(6.0);
+        ui.add_space(CARD_VERTICAL_GAP);
         ui.strong(format!("{} loader / proxy DLLs", view.loaders.len()));
         ui.weak("These hook the game to load ASI plugins (e.g. Ultimate ASI Loader). Normally only one should win.");
         content_table(ui, "asi_loaders_grid", &view.loaders, conflict_color);
     }
     if !view.other.is_empty() {
-        ui.add_space(6.0);
+        ui.add_space(CARD_VERTICAL_GAP);
         ui.strong(format!("{} other files", view.other.len()));
         content_table(ui, "asi_other_grid", &view.other, conflict_color);
     }
@@ -2478,7 +2700,7 @@ impl SanAndreasModUi {
             .id(egui::Id::new("mod_info_window"))
             .open(&mut open)
             .resizable(true)
-            .default_size([560.0, 440.0])
+            .default_size([MOD_CONFIG_PANEL_HEIGHT, MOD_CONFIG_PANEL_WIDTH])
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
                     ui.selectable_value(&mut tab, ModInfoTab::Files, "Files");
@@ -2520,11 +2742,14 @@ impl SanAndreasModUi {
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
             .show(ui, |ui| {
-                for file in info.files.iter().take(5000) {
+                for file in info.files.iter().take(MAX_LOG_PREVIEW_BYTES) {
                     ui.monospace(file);
                 }
-                if info.files.len() > 5000 {
-                    ui.weak(format!("{} more not shown", info.files.len() - 5000));
+                if info.files.len() > MAX_LOG_PREVIEW_BYTES {
+                    ui.weak(format!(
+                        "{} more not shown",
+                        info.files.len() - MAX_LOG_PREVIEW_BYTES
+                    ));
                 }
             });
     }
@@ -2544,15 +2769,19 @@ impl SanAndreasModUi {
             return;
         }
         ui.label(format!("{} conflicting files", conflicts.len()));
-        let win_color = egui::Color32::from_rgb(120, 190, 120);
+        let win_color = egui::Color32::from_rgb(
+            RUNNING_STATUS_RED,
+            RUNNING_STATUS_GREEN,
+            RUNNING_STATUS_BLUE,
+        );
         let lose_color = ui.visuals().warn_fg_color;
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 egui::Grid::new("mod_info_conflicts")
                     .striped(true)
-                    .num_columns(3)
-                    .min_col_width(60.0)
+                    .num_columns(MODLOADER_GRID_COLUMNS)
+                    .min_col_width(LOG_PREVIEW_GRID_MIN_COL_WIDTH)
                     .show(ui, |ui| {
                         ui.strong("File");
                         ui.strong("This mod");
@@ -2588,8 +2817,8 @@ impl SanAndreasModUi {
         }
         egui::Grid::new("mod_info_roots")
             .striped(true)
-            .num_columns(4)
-            .min_col_width(60.0)
+            .num_columns(CONTENT_GRID_COLUMNS)
+            .min_col_width(LOG_PREVIEW_GRID_MIN_COL_WIDTH)
             .show(ui, |ui| {
                 ui.strong("Source");
                 ui.strong("Target");
@@ -2641,11 +2870,12 @@ impl SanAndreasModUi {
 
         ui.horizontal(|ui| {
             ui.label("Color");
+            let swatch_size = egui::vec2(MOD_COLOR_SWATCH_WIDTH, MOD_COLOR_SWATCH_HEIGHT);
             for (name, color) in MOD_COLORS {
                 let selected = meta.color.as_deref() == Some(name);
                 let label = if selected { "●" } else { "  " };
                 if ui
-                    .add(egui::Button::new(label).fill(color).min_size(egui::vec2(22.0, 18.0)))
+                    .add(egui::Button::new(label).fill(color).min_size(swatch_size))
                     .on_hover_text(name)
                     .clicked()
                 {
@@ -2677,7 +2907,7 @@ impl SanAndreasModUi {
                 ui.add(
                     egui::TextEdit::singleline(&mut info.new_category)
                         .hint_text("new category")
-                        .desired_width(160.0),
+                        .desired_width(CATEGORY_INPUT_WIDTH),
                 );
             }
             if ui.button("Add").clicked() {
@@ -2690,7 +2920,7 @@ impl SanAndreasModUi {
         if let Some(info) = self.mod_info.as_mut() {
             ui.add(
                 egui::TextEdit::multiline(&mut info.note_edit)
-                    .desired_rows(4)
+                    .desired_rows(NOTE_EDITOR_ROWS)
                     .desired_width(f32::INFINITY),
             );
         }
@@ -2728,13 +2958,14 @@ impl SanAndreasModUi {
     }
 
     pub(super) fn import_panel(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Import Mod"); // literal: allow external interface text or file-format spelling
+        ui.heading("Import Mod");
         ui.label("Review first, then import. Medium-confidence readme matches stay visible for human judgment.");
         ui.separator();
         ui.horizontal(|ui| {
-            ui.label("Package or folder"); // literal: allow external interface text or file-format spelling
+            ui.label("Package or folder");
             let package_editor = egui::TextEdit::singleline(&mut self.import_path_input);
-            let package_response = ui.add_sized([470.0, ROW_HEIGHT], package_editor);
+            let package_response =
+                ui.add_sized([IMPORT_PATH_FIELD_WIDTH, ROW_HEIGHT], package_editor);
             if package_response.changed() {
                 // Editing the path invalidates proposals from the last review, so
                 // "Add to config" can never target a different package.
@@ -2775,7 +3006,7 @@ impl SanAndreasModUi {
             }
         });
         ui.separator();
-        ui.label("Supported: folders, .zip, .wrap, .7z, .rar."); // literal: allow external interface text or file-format spelling
+        ui.label("Supported: folders, .zip, .wrap, .7z, .rar.");
         if self.analysis_summary.is_none() {
             ui.label("Use Review package to inspect files, readmes, and proposed install roots before committing it to the library.");
         }
@@ -2822,18 +3053,20 @@ impl SanAndreasModUi {
             .map(|path| path.exists())
             .unwrap_or(false);
         if !imported {
-            ui.label("Import this package to the library to enable applying a proposal to its config.");
+            ui.label(
+                "Import this package to the library to enable applying a proposal to its config.",
+            );
         }
         let proposals = self.readme_proposals.clone();
         let mut accepted = None;
         egui::ScrollArea::vertical()
-            .max_height(360.0)
+            .max_height(DETAILS_PANEL_MAX_HEIGHT)
             .show(ui, |ui| {
                 for proposal in &proposals {
                     if readme_proposal_panel(ui, proposal, imported) {
                         accepted = Some(proposal.clone());
                     }
-                    ui.add_space(6.0);
+                    ui.add_space(CARD_VERTICAL_GAP);
                 }
             });
         if let Some(proposal) = accepted {
@@ -2854,19 +3087,24 @@ fn readme_proposal_panel(ui: &mut egui::Ui, proposal: &ReadmeProposal, imported:
         // is one compact row plus its evidence, not a five-line stack.
         ui.horizontal(|ui| {
             ui.strong(readme_proposal_title(proposal));
-            ui.weak(format!("{:.0}%", proposal.confidence * 100.0));
+            ui.weak(format!("{:.0}%", proposal.confidence * PERCENT_SCALE));
             ui.weak(proposal.review_state.to_string());
             if readme_proposal_is_actionable(proposal) {
                 accepted = ui
                     .add_enabled(imported, egui::Button::new("Add to config"))
-                    .on_hover_text("Append this copy as an install root on the imported mod's config")
+                    .on_hover_text(
+                        "Append this copy as an install root on the imported mod's config",
+                    )
                     .on_disabled_hover_text("Import this package to the library first")
                     .clicked();
             }
         });
         ui.label(format!("→ {}", proposal.proposed_install));
-        ui.small(clip_text(&evidence, 100))
-            .on_hover_text(format!("{evidence}\nNormalized: {}", proposal.normalized_text));
+        let clipped_evidence = clip_text(&evidence, README_EVIDENCE_CLIP);
+        ui.small(clipped_evidence).on_hover_text(format!(
+            "{evidence}\nNormalized: {}",
+            proposal.normalized_text
+        ));
         if !proposal.reasons.is_empty() {
             ui.small(format!("Why: {}", proposal.reasons.join("; ")));
         }
@@ -2924,12 +3162,12 @@ impl SanAndreasModUi {
                 ui.horizontal(|ui| {
                     ui.label("Name");
                     ui.add_sized(
-                        [140.0, ROW_HEIGHT],
+                        [COMPACT_FIELD_WIDTH, ROW_HEIGHT],
                         egui::TextEdit::singleline(&mut self.new_tool_name),
                     );
                     ui.label("Args");
                     ui.add_sized(
-                        [160.0, ROW_HEIGHT],
+                        [MEDIUM_FIELD_WIDTH, ROW_HEIGHT],
                         egui::TextEdit::singleline(&mut self.new_tool_args)
                             .hint_text("-optional -flags"),
                     );
@@ -2937,7 +3175,7 @@ impl SanAndreasModUi {
                 ui.horizontal(|ui| {
                     ui.label("Path");
                     ui.add_sized(
-                        [320.0, ROW_HEIGHT],
+                        [TOOL_PATH_FIELD_WIDTH, ROW_HEIGHT],
                         egui::TextEdit::singleline(&mut self.new_tool_path)
                             .hint_text("full path to a .exe"),
                     );
@@ -2992,7 +3230,7 @@ impl SanAndreasModUi {
                     .get(folder)
                     .copied()
                     .or_else(|| priorities.map(|table| table.for_folder(folder)))
-                    .unwrap_or(50);
+                    .unwrap_or(MODLOADER_DEFAULT_PRIORITY);
                 (folder.clone(), priority)
             })
             .collect();
@@ -3018,8 +3256,8 @@ impl SanAndreasModUi {
 
         egui::Grid::new("modloader_priority_grid")
             .striped(true)
-            .num_columns(3)
-            .min_col_width(64.0)
+            .num_columns(MODLOADER_GRID_COLUMNS)
+            .min_col_width(GRID_MIN_COL_WIDTH)
             .show(ui, |ui| {
                 ui.strong("On");
                 ui.strong("Priority");
@@ -3035,15 +3273,27 @@ impl SanAndreasModUi {
                         )
                         .changed()
                     {
-                        set_priority = Some((folder.clone(), if enabled { 50 } else { 0 }));
+                        set_priority = Some((
+                            folder.clone(),
+                            if enabled {
+                                MODLOADER_DEFAULT_PRIORITY
+                            } else {
+                                MODLOADER_MIN_PRIORITY
+                            },
+                        ));
                     }
                     let mut value = *priority;
                     let response = ui.add_enabled(
                         *priority > 0,
-                        egui::DragValue::new(&mut value).range(0..=100).speed(0.25),
+                        egui::DragValue::new(&mut value)
+                            .range(MODLOADER_MIN_PRIORITY..=MODLOADER_MAX_PRIORITY)
+                            .speed(MODLOADER_PRIORITY_STEP),
                     );
                     if response.changed() {
-                        set_priority = Some((folder.clone(), value.clamp(0, 100)));
+                        set_priority = Some((
+                            folder.clone(),
+                            value.clamp(MODLOADER_MIN_PRIORITY, MODLOADER_MAX_PRIORITY),
+                        ));
                     }
                     ui.label(folder);
                     ui.end_row();
@@ -3082,19 +3332,26 @@ impl SanAndreasModUi {
         egui::ScrollArea::vertical()
             .id_salt("overwrite_files")
             .auto_shrink([false, true])
-            .max_height(200.0)
+            .max_height(OVERWRITE_PANEL_MAX_HEIGHT)
             .show(ui, |ui| {
-                for file in self.overwrite_files.iter().take(2000) {
+                for file in self
+                    .overwrite_files
+                    .iter()
+                    .take(OVERWRITE_VISIBLE_FILE_LIMIT)
+                {
                     ui.monospace(file);
                 }
-                if self.overwrite_files.len() > 2000 {
-                    ui.weak(format!("{} more not shown", self.overwrite_files.len() - 2000));
+                if self.overwrite_files.len() > OVERWRITE_VISIBLE_FILE_LIMIT {
+                    ui.weak(format!(
+                        "{} more not shown",
+                        self.overwrite_files.len() - OVERWRITE_VISIBLE_FILE_LIMIT
+                    ));
                 }
             });
     }
 
     pub(super) fn run_panel(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Play Selected Profile"); // literal: allow external interface text or file-format spelling
+        ui.heading("Play Selected Profile");
         ui.separator();
         let active_count = selected_profile_entries(&self.state, &self.selected_profile)
             .iter()
@@ -3159,7 +3416,7 @@ impl SanAndreasModUi {
             let pending_runs = self.pending_runs.clone();
             egui::Grid::new("pending_run_grid")
                 .striped(true)
-                .min_col_width(88.0)
+                .min_col_width(PENDING_RUN_GRID_MIN_COL_WIDTH)
                 .show(ui, |ui| {
                     ui.label("Status");
                     ui.label("PID");
@@ -3188,7 +3445,7 @@ impl SanAndreasModUi {
                 });
         }
         ui.separator();
-        ui.heading("Game Infrastructure"); // literal: allow external interface text or file-format spelling
+        ui.heading("Game Infrastructure");
         infrastructure_grid(ui, &self.state.infrastructure);
     }
 }
@@ -3214,7 +3471,7 @@ impl SanAndreasModUi {
         ui.horizontal(|ui| {
             ui.label("Filter");
             ui.add_sized(
-                [240.0, ROW_HEIGHT],
+                [TELEMETRY_FILTER_WIDTH, ROW_HEIGHT],
                 egui::TextEdit::singleline(&mut self.telemetry_search),
             );
             egui::ComboBox::from_id_salt("telemetry_kind_filter")
@@ -3249,20 +3506,24 @@ impl SanAndreasModUi {
         } else {
             egui::Grid::new("telemetry_recent_events")
                 .striped(true)
-                .min_col_width(48.0)
+                .min_col_width(TELEMETRY_GRID_MIN_COL_WIDTH)
                 .show(ui, |ui| {
                     ui.strong("Type");
                     ui.strong("When");
                     ui.strong("Name");
                     ui.strong("Details");
                     ui.end_row();
-                    for event in recent_events.into_iter().take(50) {
+                    for event in recent_events
+                        .into_iter()
+                        .take(TELEMETRY_VISIBLE_EVENT_LIMIT)
+                    {
                         ui.label(&event.kind);
                         ui.monospace(human_datetime(event.created_unix))
                             .on_hover_text(format!("unix {}", event.created_unix));
-                        ui.label(clip_text(&event.title, 40)).on_hover_text(&event.title);
-                        ui.label(clip_text(&event.detail, 72))
-                            .on_hover_text(&event.detail);
+                        let clipped_title = clip_text(&event.title, TELEMETRY_TITLE_CLIP);
+                        ui.label(clipped_title).on_hover_text(&event.title);
+                        let clipped_detail = clip_text(&event.detail, TELEMETRY_DETAIL_CLIP);
+                        ui.label(clipped_detail).on_hover_text(&event.detail);
                         ui.end_row();
                     }
                 });
@@ -3276,7 +3537,7 @@ impl SanAndreasModUi {
         }
         egui::Grid::new("telemetry_mod_history")
             .striped(true)
-            .min_col_width(48.0)
+            .min_col_width(TELEMETRY_GRID_MIN_COL_WIDTH)
             .show(ui, |ui| {
                 ui.strong("Mod");
                 ui.strong("Imports");
@@ -3287,7 +3548,7 @@ impl SanAndreasModUi {
                 ui.strong("Issues");
                 ui.strong("Last seen");
                 ui.end_row();
-                for row in mod_rows.into_iter().take(50) {
+                for row in mod_rows.into_iter().take(TELEMETRY_VISIBLE_EVENT_LIMIT) {
                     ui.label(&row.id);
                     ui.monospace(row.imports.to_string());
                     ui.monospace(row.runs.to_string());

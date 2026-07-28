@@ -215,9 +215,7 @@ fn detect_game_root() -> Option<PathBuf> {
     if let Ok(cwd) = env::current_dir() {
         starts.push(cwd);
     }
-    starts
-        .iter()
-        .find_map(|start| game_root_at_or_above(start))
+    starts.iter().find_map(|start| game_root_at_or_above(start))
 }
 
 /// Nearest ancestor of `start` (inclusive) that holds a GTA San Andreas
@@ -329,10 +327,7 @@ pub(crate) fn write_example_config() -> Result<PathBuf, AppError> {
             path: "dinput8.dll".to_string(),
         }],
         default_launch_args: vec!["-nointro".to_string()],
-        default_launch_env: BTreeMap::from([(
-            "SA_EXAMPLE".to_string(),
-            "1".to_string(),
-        )]),
+        default_launch_env: BTreeMap::from([("SA_EXAMPLE".to_string(), "1".to_string())]),
         log_level: Some("info".to_string()),
         default_profile: Some("default".to_string()),
     };
@@ -446,7 +441,11 @@ fn resolve_settings(file: SettingsFile, env: EnvOverrides) -> Settings {
         .or_else(|| file.seven_zip.as_deref().map(PathBuf::from));
 
     let mut component_rules = builtin_component_rules();
-    component_rules.extend(file.component_rules.into_iter().filter_map(component_rule_from_file));
+    component_rules.extend(
+        file.component_rules
+            .into_iter()
+            .filter_map(component_rule_from_file),
+    );
     let mut context_rules = builtin_context_rules();
     context_rules.extend(file.context_rules.into_iter().map(context_rule_from_file));
 
@@ -571,11 +570,7 @@ fn env_mod_roots() -> Option<Vec<PathBuf>> {
     let roots: Vec<PathBuf> = env::split_paths(&value)
         .filter(|path| !path.as_os_str().is_empty())
         .collect();
-    if roots.is_empty() {
-        None
-    } else {
-        Some(roots)
-    }
+    if roots.is_empty() { None } else { Some(roots) }
 }
 
 #[cfg(test)]
@@ -721,10 +716,10 @@ mod tests {
             game_root: Some("G".to_string()),
             mod_roots: Some(vec!["M".to_string()]),
             seven_zip: None,
-            readme_auto_confidence: Some(0.9),
-            readme_review_confidence: Some(0.5),
-            pending_run_watch_secs: Some(5),
-            modloader_order_prefix: Some(200),
+            readme_auto_confidence: Some(0.9), // literal: allow test fixture value is the specimen under judgment
+            readme_review_confidence: Some(0.5), // literal: allow test fixture value is the specimen under judgment
+            pending_run_watch_secs: Some(5), // literal: allow test fixture value is the specimen under judgment
+            modloader_order_prefix: Some(200), // literal: allow test fixture value is the specimen under judgment
             component_rules: vec![ComponentRuleFile {
                 component: "asi".to_string(),
                 contains: Vec::new(),
@@ -751,14 +746,17 @@ mod tests {
             builtin_component_rules().len() + 1
         );
         // Behavioral tunables round-trip through the config too.
-        assert!((resolved.readme_auto_confidence - 0.9).abs() < f32::EPSILON);
-        assert!((resolved.readme_review_confidence - 0.5).abs() < f32::EPSILON);
-        assert_eq!(resolved.pending_run_watch_secs, 5);
-        assert_eq!(resolved.modloader_order_prefix, 200);
+        assert!((resolved.readme_auto_confidence - 0.9).abs() < f32::EPSILON); // literal: allow test fixture value is the specimen under judgment
+        assert!((resolved.readme_review_confidence - 0.5).abs() < f32::EPSILON); // literal: allow test fixture value is the specimen under judgment
+        assert_eq!(resolved.pending_run_watch_secs, 5); // literal: allow test fixture value is the specimen under judgment
+        assert_eq!(resolved.modloader_order_prefix, 200); // literal: allow test fixture value is the specimen under judgment
         // Configured infrastructure checks round-trip and drop blank entries.
         assert_eq!(
             resolved.infrastructure_checks,
-            vec![("ASI loader (dinput8)".to_string(), "dinput8.dll".to_string())]
+            vec![(
+                "ASI loader (dinput8)".to_string(),
+                "dinput8.dll".to_string()
+            )]
         );
         // Default launch args/env round-trip through the config too.
         assert_eq!(resolved.default_launch_args, vec!["-nointro".to_string()]);
@@ -781,7 +779,7 @@ mod tests {
 
         // Out-of-range confidence is clamped; a zero interval falls back to default.
         let file = SettingsFile {
-            readme_auto_confidence: Some(9.0),
+            readme_auto_confidence: Some(9.0), // literal: allow test fixture value is the specimen under judgment
             readme_review_confidence: Some(-1.0),
             pending_run_watch_secs: Some(0),
             ..Default::default()
@@ -794,12 +792,12 @@ mod tests {
         // An inverted config (review above auto) is pulled down to auto so the
         // needs-review band never becomes unreachable.
         let inverted = SettingsFile {
-            readme_auto_confidence: Some(0.4),
-            readme_review_confidence: Some(0.9),
+            readme_auto_confidence: Some(0.4), // literal: allow test fixture value is the specimen under judgment
+            readme_review_confidence: Some(0.9), // literal: allow test fixture value is the specimen under judgment
             ..Default::default()
         };
         let s = resolve_settings(inverted, empty_env());
         assert!(s.readme_review_confidence <= s.readme_auto_confidence);
-        assert!((s.readme_review_confidence - 0.4).abs() < f32::EPSILON);
+        assert!((s.readme_review_confidence - 0.4).abs() < f32::EPSILON); // literal: allow test fixture value is the specimen under judgment
     }
 }

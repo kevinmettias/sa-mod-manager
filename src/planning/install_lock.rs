@@ -28,7 +28,7 @@ pub(crate) fn read_install_lock(game_root: &Path) -> Result<Option<InstallLock>,
     }
     // The lock is a handful of `key=value` lines; cap the read so a corrupt or
     // oversized file fails cleanly instead of being slurped whole.
-    let text = read_capped(&path, 64 * 1024)
+    let text = read_capped(&path, 64 * 1024) // literal: allow external format or runtime boundary value means itself here
         .with_context(|| format!("read install lock {}", path.display()))?;
     parse_install_lock(&text)
 }
@@ -190,7 +190,9 @@ pub(crate) fn acquire_install_lock(
                 )),
             }
         }
-        Err(err) => Err(AppError::from(err).context(format!("create install lock {}", path.display()))),
+        Err(err) => {
+            Err(AppError::from(err).context(format!("create install lock {}", path.display())))
+        }
     }
 }
 
@@ -269,15 +271,11 @@ mod tests {
     fn acquire_blocks_second_install_while_owner_is_running() {
         let game_root = test_root("lock_blocks_running");
         // A lock owned by this very process is, by definition, still running.
-        write_install_lock(
-            &game_root,
-            "tx-live",
-            &journal_path(&game_root, "tx-live"),
-            std::process::id(),
-        )
-        .unwrap();
+        let journal_path_1 = journal_path(&game_root, "tx-live");
+        write_install_lock(&game_root, "tx-live", &journal_path_1, std::process::id()).unwrap();
 
-        let err = acquire_install_lock(&game_root, "tx-new", &journal_path(&game_root, "tx-new"))
+        let journal_path_2 = journal_path(&game_root, "tx-new");
+        let err = acquire_install_lock(&game_root, "tx-new", &journal_path_2)
             .unwrap_err()
             .to_string();
 
@@ -288,15 +286,11 @@ mod tests {
     #[test]
     fn acquire_reports_interrupted_install_when_owner_is_gone() {
         let game_root = test_root("lock_interrupted");
-        write_install_lock(
-            &game_root,
-            "tx-dead",
-            &journal_path(&game_root, "tx-dead"),
-            u32::MAX,
-        )
-        .unwrap();
+        let journal_path_3 = journal_path(&game_root, "tx-dead");
+        write_install_lock(&game_root, "tx-dead", &journal_path_3, u32::MAX).unwrap();
 
-        let err = acquire_install_lock(&game_root, "tx-new", &journal_path(&game_root, "tx-new"))
+        let journal_path_4 = journal_path(&game_root, "tx-new");
+        let err = acquire_install_lock(&game_root, "tx-new", &journal_path_4)
             .unwrap_err()
             .to_string();
 
@@ -310,22 +304,14 @@ mod tests {
         let game_root = test_root("lock_detect");
         assert!(interrupted_install(&game_root).unwrap().is_none());
 
-        write_install_lock(
-            &game_root,
-            "tx-live",
-            &journal_path(&game_root, "tx-live"),
-            std::process::id(),
-        )
-        .unwrap();
+        let journal_path_5 = journal_path(&game_root, "tx-live");
+
+        write_install_lock(&game_root, "tx-live", &journal_path_5, std::process::id()).unwrap();
         assert!(interrupted_install(&game_root).unwrap().is_none());
 
-        write_install_lock(
-            &game_root,
-            "tx-dead",
-            &journal_path(&game_root, "tx-dead"),
-            u32::MAX,
-        )
-        .unwrap();
+        let journal_path_6 = journal_path(&game_root, "tx-dead");
+
+        write_install_lock(&game_root, "tx-dead", &journal_path_6, u32::MAX).unwrap();
         let detected = interrupted_install(&game_root).unwrap().unwrap();
         assert_eq!(detected.txid, "tx-dead");
         remove_dir_if_exists(&game_root).unwrap();
@@ -357,7 +343,8 @@ mod tests {
         let detected = interrupted_install(&game_root).unwrap();
         assert_eq!(detected.unwrap().txid, "tx-reused");
 
-        let err = acquire_install_lock(&game_root, "tx-new", &journal_path(&game_root, "tx-new"))
+        let journal_path_7 = journal_path(&game_root, "tx-new");
+        let err = acquire_install_lock(&game_root, "tx-new", &journal_path_7)
             .unwrap_err()
             .to_string();
         assert!(err.contains("interrupted"));
@@ -410,11 +397,7 @@ mod tests {
         ensure_lock_parent(&path).unwrap();
         // A present-but-garbage pid must surface as corruption rather than
         // collapsing to "no pid" (which would read as a recoverable dead lock).
-        fs::write(
-            &path,
-            "version=1\ntxid=tx\njournal=j\npid=not-a-number\n",
-        )
-        .unwrap();
+        fs::write(&path, "version=1\ntxid=tx\njournal=j\npid=not-a-number\n").unwrap();
 
         let err = match read_install_lock(&game_root) {
             Ok(_) => panic!("expected a corruption error for a non-numeric pid"),

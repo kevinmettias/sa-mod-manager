@@ -1,8 +1,9 @@
 use crate::prelude::*;
 
 use super::content::{
-    modloader_active_profile, modloader_folder_from_target, modloader_managed_profile_name,
-    modloader_priority_limit, render_modloader_managed_profile, spread_priority,
+    ModLoaderManagedProfileRender, modloader_active_profile, modloader_folder_from_target,
+    modloader_managed_profile_name, modloader_priority_limit, render_modloader_managed_profile,
+    spread_priority,
 };
 use super::copy_journal::{
     apply_copy_tree_with_journal, apply_generated_file_with_journal, sync_journal,
@@ -27,26 +28,29 @@ pub(crate) fn prepare_run(game_root: &Path, profile_name: &str) -> Result<(), Ap
     let status_result = launch_game_and_wait(game_root, &launch_args, &launch_env);
     // Record how the launch actually went before rolling the run back, so a
     // failed launch is distinguishable from a real play session in telemetry.
-    record_run_outcome(
+    let outcome_context = RunOutcomeContext {
         game_root,
-        &journal_path,
+        journal_path: &journal_path,
         profile_name,
-        &launch_args,
+        launch_args: &launch_args,
         started_unix,
-        &status_result,
-    );
+    };
+    record_run_outcome(outcome_context, &status_result);
     let launch_result = interpret_launch_status(status_result);
     let rollback_result = rollback_journal(&journal_path, game_root);
     launch_result?;
     rollback_result
 }
 
-fn record_run_outcome(
-    game_root: &Path,
-    journal_path: &Path,
-    profile_name: &str,
-    launch_args: &[String],
+struct RunOutcomeContext<'a> {
+    game_root: &'a Path,
+    journal_path: &'a Path,
+    profile_name: &'a str,
+    launch_args: &'a [String],
     started_unix: u64,
+}
+fn record_run_outcome(
+    context: RunOutcomeContext<'_>,
     status_result: &Result<ExitStatus, AppError>,
 ) {
     let finished_unix = unix_now();
@@ -57,17 +61,21 @@ fn record_run_outcome(
     };
     let outcome = RunOutcome {
         version: 1,
-        txid: txid_from_journal(journal_path),
-        profile: profile_name.to_string(),
+        txid: txid_from_journal(context.journal_path),
+        profile: context.profile_name.to_string(),
         result: result.to_string(),
         exit_code,
-        duration_ms: Some(finished_unix.saturating_sub(started_unix).saturating_mul(1000)),
-        launch_args: launch_args.to_vec(),
-        started_unix,
+        duration_ms: Some(
+            finished_unix
+                .saturating_sub(context.started_unix)
+                .saturating_mul(1000), // literal: allow domain threshold is documented by the surrounding code
+        ),
+        launch_args: context.launch_args.to_vec(),
+        started_unix: context.started_unix,
         finished_unix,
     };
     // Telemetry is best-effort: a failed write must not fail the run itself.
-    if let Err(err) = write_run_outcome(&state_directory(game_root), &outcome) {
+    if let Err(err) = write_run_outcome(&state_directory(context.game_root), &outcome) {
         log_warn!("could not record run outcome: {err}");
     }
 }
@@ -77,7 +85,9 @@ fn record_run_outcome(
 fn interpret_launch_status(status_result: Result<ExitStatus, AppError>) -> Result<(), AppError> {
     match status_result {
         Ok(status) if status.success() => Ok(()),
-        Ok(status) => Err(AppError::Usage(format!("game exited with status: {status}"))),
+        Ok(status) => Err(AppError::Usage(format!(
+            "game exited with status: {status}"
+        ))),
         Err(err) => Err(err),
     }
 }
@@ -136,13 +146,13 @@ pub(crate) fn materialize_profile_for_run(
     // sandboxed modloader mods, copy order into distinct folders decides nothing.
     // Journaled like any other write, so an ephemeral run's rollback restores the
     // prior modloader.ini.
-    if let Err(err) = write_modloader_priorities_for_run(
-        &profile.mods,
+    let priority_context = ModLoaderPriorityRunContext {
+        entries: &profile.mods,
         profile_name,
         game_root,
-        &run_state.backup_root,
-        &mut journal,
-    ) {
+        backup_root: &run_state.backup_root,
+    };
+    if let Err(err) = write_modloader_priorities_for_run(priority_context, &mut journal) {
         return Err(rollback_failed_materialization(
             game_root,
             &run_state.journal_path,
@@ -201,7 +211,7 @@ fn rollback_failed_materialization(
 
 fn read_enabled_profile(game_root: &Path, profile_name: &str) -> Result<ProfileJson, AppError> {
     let profile_path = state_directory(game_root)
-        .join("profiles") // literal: allow external interface text or file-format spelling
+        .join("profiles")
         .join(format!("{profile_name}.json"));
     let mut profile = read_profile_json(&profile_path)?;
     profile.mods.retain(|entry| entry.enabled);
@@ -246,9 +256,9 @@ fn validate_profile_mods(profile: &ProfileJson) -> Result<(), AppError> {
 fn create_run_state(game_root: &Path, profile_name: &str) -> Result<RunApplyState, AppError> {
     let txid = format!("run-{}-{}", safe_name(profile_name), unix_now());
     let journal_path = state_directory(game_root)
-        .join("journals") // literal: allow external interface text or file-format spelling
+        .join("journals")
         .join(format!("{txid}.journal"));
-    let backup_root = state_directory(game_root).join("backups").join(&txid); // literal: allow external interface text or file-format spelling
+    let backup_root = state_directory(game_root).join("backups").join(&txid);
     fs::create_dir_all(&backup_root)?;
     Ok(RunApplyState {
         txid,
@@ -333,7 +343,10 @@ fn enabled_install_roots(
             .unwrap_or(root.enabled)
     });
     for root in &mut roots {
-        if let Some(target) = overrides.get(&root.source).and_then(|over| over.target.clone()) {
+        if let Some(target) = overrides
+            .get(&root.source)
+            .and_then(|over| over.target.clone())
+        {
             root.target = target;
         }
     }
@@ -346,10 +359,7 @@ fn apply_run_install_root(
     staging_root: &Path,
     context: &mut RunInstallContext,
 ) -> Result<(), AppError> {
-    /* literal: allow external interface text or file-format spelling */
-    /* literal: allow external interface text or file-format spelling */
     if root.kind.eq_ignore_ascii_case("bootstrap") {
-        // literal: allow external interface text or file-format spelling
         write_blocked_bootstrap(context.journal, &root.source, &root.target)?;
         return Ok(());
     }
@@ -400,19 +410,22 @@ fn write_missing_source(journal: &mut fs::File, source_abs: &Path) -> Result<(),
 /// (inheriting the user's `Default`) and activated per launch with `-modprof`, so
 /// the user's own ModLoader config is never disturbed. A no-op when the profile
 /// has no modloader-sandboxed mods or the file already reflects the same order.
+struct ModLoaderPriorityRunContext<'a> {
+    entries: &'a [ProfileModEntry],
+    profile_name: &'a str,
+    game_root: &'a Path,
+    backup_root: &'a Path,
+}
 fn write_modloader_priorities_for_run(
-    entries: &[ProfileModEntry],
-    profile_name: &str,
-    game_root: &Path,
-    backup_root: &Path,
+    context: ModLoaderPriorityRunContext<'_>,
     journal: &mut fs::File,
 ) -> Result<(), AppError> {
-    let ini_path = game_root.join("modloader").join("modloader.ini");
+    let ini_path = context.game_root.join("modloader").join("modloader.ini");
     let existing = read_capped(&ini_path, MAX_CONTROL_FILE_BYTES).ok();
     let existing_ref = existing.as_deref().unwrap_or("");
     let limit = modloader_priority_limit(existing_ref);
 
-    let mut folder_priorities = modloader_folder_priorities(entries, limit)?;
+    let mut folder_priorities = modloader_folder_priorities(context.entries, limit)?;
     if folder_priorities.is_empty() {
         return Ok(());
     }
@@ -420,12 +433,13 @@ fn write_modloader_priorities_for_run(
     // are expressed as IgnoreMods so ModLoader skips them; never ignore a folder an
     // enabled mod is actively using.
     let mut ignore_folders =
-        disabled_modloader_folders(game_root, profile_name, &folder_priorities)?;
+        disabled_modloader_folders(context.game_root, context.profile_name, &folder_priorities)?;
     // Layer the profile's ModLoader priority-panel overrides on top of the
     // load-order-derived defaults: a positive value overrides that folder's
     // priority, while 0 disables it *in ModLoader* (via IgnoreMods) even though the
     // mod stays manager-enabled and its files are installed.
-    let overrides = read_modloader_overrides(&state_directory(game_root), profile_name);
+    let overrides =
+        read_modloader_overrides(&state_directory(context.game_root), context.profile_name);
     for (folder, priority) in &overrides {
         let Some(key) = folder_priorities
             .keys()
@@ -440,34 +454,35 @@ fn write_modloader_priorities_for_run(
                 ignore_folders.push(key);
             }
         } else {
-            folder_priorities.insert(key, (*priority).clamp(1, limit));
+            let clamped_priority = (*priority).clamp(1, limit);
+            folder_priorities.insert(key, clamped_priority);
         }
     }
     // Per-file exclusion globs the profile declares (a hand-added `ignore_files`
     // list), mapped to ModLoader's own `[IgnoreFiles]` so one file can be hidden
     // inside a mod without editing the mod.
-    let ignore_files = profile_ignore_files(game_root, profile_name)?;
-    let managed = modloader_managed_profile_name(profile_name);
+    let ignore_files = profile_ignore_files(context.game_root, context.profile_name)?;
+    let managed = modloader_managed_profile_name(context.profile_name);
     // Inherit the user's own active profile so their hand-set priorities and
     // ignore lists still apply; our section only layers the managed mods on top.
     let parent = modloader_active_profile(existing_ref);
-    let Some(rendered) = render_modloader_managed_profile(
-        existing.as_deref(),
-        &managed,
-        &parent,
+    let Some(rendered) = render_modloader_managed_profile(ModLoaderManagedProfileRender {
+        existing: existing.as_deref(),
+        profile: &managed,
+        parent: &parent,
         limit,
-        &folder_priorities,
-        &ignore_folders,
-        &ignore_files,
-    ) else {
+        folder_priorities: &folder_priorities,
+        ignore_folders: &ignore_folders,
+        ignore_files: &ignore_files,
+    }) else {
         return Ok(());
     };
-    let mut context = CopyJournalContext {
-        game_root,
-        backup_root,
+    let mut copy_context = CopyJournalContext {
+        game_root: context.game_root,
+        backup_root: context.backup_root,
         journal,
     };
-    apply_generated_file_with_journal(&rendered, &ini_path, &mut context)
+    apply_generated_file_with_journal(&rendered, &ini_path, &mut copy_context)
 }
 
 /// The `-modprof` profile name to activate for this run, or `None` when no
@@ -613,10 +628,16 @@ mod tests {
     fn user_modloader_flags_suppress_our_modprof() {
         // A user who set any ModLoader mode keeps it; we don't append a dead -modprof.
         for arg in ["-nomods", "-NoMods", "-mod", "-modprof"] {
-            assert!(launch_args_select_modloader_mode(&[arg.to_string()]), "{arg}");
+            assert!(
+                launch_args_select_modloader_mode(&[arg.to_string()]),
+                "{arg}"
+            );
         }
         // Unrelated args leave us free to add -modprof.
-        assert!(!launch_args_select_modloader_mode(&["-nointro".to_string(), "-windowed".to_string()]));
+        assert!(!launch_args_select_modloader_mode(&[
+            "-nointro".to_string(),
+            "-windowed".to_string()
+        ]));
         assert!(!launch_args_select_modloader_mode(&[]));
     }
 
@@ -625,11 +646,14 @@ mod tests {
         let mut extra = BTreeMap::new();
         extra.insert(
             "ignore_files".to_string(),
-            serde_json::json!(["*.dff", "  to_ignore/x.txd  ", "", 42]),
+            serde_json::json!(["*.dff", "  to_ignore/x.txd  ", "", 42]), // literal: allow test fixture value is the specimen under judgment
         );
         let files = extract_ignore_files(&extra);
         // Strings are trimmed and kept; blanks and non-strings dropped.
-        assert_eq!(files, vec!["*.dff".to_string(), "to_ignore/x.txd".to_string()]);
+        assert_eq!(
+            files,
+            vec!["*.dff".to_string(), "to_ignore/x.txd".to_string()]
+        );
         // No key -> empty.
         assert!(extract_ignore_files(&BTreeMap::new()).is_empty());
     }
@@ -660,15 +684,19 @@ mod tests {
             &first_config,
             "first",
             &first_source,
-            "payload",
-            "modloader/first",
+            TestModConfigRoot {
+                source: "payload",
+                target: "modloader/first",
+            },
         );
         write_test_mod_config(
             &second_config,
             "second",
             &second_source,
-            "payload",
-            "../bad",
+            TestModConfigRoot {
+                source: "payload",
+                target: "../bad",
+            },
         );
         write_test_profile(&game_root, &first_config, &second_config);
 
@@ -723,29 +751,35 @@ mod tests {
             &early_config,
             "early",
             &early_source,
-            "payload",
-            "modloader/order",
+            TestModConfigRoot {
+                source: "payload",
+                target: "modloader/order",
+            },
         );
         write_test_mod_config(
             &late_config,
             "late",
             &late_source,
-            "payload",
-            "modloader/order",
+            TestModConfigRoot {
+                source: "payload",
+                target: "modloader/order",
+            },
         );
         write_test_mod_config(
             &disabled_config,
             "disabled",
             &disabled_source,
-            "payload",
-            "modloader/order",
+            TestModConfigRoot {
+                source: "payload",
+                target: "modloader/order",
+            },
         );
         write_profile_entries(
             &game_root,
             &[
-                test_profile_entry("late", true, 200, &late_config),
-                test_profile_entry("disabled", false, 300, &disabled_config),
-                test_profile_entry("early", true, 100, &early_config),
+                test_profile_entry("late", true, 200, &late_config), // literal: allow test fixture value is the specimen under judgment
+                test_profile_entry("disabled", false, 300, &disabled_config), // literal: allow test fixture value is the specimen under judgment
+                test_profile_entry("early", true, 100, &early_config), // literal: allow test fixture value is the specimen under judgment
             ],
         );
 
@@ -784,7 +818,15 @@ mod tests {
         fs::write(source.join("payload").join("file.txt"), "payload").unwrap();
 
         ensure_state(&game_root).unwrap();
-        write_test_mod_config(&config, "mod", &source, "payload", "modloader/target");
+        write_test_mod_config(
+            &config,
+            "mod",
+            &source,
+            TestModConfigRoot {
+                source: "payload",
+                target: "modloader/target",
+            },
+        );
 
         let mut overrides = BTreeMap::new();
         overrides.insert(
@@ -797,7 +839,7 @@ mod tests {
         let entry = ProfileModEntry {
             id: "mod".to_string(),
             enabled: true,
-            load_order: 100,
+            load_order: 100, // literal: allow test fixture value is the specimen under judgment
             config: config.clone(),
             root_overrides: overrides,
         };
@@ -829,7 +871,15 @@ mod tests {
         fs::write(source.join("payload").join("file.txt"), "payload").unwrap();
 
         ensure_state(&game_root).unwrap();
-        write_test_mod_config(&config, "mod", &source, "payload", "modloader/target");
+        write_test_mod_config(
+            &config,
+            "mod",
+            &source,
+            TestModConfigRoot {
+                source: "payload",
+                target: "modloader/target",
+            },
+        );
 
         let mut overrides = BTreeMap::new();
         overrides.insert(
@@ -842,7 +892,7 @@ mod tests {
         let entry = ProfileModEntry {
             id: "mod".to_string(),
             enabled: true,
-            load_order: 100,
+            load_order: 100, // literal: allow test fixture value is the specimen under judgment
             config: config.clone(),
             root_overrides: overrides,
         };
@@ -882,12 +932,20 @@ mod tests {
         fs::create_dir_all(source.join("payload")).unwrap();
         fs::write(source.join("payload").join("file.txt"), "payload").unwrap();
         ensure_state(&game_root).unwrap();
-        write_test_mod_config(&config, "dup", &source, "payload", "modloader/dup");
+        write_test_mod_config(
+            &config,
+            "dup",
+            &source,
+            TestModConfigRoot {
+                source: "payload",
+                target: "modloader/dup",
+            },
+        );
         write_profile_entries(
             &game_root,
             &[
-                test_profile_entry("dup", true, 100, &config),
-                test_profile_entry("dup", true, 200, &config),
+                test_profile_entry("dup", true, 100, &config), // literal: allow test fixture value is the specimen under judgment
+                test_profile_entry("dup", true, 200, &config), // literal: allow test fixture value is the specimen under judgment
             ],
         );
 
@@ -911,7 +969,7 @@ mod tests {
         ensure_state(&game_root).unwrap();
         write_profile_entries(
             &game_root,
-            &[test_profile_entry("missing", true, 100, &missing_config)],
+            &[test_profile_entry("missing", true, 100, &missing_config)], // literal: allow test fixture value is the specimen under judgment
         );
 
         let err = materialize_profile_for_run(&game_root, "default")
@@ -949,28 +1007,31 @@ mod tests {
             &early_config,
             "early",
             &early_source,
-            "payload",
-            "modloader/early_mod",
+            TestModConfigRoot {
+                source: "payload",
+                target: "modloader/early_mod",
+            },
         );
         write_test_mod_config(
             &late_config,
             "late",
             &late_source,
-            "payload",
-            "modloader/late_mod",
+            TestModConfigRoot {
+                source: "payload",
+                target: "modloader/late_mod",
+            },
         );
         write_profile_entries(
             &game_root,
             &[
-                test_profile_entry("late", true, 200, &late_config),
-                test_profile_entry("early", true, 100, &early_config),
+                test_profile_entry("late", true, 200, &late_config), // literal: allow test fixture value is the specimen under judgment
+                test_profile_entry("early", true, 100, &early_config), // literal: allow test fixture value is the specimen under judgment
             ],
         );
 
         let journal = materialize_profile_for_run(&game_root, "default").unwrap();
 
-        let ini =
-            fs::read_to_string(game_root.join("modloader").join("modloader.ini")).unwrap();
+        let ini = fs::read_to_string(game_root.join("modloader").join("modloader.ini")).unwrap();
         // Later load order -> higher ModLoader priority (wins at runtime).
         let priorities = crate::planning::read_modloader_priorities(&game_root).unwrap();
         assert!(
@@ -978,8 +1039,14 @@ mod tests {
             "later mod must get higher ModLoader priority; ini was:\n{ini}"
         );
         // Written into a manager-owned native profile that inherits Default.
-        assert!(ini.contains("[Profiles.SAMM_default.Priority]"), "ini was:\n{ini}");
-        assert!(ini.contains("[Profiles.SAMM_default.Config]"), "ini was:\n{ini}");
+        assert!(
+            ini.contains("[Profiles.SAMM_default.Priority]"),
+            "ini was:\n{ini}"
+        );
+        assert!(
+            ini.contains("[Profiles.SAMM_default.Config]"),
+            "ini was:\n{ini}"
+        );
         assert!(ini.contains("Parents = Default"), "ini was:\n{ini}");
         // That profile is what the run activates via -modprof.
         assert_eq!(
@@ -1016,23 +1083,44 @@ mod tests {
         fs::write(off_source.join("payload").join("b.dff"), "off").unwrap();
 
         ensure_state(&game_root).unwrap();
-        write_test_mod_config(&on_config, "on", &on_source, "payload", "modloader/on_mod");
-        write_test_mod_config(&off_config, "off", &off_source, "payload", "modloader/off_mod");
+        write_test_mod_config(
+            &on_config,
+            "on",
+            &on_source,
+            TestModConfigRoot {
+                source: "payload",
+                target: "modloader/on_mod",
+            },
+        );
+        write_test_mod_config(
+            &off_config,
+            "off",
+            &off_source,
+            TestModConfigRoot {
+                source: "payload",
+                target: "modloader/off_mod",
+            },
+        );
         write_profile_entries(
             &game_root,
             &[
-                test_profile_entry("on", true, 100, &on_config),
+                test_profile_entry("on", true, 100, &on_config), // literal: allow test fixture value is the specimen under judgment
                 // Disabled: its folder should be ignored, not materialized.
-                test_profile_entry("off", false, 200, &off_config),
+                test_profile_entry("off", false, 200, &off_config), // literal: allow test fixture value is the specimen under judgment
             ],
         );
 
         materialize_profile_for_run(&game_root, "default").unwrap();
 
-        let ini =
-            fs::read_to_string(game_root.join("modloader").join("modloader.ini")).unwrap();
-        assert!(ini.contains("[Profiles.SAMM_default.IgnoreMods]"), "ini was:\n{ini}");
-        assert!(ini.contains("off_mod"), "disabled folder should be ignored; ini was:\n{ini}");
+        let ini = fs::read_to_string(game_root.join("modloader").join("modloader.ini")).unwrap();
+        assert!(
+            ini.contains("[Profiles.SAMM_default.IgnoreMods]"),
+            "ini was:\n{ini}"
+        );
+        assert!(
+            ini.contains("off_mod"),
+            "disabled folder should be ignored; ini was:\n{ini}"
+        );
         // The disabled mod is never copied into the sandbox.
         assert!(!game_root.join("modloader").join("off_mod").exists());
         remove_dir_if_exists(&game_root).unwrap();
@@ -1052,8 +1140,19 @@ mod tests {
 
         ensure_state(&game_root).unwrap();
         // A CLEO-only mod targets CLEO/, never a modloader sandbox.
-        write_test_mod_config(&config, "cleo_only", &source, "payload", "CLEO");
-        write_profile_entries(&game_root, &[test_profile_entry("cleo_only", true, 100, &config)]);
+        write_test_mod_config(
+            &config,
+            "cleo_only",
+            &source,
+            TestModConfigRoot {
+                source: "payload",
+                target: "CLEO",
+            },
+        );
+        write_profile_entries(
+            &game_root,
+            &[test_profile_entry("cleo_only", true, 100, &config)], // literal: allow test fixture value is the specimen under judgment
+        );
 
         materialize_profile_for_run(&game_root, "default").unwrap();
 
@@ -1063,12 +1162,16 @@ mod tests {
         remove_dir_if_exists(&game_root).unwrap();
     }
 
+    struct TestModConfigRoot<'a> {
+        source: &'a str,
+        target: &'a str,
+    }
+
     fn write_test_mod_config(
         path: &Path,
         id: &str,
         source_root: &Path,
-        source: &str,
-        target: &str,
+        root: TestModConfigRoot<'_>,
     ) {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).unwrap();
@@ -1094,8 +1197,8 @@ mod tests {
             json_escape(id),
             json_escape(&source_root.display().to_string()),
             json_escape(&source_root.display().to_string()),
-            json_escape(source),
-            json_escape(target)
+            json_escape(root.source),
+            json_escape(root.target)
         );
         fs::write(path, text).unwrap();
     }
@@ -1104,8 +1207,8 @@ mod tests {
         write_profile_entries(
             game_root,
             &[
-                test_profile_entry("first", true, 100, first_config),
-                test_profile_entry("second", true, 200, second_config),
+                test_profile_entry("first", true, 100, first_config), // literal: allow domain threshold is documented by the surrounding code
+                test_profile_entry("second", true, 200, second_config), // literal: allow domain threshold is documented by the surrounding code
             ],
         );
     }
