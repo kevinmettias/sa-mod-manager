@@ -57,6 +57,34 @@ pub(super) enum ModStatusFilter {
     Disabled,
 }
 
+/// The active tab of the per-mod info window (MO2's Mod Info dialog).
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
+pub(super) enum ModInfoTab {
+    #[default]
+    Files,
+    Conflicts,
+    Roots,
+    Readme,
+    /// User annotations: color label, categories, and a freeform note.
+    Notes,
+}
+
+/// A per-mod detail view (MO2's Mod Info dialog): the file list and any readme
+/// text are gathered once when the window opens; conflicts and install roots are
+/// read live from the content index / config each frame.
+pub(super) struct ModInfoView {
+    pub(super) id: String,
+    pub(super) tab: ModInfoTab,
+    /// Relative file paths under the mod's library source root.
+    pub(super) files: Vec<String>,
+    /// `(relative path, contents)` for readme-like files found in the mod.
+    pub(super) readmes: Vec<(String, String)>,
+    pub(super) source_root: Option<PathBuf>,
+    /// Edit buffers for the Notes tab, seeded from the mod's metadata on open.
+    pub(super) note_edit: String,
+    pub(super) new_category: String,
+}
+
 pub(super) struct SanAndreasModUi {
     pub(super) game_root_input: String,
     pub(super) selected_profile: String,
@@ -95,6 +123,9 @@ pub(super) struct SanAndreasModUi {
     pub(super) content_index: Option<ContentIndex>,
     /// ModLoader's own per-folder priorities, read alongside a content scan.
     pub(super) modloader_priorities: Option<ModLoaderPriorities>,
+    /// Game-folder files under mod areas that no enabled mod owns (MO2's
+    /// "overwrite"), computed during a content scan.
+    pub(super) overwrite_files: Vec<String>,
     /// Summary of the last run's `modloader.log` (what ModLoader actually loaded
     /// or failed to), read alongside a content scan. `None` until scanned.
     pub(super) modloader_log: Option<ModLoaderLogSummary>,
@@ -112,6 +143,19 @@ pub(super) struct SanAndreasModUi {
     pub(super) mod_filter_status: ModStatusFilter,
     pub(super) mod_filter_category: Option<ContentCategory>,
     pub(super) mod_filter_conflicts: bool,
+    /// Filter the list to mods with this user-assigned category, if set.
+    pub(super) mod_filter_user_category: Option<String>,
+    /// User annotations (categories / color / note) keyed by mod id.
+    pub(super) mod_meta: BTreeMap<String, ModMeta>,
+    /// Per-profile ModLoader priority overrides (folder → priority; 0 = disabled
+    /// in ModLoader), applied to modloader.ini on demand.
+    pub(super) modloader_overrides: BTreeMap<String, i32>,
+    /// Load-order separators (labeled group dividers) for the selected profile.
+    pub(super) separators: Vec<Separator>,
+    /// Ids of separators whose sections are collapsed in the list (UI-only).
+    pub(super) collapsed_separators: BTreeSet<String>,
+    /// The separator currently being renamed: `(id, in-progress name)`.
+    pub(super) separator_edit: Option<(String, String)>,
     /// Configured external run targets (MO2's executables), loaded from disk.
     pub(super) executables: Vec<Executable>,
     /// Selected run target: 0 = play the current profile, 1.. = `executables[n-1]`.
@@ -119,6 +163,8 @@ pub(super) struct SanAndreasModUi {
     pub(super) new_tool_name: String,
     pub(super) new_tool_path: String,
     pub(super) new_tool_args: String,
+    /// The per-mod info window, when open (MO2's Mod Info dialog).
+    pub(super) mod_info: Option<ModInfoView>,
     window_size: [f32; 2],
     last_pref_save: Instant,
     prefs_signature: String,
@@ -301,6 +347,7 @@ impl SanAndreasModUi {
             profile_root_target_edits: BTreeMap::new(),
             content_index: None,
             modloader_priorities: None,
+            overwrite_files: Vec::new(),
             modloader_log: None,
             cleo_diagnostics: None,
             content_category: None,
@@ -310,11 +357,18 @@ impl SanAndreasModUi {
             mod_filter_status: ModStatusFilter::default(),
             mod_filter_category: None,
             mod_filter_conflicts: false,
+            mod_filter_user_category: None,
+            mod_meta: BTreeMap::new(),
+            modloader_overrides: BTreeMap::new(),
+            separators: Vec::new(),
+            collapsed_separators: BTreeSet::new(),
+            separator_edit: None,
             executables: Vec::new(),
             selected_run_target: 0,
             new_tool_name: String::new(),
             new_tool_path: String::new(),
             new_tool_args: String::new(),
+            mod_info: None,
             window_size: preferences.window_size(),
             last_pref_save: Instant::now(),
             prefs_signature: String::new(),
@@ -367,9 +421,15 @@ impl SanAndreasModUi {
         // viewer re-scans on demand.
         self.content_index = None;
         self.modloader_priorities = None;
+        self.overwrite_files = Vec::new();
         self.modloader_log = None;
         self.cleo_diagnostics = None;
         self.executables = read_executables(&state_directory(&self.game_root()));
+        self.mod_meta = read_mod_meta(&state_directory(&self.game_root()));
+        self.separators =
+            read_separators(&state_directory(&self.game_root()), &self.selected_profile);
+        self.modloader_overrides =
+            read_modloader_overrides(&state_directory(&self.game_root()), &self.selected_profile);
         // Keep the run-target selection in range if a tool was removed elsewhere.
         if self.selected_run_target > self.executables.len() {
             self.selected_run_target = 0;
@@ -610,6 +670,7 @@ impl eframe::App for SanAndreasModUi {
             .default_width(560.0)
             .show(context, |ui| self.detail_panel(ui));
         egui::CentralPanel::default().show(context, |ui| self.mods_center_panel(ui));
+        self.mod_info_window(context);
         self.confirm_modal(context);
         self.persist_preferences_if_changed(context);
     }

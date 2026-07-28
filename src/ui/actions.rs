@@ -4,8 +4,8 @@ use crate::workspace::append_mod_config_install_root;
 use eframe::egui;
 
 use super::san_andreas_mod_ui::{
-    ActiveRun, ConfirmAction, PendingRunRecord, PendingRunStatus, ReadmeProposal,
-    ReadmeProposalState, SanAndreasModUi, TaskResult, export_telemetry_summary,
+    ActiveRun, ConfirmAction, ModInfoTab, ModInfoView, PendingRunRecord, PendingRunStatus,
+    ReadmeProposal, ReadmeProposalState, SanAndreasModUi, TaskResult, export_telemetry_summary,
 };
 
 impl SanAndreasModUi {
@@ -131,6 +131,197 @@ impl SanAndreasModUi {
 }
 
 impl SanAndreasModUi {
+    /// Open the per-mod info window (MO2's Mod Info dialog). Gathers the mod's
+    /// file list and any readme text once, up front; conflicts and roots are read
+    /// live while the window is shown.
+    pub(super) fn open_mod_info(&mut self, mod_id: &str) {
+        let Some(item) = self
+            .state
+            .mods
+            .iter()
+            .find(|item| item.config.id == mod_id)
+            .cloned()
+        else {
+            self.record_error(AppError::Usage(format!(
+                "mod `{mod_id}` is not in the library"
+            )));
+            return;
+        };
+        let source_root = item
+            .config
+            .source_root
+            .clone()
+            .filter(|path| path.is_dir())
+            .or_else(|| {
+                item.config
+                    .package
+                    .is_dir()
+                    .then(|| item.config.package.clone())
+            });
+        let mut files = Vec::new();
+        let mut readmes = Vec::new();
+        if let Some(root) = &source_root {
+            if let Ok(paths) = collect_files_recursive(root) {
+                for path in &paths {
+                    let Ok(relative) = path.strip_prefix(root) else {
+                        continue;
+                    };
+                    let relative = relative.to_string_lossy().replace('\\', "/");
+                    if readmes.len() < 12 {
+                        if let Some(name) = path.file_name().and_then(|name| name.to_str()) {
+                            if is_readme_name(name) {
+                                if let Ok(text) = read_capped(path, MAX_CONTROL_FILE_BYTES) {
+                                    readmes.push((relative.clone(), text));
+                                }
+                            }
+                        }
+                    }
+                    files.push(relative);
+                }
+            }
+        }
+        let note_edit = self
+            .mod_meta
+            .get(mod_id)
+            .map(|meta| meta.note.clone())
+            .unwrap_or_default();
+        self.mod_info = Some(ModInfoView {
+            id: mod_id.to_string(),
+            tab: ModInfoTab::Files,
+            files,
+            readmes,
+            source_root,
+            note_edit,
+            new_category: String::new(),
+        });
+    }
+
+    fn persist_mod_meta(&mut self) {
+        let state_root = state_directory(&self.game_root());
+        if let Err(err) = write_mod_meta(&state_root, &self.mod_meta) {
+            self.record_error(err);
+        }
+    }
+
+    /// Set (or clear, with `None`) a mod's color label and persist.
+    pub(super) fn set_mod_color(&mut self, mod_id: &str, color: Option<String>) {
+        self.mod_meta.entry(mod_id.to_string()).or_default().color = color;
+        self.persist_mod_meta();
+    }
+
+    /// Add the category if absent, remove it if present, then persist.
+    pub(super) fn toggle_mod_category(&mut self, mod_id: &str, category: &str) {
+        let category = category.trim();
+        if category.is_empty() {
+            return;
+        }
+        let entry = self.mod_meta.entry(mod_id.to_string()).or_default();
+        if let Some(index) = entry
+            .categories
+            .iter()
+            .position(|existing| existing.eq_ignore_ascii_case(category))
+        {
+            entry.categories.remove(index);
+        } else {
+            entry.categories.push(category.to_string());
+            entry.categories.sort();
+        }
+        self.persist_mod_meta();
+    }
+
+    pub(super) fn set_mod_note(&mut self, mod_id: &str, note: String) {
+        self.mod_meta.entry(mod_id.to_string()).or_default().note = note;
+        self.persist_mod_meta();
+    }
+
+    fn persist_separators(&mut self) {
+        let state_root = state_directory(&self.game_root());
+        let profile = self.selected_profile.clone();
+        if let Err(err) = write_separators(&state_root, &profile, &self.separators) {
+            self.record_error(err);
+        }
+    }
+
+    /// Add a separator at the given display slot (0 = top of the list).
+    pub(super) fn add_separator(&mut self, position: usize) {
+        let id = format!("sep-{}-{}", std::process::id(), unix_now());
+        self.separators.push(Separator {
+            id: id.clone(),
+            name: "New separator".to_string(),
+            position,
+        });
+        self.separators.sort_by_key(|separator| separator.position);
+        self.persist_separators();
+        // Drop straight into rename so the placeholder name can be replaced.
+        self.separator_edit = Some((id, "New separator".to_string()));
+    }
+
+    pub(super) fn remove_separator(&mut self, id: &str) {
+        self.separators.retain(|separator| separator.id != id);
+        self.collapsed_separators.remove(id);
+        if self.separator_edit.as_ref().is_some_and(|(edit_id, _)| edit_id == id) {
+            self.separator_edit = None;
+        }
+        self.persist_separators();
+    }
+
+    pub(super) fn rename_separator(&mut self, id: &str, name: String) {
+        if let Some(separator) = self.separators.iter_mut().find(|sep| sep.id == id) {
+            separator.name = name;
+        }
+        self.separator_edit = None;
+        self.persist_separators();
+    }
+
+    /// Move a separator to a new display slot, clamped to the list length.
+    pub(super) fn move_separator(&mut self, id: &str, position: usize) {
+        if let Some(separator) = self.separators.iter_mut().find(|sep| sep.id == id) {
+            separator.position = position;
+        }
+        self.separators.sort_by_key(|separator| separator.position);
+        self.persist_separators();
+    }
+
+    pub(super) fn toggle_separator_collapsed(&mut self, id: &str) {
+        if !self.collapsed_separators.insert(id.to_string()) {
+            self.collapsed_separators.remove(id);
+        }
+    }
+
+    fn persist_modloader_overrides(&mut self) {
+        let state_root = state_directory(&self.game_root());
+        let profile = self.selected_profile.clone();
+        if let Err(err) = write_modloader_overrides(&state_root, &profile, &self.modloader_overrides)
+        {
+            self.record_error(err);
+        }
+    }
+
+    /// Set a ModLoader folder's priority for this profile (0 = disabled in
+    /// ModLoader). Persisted to the profile's sidecar; applied to modloader.ini
+    /// via [`Self::apply_modloader_priorities`].
+    pub(super) fn set_modloader_priority(&mut self, folder: &str, priority: i32) {
+        self.modloader_overrides
+            .insert(folder.to_string(), priority);
+        self.persist_modloader_overrides();
+    }
+
+    /// Write this profile's ModLoader priority overrides into modloader.ini's
+    /// active-profile Priority section.
+    pub(super) fn apply_modloader_priorities(&mut self) {
+        let game_root = self.game_root();
+        match apply_modloader_priorities(&game_root, &self.modloader_overrides) {
+            Ok(()) => {
+                self.last_error = None;
+                self.status = "applied ModLoader priorities to modloader.ini".to_string();
+                if let Err(err) = self.reload_state() {
+                    self.record_error(err);
+                }
+            }
+            Err(err) => self.record_error(err),
+        }
+    }
+
     /// Jump to the Content tab focused on one mod: scan if needed, then filter
     /// the viewer to that mod's files (optionally only its conflicts). Powers the
     /// per-mod "Show files / Show conflicts" cross-link from the load-order list.
@@ -196,6 +387,11 @@ impl SanAndreasModUi {
             index.entries.len(),
             index.conflict_count()
         );
+        // Files in the game folder's mod areas that no enabled mod provides
+        // (MO2's "overwrite") — computed from the index's owned target paths.
+        let owned: BTreeSet<String> =
+            index.entries.iter().map(|entry| entry.target.clone()).collect();
+        self.overwrite_files = collect_overwrite_files(&self.game_root(), &owned);
         self.content_index = Some(index);
         // ModLoader's own priority config governs load order within modloader/;
         // read it alongside the scan so the ModLoader viewer can surface it.
