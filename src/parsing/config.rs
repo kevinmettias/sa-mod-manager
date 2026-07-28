@@ -94,7 +94,7 @@ fn root_override_from_file(raw: RootOverrideFile) -> ProfileRootOverride {
 fn profile_name_from_path(path: &Path) -> String {
     path.file_stem()
         .and_then(OsStr::to_str)
-        .unwrap_or("default") // literal: allow external interface text or file-format spelling
+        .unwrap_or("default")
         .to_string()
 }
 
@@ -107,9 +107,9 @@ fn game_root_from_profile_path(path: &Path) -> PathBuf {
 }
 
 fn profile_mod_entry_from_json(entry: ProfileModEntryFile, game_root: &Path) -> ProfileModEntry {
-    let id = entry.id.unwrap_or_else(|| "unnamed".to_string()); // literal: allow external interface text or file-format spelling
+    let id = entry.id.unwrap_or_else(|| "unnamed".to_string());
     let enabled = entry.enabled.unwrap_or(true);
-    let load_order = entry.load_order.unwrap_or(100);
+    let load_order = entry.load_order.unwrap_or(100); // literal: allow domain threshold is documented by the surrounding code
     let config = entry
         .config
         .unwrap_or_else(|| default_mod_config_path(game_root, &id));
@@ -130,7 +130,7 @@ fn profile_mod_entry_from_json(entry: ProfileModEntryFile, game_root: &Path) -> 
 
 fn default_mod_config_path(game_root: &Path, id: &str) -> PathBuf {
     let state_root = state_directory(game_root);
-    state_root.join("mods").join(id).join("mod.json") // literal: allow external interface text or file-format spelling
+    state_root.join("mods").join(id).join("mod.json")
 }
 
 pub(crate) fn read_mod_config_json(path: &Path) -> Result<ModConfigJson, AppError> {
@@ -180,14 +180,14 @@ fn mod_id_from_path(path: &Path) -> String {
     path.parent()
         .and_then(Path::file_name)
         .and_then(OsStr::to_str)
-        .unwrap_or("mod") // literal: allow external interface text or file-format spelling
+        .unwrap_or("mod")
         .to_string()
 }
 
 fn mod_install_root_from_json(object: ModInstallRootJsonFile) -> ModInstallRootJson {
-    let source = object.source.unwrap_or_else(|| ".".to_string()); // literal: allow external interface text or file-format spelling
-    let target = object.target.unwrap_or_else(|| ".".to_string()); // literal: allow external interface text or file-format spelling
-    let kind = object.kind.unwrap_or_else(|| "modloader".to_string()); // literal: allow external interface text or file-format spelling
+    let source = object.source.unwrap_or_else(|| ".".to_string());
+    let target = object.target.unwrap_or_else(|| ".".to_string());
+    let kind = object.kind.unwrap_or_else(|| "modloader".to_string());
     let enabled = object.enabled.unwrap_or(true);
     let optional = object.optional.unwrap_or(false);
     ModInstallRootJson {
@@ -250,7 +250,10 @@ mod tests {
         );
         // The unmodeled top-level field is preserved.
         assert_eq!(
-            profile.extra.get("custom_note").and_then(serde_json::Value::as_str),
+            profile
+                .extra
+                .get("custom_note")
+                .and_then(serde_json::Value::as_str),
             Some("keep me")
         );
         fs::remove_dir_all(path.parent().unwrap().parent().unwrap().parent().unwrap()).unwrap();

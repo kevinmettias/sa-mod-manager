@@ -27,11 +27,15 @@ fn has_any_contains_match(lower: &str, needles: &[String]) -> bool {
 }
 
 fn has_any_prefix_match(lower: &str, prefixes: &[String]) -> bool {
-    prefixes.iter().any(|prefix| lower.starts_with(prefix.as_str()))
+    prefixes
+        .iter()
+        .any(|prefix| lower.starts_with(prefix.as_str()))
 }
 
 fn has_any_suffix_match(lower: &str, suffixes: &[String]) -> bool {
-    suffixes.iter().any(|suffix| lower.ends_with(suffix.as_str()))
+    suffixes
+        .iter()
+        .any(|suffix| lower.ends_with(suffix.as_str()))
 }
 
 pub(crate) fn classify_context(lower: &str, hints: &mut BTreeSet<String>) {
@@ -41,7 +45,11 @@ pub(crate) fn classify_context(lower: &str, hints: &mut BTreeSet<String>) {
 }
 
 fn insert_context_for_rule(lower: &str, hints: &mut BTreeSet<String>, rule: &ContextRule) {
-    if rule.aliases.iter().any(|alias| lower.contains(alias.as_str())) {
+    if rule
+        .aliases
+        .iter()
+        .any(|alias| lower.contains(alias.as_str()))
+    {
         insert_context_hint(hints, &rule.hint);
     }
 }
@@ -52,41 +60,28 @@ fn insert_context_hint(hints: &mut BTreeSet<String>, hint: &str) {
 }
 
 pub(crate) fn classify_risk(lower: &str, risks: &mut BTreeSet<String>) {
-    if lower.ends_with(".exe") // literal: allow external interface text or file-format spelling
-        || lower.ends_with(".bat") // literal: allow external interface text or file-format spelling
-        || lower.ends_with(".cmd") // literal: allow external interface text or file-format spelling
-        /* literal: allow external interface text or file-format spelling */ || lower.ends_with(".msi")
-    // literal: allow external interface text or file-format spelling
+    if lower.ends_with(".exe")
+        || lower.ends_with(".bat")
+        || lower.ends_with(".cmd")
+        || lower.ends_with(".msi")
     {
-        let risk = "contains executable installer/script files".to_string(); // literal: allow external interface text or file-format spelling
+        let risk = "contains executable installer/script files".to_string();
         risks.insert(risk);
     }
-    /* literal: allow external interface text or file-format spelling */
-    /* literal: allow external interface text or file-format spelling */
     if lower.contains("gta_sa.exe") || lower.contains("gta-sa.exe") {
-        // literal: allow external interface text or file-format spelling
-        let risk = "contains game executable replacement".to_string(); // literal: allow external interface text or file-format spelling
+        let risk = "contains game executable replacement".to_string();
         risks.insert(risk);
     }
-    /* literal: allow external interface text or file-format spelling */
-    /* literal: allow external interface text or file-format spelling */
     if lower.ends_with("main.scm") || lower.ends_with("script.img") {
-        // literal: allow external interface text or file-format spelling
-        let risk = "contains mission script replacement; profile conflicts are likely".to_string(); // literal: allow external interface text or file-format spelling
+        let risk = "contains mission script replacement; profile conflicts are likely".to_string();
         risks.insert(risk);
     }
-    /* literal: allow external interface text or file-format spelling */
-    /* literal: allow external interface text or file-format spelling */
     if lower.ends_with(".img") {
-        // literal: allow external interface text or file-format spelling
-        let risk = "contains full IMG archive replacement".to_string(); // literal: allow external interface text or file-format spelling
+        let risk = "contains full IMG archive replacement".to_string();
         risks.insert(risk);
     }
-    /* literal: allow external interface text or file-format spelling */
-    /* literal: allow external interface text or file-format spelling */
     if lower.contains("vorbis") || lower.contains("dinput8.dll") {
-        // literal: allow external interface text or file-format spelling
-        let risk = "contains loader/proxy DLL files".to_string(); // literal: allow external interface text or file-format spelling
+        let risk = "contains loader/proxy DLL files".to_string();
         risks.insert(risk);
     }
 }

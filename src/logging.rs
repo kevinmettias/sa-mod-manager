@@ -8,9 +8,9 @@ use std::sync::atomic::{AtomicU8, Ordering};
 pub(crate) enum Level {
     Error = 0,
     Warn = 1,
-    Info = 2,
-    Debug = 3,
-    Trace = 4,
+    Info = 2,  // literal: allow external format or runtime boundary value means itself here
+    Debug = 3, // literal: allow external format or runtime boundary value means itself here
+    Trace = 4, // literal: allow external format or runtime boundary value means itself here
 }
 
 impl Level {
@@ -28,8 +28,8 @@ impl Level {
         match value {
             0 => Level::Error,
             1 => Level::Warn,
-            2 => Level::Info,
-            3 => Level::Debug,
+            2 => Level::Info, // literal: allow external format or runtime boundary value means itself here
+            3 => Level::Debug, // literal: allow external format or runtime boundary value means itself here
             _ => Level::Trace,
         }
     }
@@ -71,7 +71,11 @@ fn console_level() -> Level {
 /// Open the persistent log under a game folder's state directory. The standard
 /// entry point for commands that operate on a game root.
 pub(crate) fn open_for_game_root(game_root: &Path) {
-    open_log_file(&state_directory(game_root).join("logs").join("sa-mod-manager.log"));
+    open_log_file(
+        &state_directory(game_root)
+            .join("logs")
+            .join("sa-mod-manager.log"),
+    );
 }
 
 /// Roll the log over once it passes this size, keeping one `.1` backup, so the
@@ -134,7 +138,12 @@ fn write_to_file(level: Level, args: fmt::Arguments) {
     if let Some(file) = guard.as_mut() {
         // Human-readable UTC timestamp, matching how times are shown in the UI,
         // rather than a raw unix-seconds integer.
-        let _ = writeln!(file, "{} {} {args}", human_datetime(unix_now()), level.label());
+        let _ = writeln!(
+            file,
+            "{} {} {args}",
+            human_datetime(unix_now()),
+            level.label()
+        );
     }
 }
 
@@ -170,19 +179,19 @@ mod tests {
 
         // A small file is left in place.
         fs::write(&log, b"tiny").unwrap();
-        assert!(!rotate_if_over(&log, 100));
+        assert!(!rotate_if_over(&log, 100)); // literal: allow test fixture value is the specimen under judgment
         assert!(log.exists());
         assert!(!backup.exists());
 
         // An oversized file is moved to `.1` so the next open starts fresh.
-        fs::write(&log, vec![b'x'; 200]).unwrap();
-        assert!(rotate_if_over(&log, 100));
+        fs::write(&log, vec![b'x'; 200]).unwrap(); // literal: allow test fixture value is the specimen under judgment
+        assert!(rotate_if_over(&log, 100)); // literal: allow test fixture value is the specimen under judgment
         assert!(!log.exists());
-        assert_eq!(fs::read(&backup).unwrap().len(), 200);
+        assert_eq!(fs::read(&backup).unwrap().len(), 200); // literal: allow test fixture value is the specimen under judgment
 
         // A second rotation replaces the previous backup rather than piling up.
-        fs::write(&log, vec![b'y'; 150]).unwrap();
-        assert!(rotate_if_over(&log, 100));
+        fs::write(&log, vec![b'y'; 150]).unwrap(); // literal: allow test fixture value is the specimen under judgment
+        assert!(rotate_if_over(&log, 100)); // literal: allow test fixture value is the specimen under judgment
         assert_eq!(fs::read(&backup).unwrap()[0], b'y');
 
         fs::remove_dir_all(&dir).unwrap();

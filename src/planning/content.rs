@@ -1,4 +1,22 @@
 use crate::prelude::*;
+const CONTENT_CATEGORY_COUNT: usize = 11;
+const MODLOADER_BUILTIN_DEFAULT_PRIORITY: i32 = 50;
+const MODLOADER_PRIORITY_MIN: i32 = 1;
+const MODLOADER_PRIORITY_PAIR_COUNT: usize = 2;
+const MODLOADER_PRIORITY_TRIPLE_COUNT: usize = 3;
+const MODLOADER_PRIORITY_PAIR_DIVISOR_I32: i32 = 2;
+const MODLOADER_PRIORITY_PAIR_DIVISOR_I64: i64 = 2;
+const MODLOADER_TEST_LIMIT: i32 = 100;
+const MODLOADER_TEST_DEFAULT_PRIORITY: i32 = 60;
+const MODLOADER_TEST_LOW_PRIORITY: i32 = 30;
+const MODLOADER_TEST_HIGH_PRIORITY: i32 = 80;
+const MODLOADER_TEST_MID_PRIORITY: i32 = 51;
+const MODLOADER_TEST_EXTENDED_LIMIT: i32 = 200;
+const SANDBOXED_ASSET_MIN_SEGMENTS: usize = 2;
+const CONFLICT_MIN_CONTENDERS: usize = 2;
+const EXPECTED_HANDLING_FILE_COUNT: usize = 2;
+const EXPECTED_GROUP_ENTRY_COUNT: usize = 2;
+const EXPECTED_LOG_ERROR_COUNT: usize = 2;
 
 /// The San-Andreas-native content buckets a materialized file can fall into.
 /// These are the "viewers" the UI groups by: the loader subsystems (ModLoader,
@@ -21,7 +39,7 @@ pub(crate) enum ContentCategory {
 impl ContentCategory {
     /// Every category in a stable display order, so the UI can render a fixed
     /// set of tabs/filters without discovering them from the data.
-    pub(crate) fn all() -> [ContentCategory; 11] {
+    pub(crate) fn all() -> [ContentCategory; CONTENT_CATEGORY_COUNT] {
         [
             ContentCategory::ModLoader,
             ContentCategory::Cleo,
@@ -130,19 +148,78 @@ pub(crate) fn per_mod_flags(index: &ContentIndex) -> BTreeMap<String, ModContent
             let flags = map.entry(id.clone()).or_default();
             flags.categories.insert(entry.category);
             flags.file_count += 1;
-            if is_conflict {
-                // The last provider wins the file and thus overwrites the rest.
-                if position == last {
-                    flags.overwrites_others = true;
-                } else {
-                    flags.overwritten = true;
-                }
-            }
+            mark_provider_conflict(flags, is_conflict, position, last);
         }
     }
     map
 }
 
+fn index_content_root(
+    indexed: &IndexedMod,
+    root: &ModInstallRootJson,
+    by_target: &mut BTreeMap<String, (ContentCategory, Vec<String>)>,
+) -> Result<bool, ()> {
+    if root.kind.eq_ignore_ascii_case("bootstrap") {
+        return Ok(false);
+    }
+    let Ok(relative_source) = path_from_package_root(&root.source) else {
+        return Ok(false);
+    };
+    let source_abs = indexed.source_root.join(&relative_source);
+    if !source_abs.exists() {
+        return Ok(false);
+    }
+    let files = collect_files_recursive(&source_abs).map_err(|_| ())?;
+    let context = ContentRootIndexContext {
+        indexed,
+        root,
+        source_abs: &source_abs,
+    };
+    for file in files {
+        index_content_file(context, &file, by_target);
+    }
+    Ok(true)
+}
+
+#[derive(Clone, Copy)]
+struct ContentRootIndexContext<'a> {
+    indexed: &'a IndexedMod,
+    root: &'a ModInstallRootJson,
+    source_abs: &'a Path,
+}
+
+fn index_content_file(
+    context: ContentRootIndexContext<'_>,
+    file: &Path,
+    by_target: &mut BTreeMap<String, (ContentCategory, Vec<String>)>,
+) {
+    let Some(target) = target_path_for(context.source_abs, file, &context.root.target) else {
+        return;
+    };
+    if is_user_data_target(&target) {
+        return;
+    }
+    let category = categorize(&context.root.kind, &target);
+    let entry = by_target
+        .entry(target)
+        .or_insert_with(|| (category, Vec::new()));
+    push_provider(&mut entry.1, &context.indexed.id);
+}
+fn mark_provider_conflict(
+    flags: &mut ModContentFlags,
+    is_conflict: bool,
+    position: usize,
+    last: usize,
+) {
+    if !is_conflict {
+        return;
+    }
+    if position == last {
+        flags.overwrites_others = true;
+    } else {
+        flags.overwritten = true;
+    }
+}
 /// One enabled mod resolved to what it will actually copy: where its files live
 /// on disk (`source_root`) and the effective install roots (profile overrides
 /// already applied, disabled roots already dropped). Built by the UI from the
@@ -185,7 +262,10 @@ pub(crate) struct ContentIndex {
 
 impl ContentIndex {
     pub(crate) fn conflict_count(&self) -> usize {
-        self.entries.iter().filter(|entry| entry.is_conflict()).count()
+        self.entries
+            .iter()
+            .filter(|entry| entry.is_conflict())
+            .count()
     }
 
     pub(crate) fn category_count(&self, category: ContentCategory) -> usize {
@@ -234,41 +314,9 @@ pub(crate) fn build_content_index(mods_in_load_order: &[IndexedMod]) -> ContentI
         let mut read_any = false;
         let mut read_failed = false;
         for root in &indexed.roots {
-            // A bootstrap root is blocked at run time and copies nothing, so it
-            // contributes no materialized files here either.
-            if root.kind.eq_ignore_ascii_case("bootstrap") {
-                continue;
-            }
-            let Ok(relative_source) = path_from_package_root(&root.source) else {
-                continue;
-            };
-            let source_abs = indexed.source_root.join(&relative_source);
-            if !source_abs.exists() {
-                continue;
-            }
-            match collect_files_recursive(&source_abs) {
-                Ok(files) => {
-                    read_any = true;
-                    for file in files {
-                        let Some(target) = target_path_for(&source_abs, &file, &root.target) else {
-                            continue;
-                        };
-                        // CLEO save data is runtime user data, not mod content:
-                        // keep it out of the index so it is never counted as a
-                        // conflict or reported as overwritten by another mod.
-                        if is_user_data_target(&target) {
-                            continue;
-                        }
-                        let category = categorize(&root.kind, &target);
-                        let entry = by_target
-                            .entry(target)
-                            .or_insert_with(|| (category, Vec::new()));
-                        // The first mod to touch a target fixes its category; a
-                        // later winner does not reclassify an existing file.
-                        push_provider(&mut entry.1, &indexed.id);
-                    }
-                }
-                Err(_) => read_failed = true,
+            match index_content_root(indexed, root, &mut by_target) {
+                Ok(root_read) => read_any |= root_read,
+                Err(()) => read_failed = true,
             }
         }
         if read_failed && !read_any {
@@ -365,8 +413,11 @@ fn categorize_by_path(lower: &str) -> ContentCategory {
         ContentCategory::Models
     } else if lower.ends_with(".scm") || lower.ends_with(".cm") {
         ContentCategory::Script
-    } else if segment_contains(lower, "data") || lower.ends_with(".dat") || lower.ends_with(".ide")
-        || lower.ends_with(".ipl") || lower.ends_with(".cfg")
+    } else if segment_contains(lower, "data")
+        || lower.ends_with(".dat")
+        || lower.ends_with(".ide")
+        || lower.ends_with(".ipl")
+        || lower.ends_with(".cfg")
     {
         ContentCategory::Data
     } else {
@@ -451,7 +502,7 @@ pub(crate) fn read_modloader_priorities(game_root: &Path) -> Option<ModLoaderPri
 /// sets the fallback (ModLoader's built-in default is 50).
 pub(crate) fn parse_modloader_priorities(text: &str) -> ModLoaderPriorities {
     let mut priorities = ModLoaderPriorities {
-        default: 50,
+        default: MODLOADER_BUILTIN_DEFAULT_PRIORITY,
         by_folder: BTreeMap::new(),
     };
     let mut in_priority_section = false;
@@ -476,18 +527,24 @@ pub(crate) fn parse_modloader_priorities(text: &str) -> ModLoaderPriorities {
             continue;
         }
         if in_priority_section {
-            if let Ok(number) = value.parse::<i32>() {
-                if key.eq_ignore_ascii_case("default") {
-                    priorities.default = number;
-                } else {
-                    priorities.by_folder.insert(key.to_ascii_lowercase(), number);
-                }
-            }
+            apply_modloader_priority_value(key, value, &mut priorities);
         }
     }
     priorities
 }
 
+fn apply_modloader_priority_value(key: &str, value: &str, priorities: &mut ModLoaderPriorities) {
+    let Ok(number) = value.parse::<i32>() else {
+        return;
+    };
+    if key.eq_ignore_ascii_case("default") {
+        priorities.default = number;
+    } else {
+        priorities
+            .by_folder
+            .insert(key.to_ascii_lowercase(), number);
+    }
+}
 // --- ModLoader log (#3) ---------------------------------------------------
 
 /// ModLoader caps `modloader.log` at 5 MiB; read with headroom above that and
@@ -571,15 +628,31 @@ fn parse_modloader_log_version(line: &str) -> Option<String> {
 }
 
 fn is_log_error_line(lower: &str) -> bool {
-    ["error", "failed", "failure", "could not", "couldn't", "cannot", "unable to"]
-        .iter()
-        .any(|needle| lower.contains(needle))
+    [
+        "error",
+        "failed",
+        "failure",
+        "could not",
+        "couldn't",
+        "cannot",
+        "unable to",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle))
 }
 
 fn is_log_warning_line(lower: &str) -> bool {
-    ["warning", "warn:", "ignoring", "ignored", "skipping", "skipped", "deprecated"]
-        .iter()
-        .any(|needle| lower.contains(needle))
+    [
+        "warning",
+        "warn:",
+        "ignoring",
+        "ignored",
+        "skipping",
+        "skipped",
+        "deprecated",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle))
 }
 
 fn push_log_line(bucket: &mut Vec<String>, line: &str, truncated: &mut bool) {
@@ -621,7 +694,10 @@ pub(crate) struct ModLoaderConflict {
 impl ModLoaderConflict {
     /// The folder ModLoader will let win this asset at runtime.
     pub(crate) fn winner(&self) -> &str {
-        self.contenders.first().map(|c| c.folder.as_str()).unwrap_or("")
+        self.contenders
+            .first()
+            .map(|c| c.folder.as_str())
+            .unwrap_or("")
     }
 }
 
@@ -631,7 +707,11 @@ impl ModLoaderConflict {
 /// not listed — including override-only data like timecyc/popcycle/fonts/clothes
 /// and all `.ipl`/`.zon` — is treated as winner-take-all.
 pub(crate) fn is_mergeable_data_file(target: &str) -> bool {
-    let name = target.rsplit('/').next().unwrap_or(target).to_ascii_lowercase();
+    let name = target
+        .rsplit('/')
+        .next()
+        .unwrap_or(target)
+        .to_ascii_lowercase();
     // Every IDE is merged by model id.
     if name.ends_with(".ide") {
         return true;
@@ -702,7 +782,7 @@ pub(crate) fn modloader_virtual_asset(target: &str) -> Option<String> {
         }
         rest.push(segment);
     }
-    if !found_root || rest.len() < 2 {
+    if !found_root || rest.len() < SANDBOXED_ASSET_MIN_SEGMENTS {
         // Not under a named sandbox folder (rest = [folder, file...]) — nothing
         // to compare across mods.
         return None;
@@ -757,7 +837,7 @@ pub(crate) fn modloader_conflicts(
 
     let mut conflicts = Vec::new();
     for (asset, folders) in by_asset {
-        if folders.len() < 2 {
+        if folders.len() < CONFLICT_MIN_CONTENDERS {
             continue;
         }
         let mut contenders: Vec<ModLoaderContender> = folders
@@ -831,7 +911,7 @@ pub(crate) fn modloader_priority_limit(ini: &str) -> i32 {
     ini_value_in_section(ini, "folder.config", "prioritylimit")
         .and_then(|value| value.parse::<i32>().ok())
         .unwrap_or(MODLOADER_DEFAULT_PRIORITY_LIMIT)
-        .max(2)
+        .max(MODLOADER_PRIORITY_PAIR_DIVISOR_I32)
 }
 
 /// First `key = value` in the section whose header equals `section`
@@ -861,13 +941,13 @@ fn ini_value_in_section(ini: &str, section: &str, key: &str) -> Option<String> {
 /// centered on 50, so managed mods straddle ModLoader's default for unlisted
 /// mods and preserve the profile's relative order. A lone mod gets ~50.
 pub(crate) fn spread_priority(rank: usize, count: usize, limit: i32) -> i32 {
-    let limit = limit.max(2);
+    let limit = limit.max(MODLOADER_PRIORITY_PAIR_DIVISOR_I32);
     if count <= 1 {
-        return (limit / 2).clamp(1, limit);
+        return (limit / MODLOADER_PRIORITY_PAIR_DIVISOR_I32).clamp(1, limit);
     }
     let numer = rank as i64 * (limit as i64 - 1);
     let denom = (count - 1) as i64;
-    let value = 1 + ((numer + denom / 2) / denom) as i32;
+    let value = 1 + ((numer + denom / MODLOADER_PRIORITY_PAIR_DIVISOR_I64) / denom) as i32;
     value.clamp(1, limit)
 }
 
@@ -890,7 +970,13 @@ pub(crate) fn render_modloader_priority_ini(
         .map(|(folder, priority)| {
             (
                 folder.to_ascii_lowercase(),
-                (folder.clone(), (*priority).clamp(1, limit.max(2))),
+                (
+                    folder.clone(),
+                    (*priority).clamp(
+                        MODLOADER_PRIORITY_MIN,
+                        limit.max(MODLOADER_PRIORITY_PAIR_DIVISOR_I32),
+                    ),
+                ),
             )
         })
         .collect();
@@ -921,19 +1007,10 @@ pub(crate) fn render_modloader_priority_ini(
             out.push(line.to_string());
             continue;
         }
-        if in_target {
-            // Update an existing `folder = value` entry in place.
-            if let Some((key, _)) = trimmed.split_once('=') {
-                let folder_key = key.trim().to_ascii_lowercase();
-                if let Some((display, priority)) = pending.remove(&folder_key) {
-                    let replacement = format!("{display} = {priority}");
-                    if replacement != trimmed {
-                        changed = true;
-                    }
-                    out.push(replacement);
-                    continue;
-                }
-            }
+        if in_target
+            && replace_rendered_priority_line(trimmed, &mut pending, &mut out, &mut changed)
+        {
+            continue;
         }
         out.push(line.to_string());
     }
@@ -958,6 +1035,26 @@ pub(crate) fn render_modloader_priority_ini(
 }
 
 /// Append each still-pending folder as a `Folder = priority` line.
+fn replace_rendered_priority_line(
+    trimmed: &str,
+    pending: &mut BTreeMap<String, (String, i32)>,
+    out: &mut Vec<String>,
+    changed: &mut bool,
+) -> bool {
+    let Some((key, _)) = trimmed.split_once('=') else {
+        return false;
+    };
+    let folder_key = key.trim().to_ascii_lowercase();
+    let Some((display, priority)) = pending.remove(&folder_key) else {
+        return false;
+    };
+    let replacement = format!("{display} = {priority}");
+    if replacement != trimmed {
+        *changed = true;
+    }
+    out.push(replacement);
+    true
+}
 fn flush_pending(
     out: &mut Vec<String>,
     pending: &mut BTreeMap<String, (String, i32)>,
@@ -1013,28 +1110,46 @@ pub(crate) fn modloader_managed_profile_name(profile_name: &str) -> String {
 /// when they are physically present (a persistent `modloader/` install). All
 /// other content is preserved, and `[Folder.Config]` is left alone — the profile
 /// is activated per launch with `-modprof`. Returns `None` when nothing changes.
+pub(crate) struct ModLoaderManagedProfileRender<'a> {
+    pub(crate) existing: Option<&'a str>,
+    pub(crate) profile: &'a str,
+    pub(crate) parent: &'a str,
+    pub(crate) limit: i32,
+    pub(crate) folder_priorities: &'a BTreeMap<String, i32>,
+    pub(crate) ignore_folders: &'a [String],
+    pub(crate) ignore_files: &'a [String],
+}
+
 pub(crate) fn render_modloader_managed_profile(
-    existing: Option<&str>,
-    profile: &str,
-    parent: &str,
-    limit: i32,
-    folder_priorities: &BTreeMap<String, i32>,
-    ignore_folders: &[String],
-    ignore_files: &[String],
+    request: ModLoaderManagedProfileRender<'_>,
 ) -> Option<String> {
-    let base = existing.unwrap_or("");
-    let (with_config, config_changed) = ensure_profile_config_section(base, profile, parent);
+    let base = request.existing.unwrap_or("");
+    let (with_config, config_changed) =
+        ensure_profile_config_section(base, request.profile, request.parent);
     // Layer the priority section on top of the (possibly config-augmented) text.
     // Passing a non-empty text avoids the "fresh file" path, so we never write a
     // `[Folder.Config] Profile =` line — activation is via -modprof only.
-    let priority = render_modloader_priority_ini(Some(&with_config), profile, limit, folder_priorities);
+    let priority = render_modloader_priority_ini(
+        Some(&with_config),
+        request.profile,
+        request.limit,
+        request.folder_priorities,
+    );
     let after_priority = priority.clone().unwrap_or(with_config);
     // Regenerate our own IgnoreMods / IgnoreFiles blocks (we fully own this
     // profile's sections): disabled mods, then per-file exclusion globs.
-    let (after_ignore_mods, mods_changed) =
-        set_profile_list_section(&after_priority, profile, "IgnoreMods", ignore_folders);
-    let (after_ignore_files, files_changed) =
-        set_profile_list_section(&after_ignore_mods, profile, "IgnoreFiles", ignore_files);
+    let (after_ignore_mods, mods_changed) = set_profile_list_section(
+        &after_priority,
+        request.profile,
+        "IgnoreMods",
+        request.ignore_folders,
+    );
+    let (after_ignore_files, files_changed) = set_profile_list_section(
+        &after_ignore_mods,
+        request.profile,
+        "IgnoreFiles",
+        request.ignore_files,
+    );
     if config_changed || priority.is_some() || mods_changed || files_changed {
         Some(after_ignore_files)
     } else {
@@ -1260,7 +1375,11 @@ fn is_asi_loader(target: &str) -> bool {
         "ddraw.dll",
         "dxwrapper.dll",
     ];
-    let name = target.rsplit('/').next().unwrap_or(target).to_ascii_lowercase();
+    let name = target
+        .rsplit('/')
+        .next()
+        .unwrap_or(target)
+        .to_ascii_lowercase();
     LOADERS.contains(&name.as_str())
 }
 
@@ -1353,7 +1472,7 @@ mod tests {
         let early_flags = flags.get("early").unwrap();
         assert!(early_flags.overwritten, "early loses handling.cfg");
         assert!(!early_flags.overwrites_others);
-        assert_eq!(early_flags.file_count, 2);
+        assert_eq!(early_flags.file_count, EXPECTED_HANDLING_FILE_COUNT);
 
         let late_flags = flags.get("late").unwrap();
         assert!(late_flags.overwrites_others, "late wins handling.cfg");
@@ -1394,7 +1513,10 @@ mod tests {
             "CLEO save data is user data and must not be indexed"
         );
         assert_eq!(index.conflict_count(), 0, "save data is never a conflict");
-        assert!(per_mod_flags(&index).is_empty(), "no mod is flagged for saves");
+        assert!(
+            per_mod_flags(&index).is_empty(),
+            "no mod is flagged for saves"
+        );
         fs::remove_dir_all(&base).unwrap();
     }
 
@@ -1438,7 +1560,11 @@ mod tests {
         let view = cleo_view(&refs);
         assert_eq!(view.plugins.len(), 1);
         assert_eq!(view.plugins[0].target, "cleo/cleo_plugins/SA.IniFiles.cleo");
-        let scripts: Vec<&str> = view.scripts.iter().map(|s| s.script.target.as_str()).collect();
+        let scripts: Vec<&str> = view
+            .scripts
+            .iter()
+            .map(|s| s.script.target.as_str())
+            .collect();
         assert_eq!(scripts, vec!["cleo/legacy.cs4", "cleo/mod.cs"]);
     }
 
@@ -1470,12 +1596,18 @@ ImVehFt = 100
 HD_Roads=30   ; inline comment
 ";
         let priorities = parse_modloader_priorities(ini);
-        assert_eq!(priorities.default, 60);
-        assert_eq!(priorities.for_folder("ImVehFt"), 100);
+        assert_eq!(priorities.default, MODLOADER_TEST_DEFAULT_PRIORITY);
+        assert_eq!(priorities.for_folder("ImVehFt"), MODLOADER_TEST_LIMIT);
         // Case-insensitive folder lookup.
-        assert_eq!(priorities.for_folder("hd_roads"), 30);
+        assert_eq!(
+            priorities.for_folder("hd_roads"),
+            MODLOADER_TEST_LOW_PRIORITY
+        );
         // Unknown folder falls back to the default.
-        assert_eq!(priorities.for_folder("SomethingElse"), 60);
+        assert_eq!(
+            priorities.for_folder("SomethingElse"),
+            MODLOADER_TEST_DEFAULT_PRIORITY
+        );
     }
 
     #[test]
@@ -1494,7 +1626,7 @@ HD_Roads=30   ; inline comment
         let labels: Vec<&str> = groups.iter().map(|(label, _)| label.as_str()).collect();
         assert_eq!(labels, vec!["HD_Roads", "ImVehFt"]);
         let imvehft = groups.iter().find(|(label, _)| label == "ImVehFt").unwrap();
-        assert_eq!(imvehft.1.len(), 2);
+        assert_eq!(imvehft.1.len(), EXPECTED_GROUP_ENTRY_COUNT);
     }
 
     #[test]
@@ -1592,11 +1724,15 @@ HD_Roads=30   ; inline comment
         let refs = vec![&a, &b];
 
         let mut priorities = ModLoaderPriorities {
-            default: 50,
+            default: MODLOADER_BUILTIN_DEFAULT_PRIORITY,
             by_folder: BTreeMap::new(),
         };
-        priorities.by_folder.insert("moda".to_string(), 30);
-        priorities.by_folder.insert("modb".to_string(), 80);
+        priorities
+            .by_folder
+            .insert("moda".to_string(), MODLOADER_TEST_LOW_PRIORITY);
+        priorities
+            .by_folder
+            .insert("modb".to_string(), MODLOADER_TEST_HIGH_PRIORITY);
 
         let conflicts = modloader_conflicts(&refs, &priorities);
         assert_eq!(conflicts.len(), 1);
@@ -1614,13 +1750,16 @@ HD_Roads=30   ; inline comment
         let refs = vec![&a, &b];
         // Both fall back to the default priority.
         let priorities = ModLoaderPriorities {
-            default: 50,
+            default: MODLOADER_BUILTIN_DEFAULT_PRIORITY,
             by_folder: BTreeMap::new(),
         };
 
         let conflicts = modloader_conflicts(&refs, &priorities);
         assert_eq!(conflicts.len(), 1);
-        assert!(conflicts[0].ambiguous, "equal priorities are non-deterministic");
+        assert!(
+            conflicts[0].ambiguous,
+            "equal priorities are non-deterministic"
+        );
         // A single-folder asset is never a conflict.
         let solo = ml_entry("modloader/ModA/unique.dff");
         assert!(modloader_conflicts(&[&solo], &priorities).is_empty());
@@ -1650,7 +1789,7 @@ HD_Roads=30   ; inline comment
     #[test]
     fn conflict_marks_merge_vs_override() {
         let priorities = ModLoaderPriorities {
-            default: 50,
+            default: MODLOADER_BUILTIN_DEFAULT_PRIORITY,
             by_folder: BTreeMap::new(),
         };
         // Two mods both ship handling.cfg -> mergeable (soft).
@@ -1703,21 +1842,40 @@ HD_Roads=30   ; inline comment
     #[test]
     fn spread_priority_is_ordered_distinct_and_centered() {
         // Two mods land at the extremes; three straddle the default.
-        assert_eq!(spread_priority(0, 2, 100), 1);
-        assert_eq!(spread_priority(1, 2, 100), 100);
-        assert_eq!(spread_priority(0, 3, 100), 1);
-        assert_eq!(spread_priority(1, 3, 100), 51);
-        assert_eq!(spread_priority(2, 3, 100), 100);
+        assert_eq!(
+            spread_priority(0, MODLOADER_PRIORITY_PAIR_COUNT, MODLOADER_TEST_LIMIT),
+            1
+        );
+        assert_eq!(
+            spread_priority(1, MODLOADER_PRIORITY_PAIR_COUNT, MODLOADER_TEST_LIMIT),
+            100 // literal: allow test fixture value is the specimen under judgment
+        );
+        assert_eq!(
+            spread_priority(0, MODLOADER_PRIORITY_TRIPLE_COUNT, MODLOADER_TEST_LIMIT),
+            1
+        );
+        assert_eq!(
+            spread_priority(1, MODLOADER_PRIORITY_TRIPLE_COUNT, MODLOADER_TEST_LIMIT),
+            MODLOADER_TEST_MID_PRIORITY
+        );
+        assert_eq!(
+            spread_priority(2, MODLOADER_PRIORITY_TRIPLE_COUNT, MODLOADER_TEST_LIMIT), // literal: allow test fixture value is the specimen under judgment
+            100 // literal: allow test fixture value is the specimen under judgment
+        );
         // A lone mod sits near the default.
-        assert_eq!(spread_priority(0, 1, 100), 50);
+        assert_eq!(
+            spread_priority(0, 1, MODLOADER_TEST_LIMIT),
+            MODLOADER_BUILTIN_DEFAULT_PRIORITY
+        );
     }
 
     #[test]
     fn render_priority_ini_from_scratch_sets_profile_and_section() {
         let mut priorities = BTreeMap::new();
         priorities.insert("HD_Roads".to_string(), 1);
-        priorities.insert("ImVehFt".to_string(), 100);
-        let ini = render_modloader_priority_ini(None, "Default", 100, &priorities).unwrap();
+        priorities.insert("ImVehFt".to_string(), MODLOADER_TEST_LIMIT);
+        let ini = render_modloader_priority_ini(None, "Default", MODLOADER_TEST_LIMIT, &priorities)
+            .unwrap();
 
         assert!(ini.contains("[Folder.Config]"));
         assert!(ini.contains("Profile = Default"));
@@ -1726,7 +1884,7 @@ HD_Roads=30   ; inline comment
         assert!(ini.contains("ImVehFt = 100"));
         // Round-trips through our own reader.
         let parsed = parse_modloader_priorities(&ini);
-        assert_eq!(parsed.for_folder("ImVehFt"), 100);
+        assert_eq!(parsed.for_folder("ImVehFt"), MODLOADER_TEST_LIMIT);
         assert_eq!(parsed.for_folder("HD_Roads"), 1);
     }
 
@@ -1750,15 +1908,23 @@ _ignore
 ";
         let mut priorities = BTreeMap::new();
         // Update an existing managed folder and add a new one; UserMod untouched.
-        priorities.insert("ImVehFt".to_string(), 100);
+        priorities.insert("ImVehFt".to_string(), MODLOADER_TEST_LIMIT);
         priorities.insert("HD_Roads".to_string(), 1);
-        let ini =
-            render_modloader_priority_ini(Some(existing), "Default", 100, &priorities).unwrap();
+        let ini = render_modloader_priority_ini(
+            Some(existing),
+            "Default",
+            MODLOADER_TEST_LIMIT,
+            &priorities,
+        )
+        .unwrap();
 
         assert!(ini.contains("; user notes"));
         assert!(ini.contains("[Profiles.Default.Config]"));
         assert!(ini.contains("UserMod = 90"), "unmanaged folder preserved");
-        assert!(ini.contains("ImVehFt = 100"), "managed folder updated in place");
+        assert!(
+            ini.contains("ImVehFt = 100"),
+            "managed folder updated in place"
+        );
         assert!(ini.contains("HD_Roads = 1"), "new managed folder added");
         assert!(ini.contains("[Profiles.Default.IgnoreMods]"));
         assert!(ini.contains("_ignore"));
@@ -1780,9 +1946,15 @@ Profile = Default
 ImVehFt = 100
 ";
         let mut priorities = BTreeMap::new();
-        priorities.insert("ImVehFt".to_string(), 100);
+        priorities.insert("ImVehFt".to_string(), MODLOADER_TEST_LIMIT);
         assert!(
-            render_modloader_priority_ini(Some(existing), "Default", 100, &priorities).is_none(),
+            render_modloader_priority_ini(
+                Some(existing),
+                "Default",
+                MODLOADER_TEST_LIMIT,
+                &priorities
+            )
+            .is_none(),
             "no change should skip the write"
         );
     }
@@ -1795,15 +1967,18 @@ Profile = SAMP
 PriorityLimit = 200
 ";
         assert_eq!(modloader_active_profile(ini), "SAMP");
-        assert_eq!(modloader_priority_limit(ini), 200);
+        assert_eq!(modloader_priority_limit(ini), MODLOADER_TEST_EXTENDED_LIMIT);
         // Defaults when absent.
         assert_eq!(modloader_active_profile(""), "Default");
-        assert_eq!(modloader_priority_limit(""), 100);
+        assert_eq!(modloader_priority_limit(""), MODLOADER_TEST_LIMIT);
     }
 
     #[test]
     fn managed_profile_name_is_prefixed_and_sanitized() {
-        assert_eq!(modloader_managed_profile_name("vanilla-plus"), "SAMM_vanilla-plus");
+        assert_eq!(
+            modloader_managed_profile_name("vanilla-plus"),
+            "SAMM_vanilla-plus"
+        );
         // Spaces and unsafe characters are normalized so the name is safe in an
         // INI header and a -modprof argument.
         let name = modloader_managed_profile_name("My Profile!");
@@ -1816,16 +1991,16 @@ PriorityLimit = 200
     fn managed_profile_from_scratch_writes_config_and_priority_without_folder_config() {
         let mut priorities = BTreeMap::new();
         priorities.insert("early_mod".to_string(), 1);
-        priorities.insert("late_mod".to_string(), 100);
-        let ini = render_modloader_managed_profile(
-            None,
-            "SAMM_default",
-            "Default",
-            100,
-            &priorities,
-            &[],
-            &[],
-        )
+        priorities.insert("late_mod".to_string(), MODLOADER_TEST_LIMIT);
+        let ini = render_modloader_managed_profile(ModLoaderManagedProfileRender {
+            existing: None,
+            profile: "SAMM_default",
+            parent: "Default",
+            limit: MODLOADER_TEST_LIMIT,
+            folder_priorities: &priorities,
+            ignore_folders: &[],
+            ignore_files: &[],
+        })
         .unwrap();
 
         assert!(ini.contains("[Profiles.SAMM_default.Config]"));
@@ -1842,68 +2017,80 @@ PriorityLimit = 200
     #[test]
     fn managed_profile_writes_ignoremods_for_disabled_folders() {
         let mut priorities = BTreeMap::new();
-        priorities.insert("enabled_mod".to_string(), 100);
+        priorities.insert("enabled_mod".to_string(), MODLOADER_TEST_LIMIT);
         let ignore = vec!["off_mod".to_string(), "also_off".to_string()];
-        let ini = render_modloader_managed_profile(
-            None,
-            "SAMM_default",
-            "Default",
-            100,
-            &priorities,
-            &ignore,
-            &[],
-        )
+        let ini = render_modloader_managed_profile(ModLoaderManagedProfileRender {
+            existing: None,
+            profile: "SAMM_default",
+            parent: "Default",
+            limit: MODLOADER_TEST_LIMIT,
+            folder_priorities: &priorities,
+            ignore_folders: &ignore,
+            ignore_files: &[],
+        })
         .unwrap();
 
-        assert!(ini.contains("[Profiles.SAMM_default.IgnoreMods]"), "ini was:\n{ini}");
+        assert!(
+            ini.contains("[Profiles.SAMM_default.IgnoreMods]"),
+            "ini was:\n{ini}"
+        );
         assert!(ini.contains("off_mod"));
         assert!(ini.contains("also_off"));
         // Clearing the disabled set removes the IgnoreMods block again.
-        let cleared = render_modloader_managed_profile(
-            Some(&ini),
-            "SAMM_default",
-            "Default",
-            100,
-            &priorities,
-            &[],
-            &[],
-        )
+        let cleared = render_modloader_managed_profile(ModLoaderManagedProfileRender {
+            existing: Some(&ini),
+            profile: "SAMM_default",
+            parent: "Default",
+            limit: MODLOADER_TEST_LIMIT,
+            folder_priorities: &priorities,
+            ignore_folders: &[],
+            ignore_files: &[],
+        })
         .unwrap();
-        assert!(!cleared.contains("IgnoreMods"), "cleared ini was:\n{cleared}");
+        assert!(
+            !cleared.contains("IgnoreMods"),
+            "cleared ini was:\n{cleared}"
+        );
         assert!(!cleared.contains("off_mod"));
     }
 
     #[test]
     fn managed_profile_writes_ignorefiles_globs() {
         let mut priorities = BTreeMap::new();
-        priorities.insert("mod".to_string(), 100);
+        priorities.insert("mod".to_string(), MODLOADER_TEST_LIMIT);
         let ignore_files = vec!["*.dff".to_string(), "to_ignore/bad.txd".to_string()];
-        let ini = render_modloader_managed_profile(
-            None,
-            "SAMM_default",
-            "Default",
-            100,
-            &priorities,
-            &[],
-            &ignore_files,
-        )
+        let ini = render_modloader_managed_profile(ModLoaderManagedProfileRender {
+            existing: None,
+            profile: "SAMM_default",
+            parent: "Default",
+            limit: MODLOADER_TEST_LIMIT,
+            folder_priorities: &priorities,
+            ignore_folders: &[],
+            ignore_files: &ignore_files,
+        })
         .unwrap();
 
-        assert!(ini.contains("[Profiles.SAMM_default.IgnoreFiles]"), "ini was:\n{ini}");
+        assert!(
+            ini.contains("[Profiles.SAMM_default.IgnoreFiles]"),
+            "ini was:\n{ini}"
+        );
         assert!(ini.contains("*.dff"));
         assert!(ini.contains("to_ignore/bad.txd"));
         // Clearing the globs drops the IgnoreFiles block.
-        let cleared = render_modloader_managed_profile(
-            Some(&ini),
-            "SAMM_default",
-            "Default",
-            100,
-            &priorities,
-            &[],
-            &[],
-        )
+        let cleared = render_modloader_managed_profile(ModLoaderManagedProfileRender {
+            existing: Some(&ini),
+            profile: "SAMM_default",
+            parent: "Default",
+            limit: MODLOADER_TEST_LIMIT,
+            folder_priorities: &priorities,
+            ignore_folders: &[],
+            ignore_files: &[],
+        })
         .unwrap();
-        assert!(!cleared.contains("IgnoreFiles"), "cleared ini was:\n{cleared}");
+        assert!(
+            !cleared.contains("IgnoreFiles"),
+            "cleared ini was:\n{cleared}"
+        );
     }
 
     #[test]
@@ -1917,16 +2104,16 @@ PriorityLimit = 100
 UserMod = 70
 ";
         let mut priorities = BTreeMap::new();
-        priorities.insert("my_mod".to_string(), 100);
-        let ini = render_modloader_managed_profile(
-            Some(existing),
-            "SAMM_default",
-            "Default",
-            100,
-            &priorities,
-            &[],
-            &[],
-        )
+        priorities.insert("my_mod".to_string(), MODLOADER_TEST_LIMIT);
+        let ini = render_modloader_managed_profile(ModLoaderManagedProfileRender {
+            existing: Some(existing),
+            profile: "SAMM_default",
+            parent: "Default",
+            limit: MODLOADER_TEST_LIMIT,
+            folder_priorities: &priorities,
+            ignore_folders: &[],
+            ignore_files: &[],
+        })
         .unwrap();
 
         // The user's own profile, active profile, and priorities are untouched.
@@ -1949,17 +2136,17 @@ Parents = Default
 my_mod = 100
 ";
         let mut priorities = BTreeMap::new();
-        priorities.insert("my_mod".to_string(), 100);
+        priorities.insert("my_mod".to_string(), MODLOADER_TEST_LIMIT);
         assert!(
-            render_modloader_managed_profile(
-                Some(existing),
-                "SAMM_default",
-                "Default",
-                100,
-                &priorities,
-                &[],
-                &[]
-            )
+            render_modloader_managed_profile(ModLoaderManagedProfileRender {
+                existing: Some(existing),
+                profile: "SAMM_default",
+                parent: "Default",
+                limit: MODLOADER_TEST_LIMIT,
+                folder_priorities: &priorities,
+                ignore_folders: &[],
+                ignore_files: &[],
+            })
             .is_none()
         );
     }
@@ -1976,7 +2163,12 @@ Could not open archive gta3.img
 ";
         let summary = parse_modloader_log(log);
         assert_eq!(summary.version.as_deref(), Some("0.3.7"));
-        assert_eq!(summary.errors.len(), 2, "errors: {:?}", summary.errors);
+        assert_eq!(
+            summary.errors.len(),
+            EXPECTED_LOG_ERROR_COUNT,
+            "errors: {:?}",
+            summary.errors
+        );
         assert!(summary.errors.iter().any(|l| l.contains("Failed to read")));
         assert!(summary.errors.iter().any(|l| l.contains("Could not open")));
         assert_eq!(summary.warnings.len(), 1);

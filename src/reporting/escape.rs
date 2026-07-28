@@ -2,21 +2,21 @@ use crate::prelude::*;
 
 pub(crate) fn escape_value(value: &str) -> String {
     value
-        .replace('\\', "\\\\") // literal: allow external interface text or file-format spelling
-        .replace('\n', "\\n") // literal: allow external interface text or file-format spelling
-        .replace('\r', "\\r") // literal: allow external interface text or file-format spelling
-        .replace('|', "\\|") // literal: allow external interface text or file-format spelling
+        .replace('\\', "\\\\")
+        .replace('\n', "\\n")
+        .replace('\r', "\\r")
+        .replace('|', "\\|")
 }
 
 pub(crate) fn json_escape(value: &str) -> String {
     let mut out = String::new();
     for ch in value.chars() {
         match ch {
-            '"' => out.push_str("\\\""), // literal: allow external interface text or file-format spelling
-            '\\' => out.push_str("\\\\"), // literal: allow external interface text or file-format spelling
-            '\n' => out.push_str("\\n"), // literal: allow external interface text or file-format spelling
-            '\r' => out.push_str("\\r"), // literal: allow external interface text or file-format spelling
-            '\t' => out.push_str("\\t"), // literal: allow external interface text or file-format spelling
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
             other => out.push(other),
         }
     }

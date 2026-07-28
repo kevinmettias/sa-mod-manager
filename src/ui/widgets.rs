@@ -4,10 +4,7 @@ use eframe::egui;
 use super::state::{InfrastructureItem, ModConfigItem, UiState};
 
 pub(super) fn infrastructure_grid(ui: &mut egui::Ui, infrastructure: &[InfrastructureItem]) {
-    /* literal: allow external interface text or file-format spelling */
-    /* literal: allow external interface text or file-format spelling */
     egui::Grid::new("infra_grid").striped(true).show(ui, |ui| {
-        // literal: allow external interface text or file-format spelling
         for item in infrastructure {
             infrastructure_row(ui, item);
         }
@@ -16,7 +13,7 @@ pub(super) fn infrastructure_grid(ui: &mut egui::Ui, infrastructure: &[Infrastru
 
 pub(super) fn infrastructure_row(ui: &mut egui::Ui, item: &InfrastructureItem) {
     ui.label(&item.label);
-    ui.label(if item.present { "present" } else { "missing" }); // literal: allow external interface text or file-format spelling
+    ui.label(if item.present { "present" } else { "missing" });
     let path_display = item.path.display().to_string();
     ui.monospace(path_display);
     ui.end_row();
@@ -45,5 +42,5 @@ pub(super) fn should_add_mod_to_profile(ui: &mut egui::Ui, item: &ModConfigItem)
     if item.in_selected_profile {
         return false;
     }
-    ui.button("Select").clicked() // literal: allow external interface text or file-format spelling
+    ui.button("Select").clicked()
 }

@@ -19,7 +19,7 @@ pub(super) fn load_ui_state(
     let profile_name = if profiles.iter().any(|name| name == selected_profile_name) {
         selected_profile_name
     } else {
-        profiles.first().map(String::as_str).unwrap_or("default") // literal: allow external interface text or file-format spelling
+        profiles.first().map(String::as_str).unwrap_or("default")
     };
     let selected_profile = load_profile_for_edit(game_root, profile_name).ok();
     let selected_profile_ref = selected_profile.as_ref();
@@ -35,21 +35,18 @@ pub(super) fn load_ui_state(
 }
 
 fn list_profile_names(game_root: &Path) -> Result<Vec<String>, AppError> {
-    let profiles_root = state_directory(game_root).join("profiles"); // literal: allow external interface text or file-format spelling
+    let profiles_root = state_directory(game_root).join("profiles");
     let mut names = Vec::new();
     if !profiles_root.exists() {
         return Ok(names);
     }
     for entry in fs::read_dir(profiles_root)? {
         let path = entry?.path();
-        /* literal: allow external interface text or file-format spelling */
-        /* literal: allow external interface text or file-format spelling */
         if extension_eq(&path, "json") {
-            // literal: allow external interface text or file-format spelling
             let name = path
                 .file_stem()
                 .and_then(OsStr::to_str)
-                .unwrap_or("default") // literal: allow external interface text or file-format spelling
+                .unwrap_or("default")
                 .to_string();
             names.push(name);
         }
@@ -73,13 +70,13 @@ fn list_mod_configs(
     game_root: &Path,
     selected_ids: &BTreeSet<String>,
 ) -> Result<Vec<ModConfigItem>, AppError> {
-    let mods_root = state_directory(game_root).join("mods"); // literal: allow external interface text or file-format spelling
+    let mods_root = state_directory(game_root).join("mods");
     let mut items = Vec::new();
     if !mods_root.exists() {
         return Ok(items);
     }
     for entry in fs::read_dir(mods_root)? {
-        let path = entry?.path().join("mod.json"); // literal: allow external interface text or file-format spelling
+        let path = entry?.path().join("mod.json");
         if !path.exists() {
             continue;
         }
@@ -97,13 +94,13 @@ fn list_mod_configs(
 
 fn inspect_infrastructure(game_root: &Path) -> Vec<InfrastructureItem> {
     let builtin = [
-        ("Steam executable", "gta-sa.exe"), // literal: allow external interface text or file-format spelling
-        ("Classic executable", "gta_sa.exe"), // literal: allow external interface text or file-format spelling
-        ("Mod Loader ASI", "modloader.asi"), // literal: allow external interface text or file-format spelling
-        ("Mod Loader folder", "modloader"), // literal: allow external interface text or file-format spelling
-        ("CLEO ASI", "CLEO.asi"), // literal: allow external interface text or file-format spelling
-        ("CLEO folder", "CLEO"),  // literal: allow external interface text or file-format spelling
-        ("ASI loader DLL", "vorbisFile.dll"), // literal: allow external interface text or file-format spelling
+        ("Steam executable", "gta-sa.exe"),
+        ("Classic executable", "gta_sa.exe"),
+        ("Mod Loader ASI", "modloader.asi"),
+        ("Mod Loader folder", "modloader"),
+        ("CLEO ASI", "CLEO.asi"),
+        ("CLEO folder", "CLEO"),
+        ("ASI loader DLL", "vorbisFile.dll"),
     ];
     let mut items: Vec<InfrastructureItem> = builtin
         .into_iter()
@@ -112,7 +109,8 @@ fn inspect_infrastructure(game_root: &Path) -> Vec<InfrastructureItem> {
     // Config-declared checks (e.g. an alternate ASI loader like dinput8.dll) are
     // appended so the status panel can recognize non-default setups.
     for (label, relative) in crate::settings::extra_infrastructure_checks() {
-        items.push(infrastructure_item(game_root, label, relative));
+        let item = infrastructure_item(game_root, label, relative);
+        items.push(item);
     }
     items
 }

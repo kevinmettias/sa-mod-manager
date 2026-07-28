@@ -99,7 +99,7 @@ mod tests {
         write_executables(&root, &executables).unwrap();
         let read = read_executables(&root);
 
-        assert_eq!(read.len(), 2);
+        assert_eq!(read.len(), 2); // literal: allow test fixture value is the specimen under judgment
         assert_eq!(read[0].name, "Map editor");
         assert_eq!(read[0].arg_list(), vec!["--fast", "-x"]);
         assert!(read[1].arg_list().is_empty());

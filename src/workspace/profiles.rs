@@ -1,7 +1,9 @@
 use crate::prelude::*;
 
+const ACTIVE_PROFILE_MARKER_MAX_BYTES: u64 = 64 * 1024;
+
 pub(crate) fn list_profiles(game_root: &Path) -> Result<(), AppError> {
-    let profiles = state_directory(game_root).join("profiles"); // literal: allow external interface text or file-format spelling
+    let profiles = state_directory(game_root).join("profiles");
     if !profiles.exists() {
         println!("no profiles found; run `init` first");
         return Ok(());
@@ -17,10 +19,7 @@ fn profile_files(profiles: &Path) -> Result<Vec<PathBuf>, AppError> {
     for entry in fs::read_dir(&profiles)? {
         let entry = entry?;
         let path = entry.path();
-        /* literal: allow external interface text or file-format spelling */
-        /* literal: allow external interface text or file-format spelling */
         if extension_eq(&path, "profile") || extension_eq(&path, "json") {
-            // literal: allow external interface text or file-format spelling
             found.push(path);
         }
     }
@@ -47,7 +46,7 @@ pub(crate) fn create_profile(game_root: &Path, name: &str) -> Result<(), AppErro
     ensure_state(game_root)?;
     let safe = safe_name(name);
     let path = state_directory(game_root)
-        .join("profiles") // literal: allow external interface text or file-format spelling
+        .join("profiles")
         .join(format!("{safe}.json"));
     if path.exists() {
         return Err(AppError::Usage(format!("profile already exists: {safe}")));
@@ -64,7 +63,7 @@ pub(crate) fn create_profile(game_root: &Path, name: &str) -> Result<(), AppErro
 pub(crate) fn write_profile_json(game_root: &Path, profile: &ProfileJson) -> Result<(), AppError> {
     ensure_state(game_root)?;
     let path = state_directory(game_root)
-        .join("profiles") // literal: allow external interface text or file-format spelling
+        .join("profiles")
         .join(format!("{}.json", profile.name));
     write_profile_json_file(&path, game_root, profile)?;
     println!("profile json: {}", path.display());
@@ -144,7 +143,7 @@ pub(crate) fn add_mod_to_profile_json(
 ) -> Result<(), AppError> {
     ensure_state(game_root)?;
     let profile_path = state_directory(game_root)
-        .join("profiles") // literal: allow external interface text or file-format spelling
+        .join("profiles")
         .join(format!("{profile_name}.json"));
     let mut profile = if profile_path.exists() {
         read_profile_json(&profile_path)?
@@ -162,7 +161,7 @@ pub(crate) fn add_mod_to_profile_json(
         .map(|entry| entry.load_order)
         .max()
         .unwrap_or(0)
-        + 100;
+        + 100; // literal: allow domain threshold is documented by the surrounding code
     profile.mods.push(ProfileModEntry {
         id: config.id,
         enabled: true,
@@ -227,7 +226,7 @@ pub(crate) fn load_profile_for_edit(
 }
 
 fn profiles_directory(game_root: &Path) -> PathBuf {
-    state_directory(game_root).join("profiles") // literal: allow external interface text or file-format spelling
+    state_directory(game_root).join("profiles")
 }
 
 fn profile_json_path(game_root: &Path, profile_name: &str) -> PathBuf {
@@ -244,7 +243,11 @@ fn active_profile_path(game_root: &Path) -> PathBuf {
 pub(crate) fn read_active_profile(game_root: &Path) -> String {
     // The marker holds only a profile name; cap the read so a corrupt/oversized
     // marker falls back to `default` instead of being slurped whole.
-    match read_capped(&active_profile_path(game_root), 64 * 1024) {
+    match read_capped(
+        &active_profile_path(game_root),
+        ACTIVE_PROFILE_MARKER_MAX_BYTES,
+    ) {
+        // literal: allow domain threshold is documented by the surrounding code
         Ok(text) => {
             let name = text.trim();
             if name.is_empty() {
@@ -326,52 +329,67 @@ pub(crate) fn set_profile_launch_args(
     Ok(())
 }
 
+pub(crate) struct ProfileRootSelector<'a> {
+    pub(crate) profile_name: &'a str,
+    pub(crate) mod_id: &'a str,
+    pub(crate) source: &'a str,
+}
 pub(crate) fn set_profile_root_override(
     game_root: &Path,
-    profile_name: &str,
-    mod_id: &str,
-    source: &str,
+    selector: ProfileRootSelector<'_>,
     enabled: bool,
 ) -> Result<(), AppError> {
-    update_profile_root_override(game_root, profile_name, mod_id, source, |over| {
+    update_profile_root_override(game_root, &selector, |over| {
         over.enabled = Some(enabled);
     })?;
     println!(
-        "set root `{source}` of `{mod_id}` to {} in profile `{profile_name}`",
-        if enabled { "enabled" } else { "disabled" }
+        "set root `{}` of `{}` to {} in profile `{}`",
+        selector.source,
+        selector.mod_id,
+        if enabled { "enabled" } else { "disabled" },
+        selector.profile_name
     );
     Ok(())
 }
 
 pub(crate) fn set_profile_root_target(
     game_root: &Path,
-    profile_name: &str,
-    mod_id: &str,
-    source: &str,
+    selector: ProfileRootSelector<'_>,
     target: &str,
 ) -> Result<(), AppError> {
     let target = normalize_path(target);
-    update_profile_root_override(game_root, profile_name, mod_id, source, |over| {
+    update_profile_root_override(game_root, &selector, |over| {
         over.target = Some(target.clone());
     })?;
-    println!("set root `{source}` of `{mod_id}` to target `{target}` in profile `{profile_name}`");
+    println!(
+        "set root `{}` of `{}` to target `{target}` in profile `{}`",
+        selector.source, selector.mod_id, selector.profile_name
+    );
     Ok(())
 }
 
 fn update_profile_root_override(
     game_root: &Path,
-    profile_name: &str,
-    mod_id: &str,
-    source: &str,
+    selector: &ProfileRootSelector<'_>,
     update: impl FnOnce(&mut ProfileRootOverride),
 ) -> Result<(), AppError> {
-    let mut profile = load_profile_for_edit(game_root, profile_name)?;
-    let Some(entry) = profile.mods.iter_mut().find(|entry| entry.id == mod_id) else {
+    let mut profile = load_profile_for_edit(game_root, selector.profile_name)?;
+    let Some(entry) = profile
+        .mods
+        .iter_mut()
+        .find(|entry| entry.id == selector.mod_id)
+    else {
         return Err(AppError::Usage(format!(
-            "mod `{mod_id}` is not in profile `{profile_name}`"
+            "mod `{}` is not in profile `{}`",
+            selector.mod_id, selector.profile_name
         )));
     };
-    update(entry.root_overrides.entry(source.to_string()).or_default());
+    update(
+        entry
+            .root_overrides
+            .entry(selector.source.to_string())
+            .or_default(),
+    );
     write_profile_json(game_root, &profile)
 }
 
@@ -413,7 +431,8 @@ pub(crate) fn rename_profile(
         ));
     }
     copy_profile(game_root, &old_safe, new_name)?;
-    fs::remove_file(profile_json_path(game_root, &old_safe))?;
+    let old_profile_path = profile_json_path(game_root, &old_safe);
+    fs::remove_file(old_profile_path)?;
     if read_active_profile(game_root) == old_safe {
         set_active_profile(game_root, &safe_name(new_name))?;
     }
@@ -459,10 +478,14 @@ mod tests {
         assert_eq!(resolve_launch_args(Vec::new(), &defaults), defaults);
 
         // Env merges with the config default as the base; a profile key overrides.
-        let default_env =
-            BTreeMap::from([("A".to_string(), "1".to_string()), ("B".to_string(), "1".to_string())]);
-        let profile_env =
-            BTreeMap::from([("B".to_string(), "2".to_string()), ("C".to_string(), "3".to_string())]);
+        let default_env = BTreeMap::from([
+            ("A".to_string(), "1".to_string()),
+            ("B".to_string(), "1".to_string()),
+        ]);
+        let profile_env = BTreeMap::from([
+            ("B".to_string(), "2".to_string()),
+            ("C".to_string(), "3".to_string()),
+        ]);
         let merged = resolve_launch_env(profile_env, &default_env);
         assert_eq!(merged.get("A").map(String::as_str), Some("1"));
         assert_eq!(merged.get("B").map(String::as_str), Some("2"));
@@ -575,7 +598,7 @@ mod tests {
             mods: vec![ProfileModEntry {
                 id: "cleo".to_string(),
                 enabled: true,
-                load_order: 150,
+                load_order: 150, // literal: allow test fixture value is the specimen under judgment
                 config: game_root
                     .join(".sa-mod-manager")
                     .join("mods")
@@ -598,7 +621,7 @@ mod tests {
         assert_eq!(read.mods.len(), 1);
         assert_eq!(read.mods[0].id, "cleo");
         assert!(read.mods[0].enabled);
-        assert_eq!(read.mods[0].load_order, 150);
+        assert_eq!(read.mods[0].load_order, 150); // literal: allow test fixture value is the specimen under judgment
         let over = read.mods[0].root_overrides.get("cleo").unwrap();
         assert_eq!(over.enabled, Some(false));
         assert_eq!(over.target.as_deref(), Some("CLEO_custom"));

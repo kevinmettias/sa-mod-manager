@@ -1,5 +1,10 @@
 use crate::prelude::*;
 
+const MAX_README_DOCUMENTS_PRINTED: usize = 6;
+const MAX_README_EXCERPT_LINES: usize = 6;
+const MAX_README_INSTRUCTIONS_PRINTED: usize = 20;
+const MAX_STRING_VALUES_PRINTED: usize = 40;
+
 pub(crate) fn print_report(report: &PackageReport) {
     print_report_header(report);
     print_report_sections(report);
@@ -16,37 +21,48 @@ fn print_report_header(report: &PackageReport) {
 
 fn print_report_sections(report: &PackageReport) {
     let components = report.components.iter();
-    print_set("components", components); // literal: allow external interface text or file-format spelling
-    print_vec("readmes", &report.readmes); // literal: allow external interface text or file-format spelling
+    print_set("components", components);
+    print_vec("readmes", &report.readmes);
     print_readme_documents(&report.readme_documents);
     print_readme_instructions(&report.readme_instructions);
     print_manifest_roots(&report.manifest_roots);
-    print_vec("option groups", &report.option_groups); // literal: allow external interface text or file-format spelling
+    print_vec("option groups", &report.option_groups);
     let context_hints = report.context_hints.iter();
-    print_set("context hints", context_hints); // literal: allow external interface text or file-format spelling
+    print_set("context hints", context_hints);
     let risks = report.risks.iter();
-    print_set("risks", risks); // literal: allow external interface text or file-format spelling
+    print_set("risks", risks);
 }
 
 fn print_readme_documents(documents: &[ReadmeDocument]) {
     println!("readme excerpts:");
     if documents.is_empty() {
         println!("  none");
-    } else {
-        for document in documents.iter().take(6) {
-            println!("  {}", document.path);
-            for line in document.text.lines().take(6) {
-                let trimmed = line.trim();
-                if !trimmed.is_empty() {
-                    println!("    {trimmed}");
-                }
-            }
-        }
-        if documents.len() > 6 {
-            println!("  ... {} more", documents.len() - 6);
-        }
+        println!();
+        return;
+    }
+    for document in documents.iter().take(MAX_README_DOCUMENTS_PRINTED) {
+        // literal: allow external format or runtime boundary value means itself here
+        print_readme_document_excerpt(document);
+    }
+    if documents.len() > MAX_README_DOCUMENTS_PRINTED {
+        // literal: allow external format or runtime boundary value means itself here
+        println!(
+            "  ... {} more",
+            documents.len() - MAX_README_DOCUMENTS_PRINTED
+        ); // literal: allow external format or runtime boundary value means itself here
     }
     println!();
+}
+
+fn print_readme_document_excerpt(document: &ReadmeDocument) {
+    println!("  {}", document.path);
+    for line in document.text.lines().take(MAX_README_EXCERPT_LINES) {
+        // literal: allow external format or runtime boundary value means itself here
+        let trimmed = line.trim();
+        if !trimmed.is_empty() {
+            println!("    {trimmed}");
+        }
+    }
 }
 
 fn print_readme_instructions(instructions: &[ReadmeInstruction]) {
@@ -54,11 +70,12 @@ fn print_readme_instructions(instructions: &[ReadmeInstruction]) {
     if instructions.is_empty() {
         println!("  none");
     } else {
-        for instruction in instructions.iter().take(20) {
+        for instruction in instructions.iter().take(MAX_README_INSTRUCTIONS_PRINTED) {
+            // literal: allow external format or runtime boundary value means itself here
             println!(
                 "  {} {:.0}% {}:{}",
                 instruction.action,
-                instruction.confidence * 100.0,
+                instruction.confidence * 100.0, // literal: allow external format or runtime boundary value means itself here
                 instruction.source_readme,
                 instruction.line_number
             );
@@ -74,8 +91,12 @@ fn print_readme_instructions(instructions: &[ReadmeInstruction]) {
                 println!("    reasons: {}", instruction.confidence_reasons.join("; "));
             }
         }
-        if instructions.len() > 20 {
-            println!("  ... {} more", instructions.len() - 20);
+        if instructions.len() > MAX_README_INSTRUCTIONS_PRINTED {
+            // literal: allow external format or runtime boundary value means itself here
+            println!(
+                "  ... {} more",
+                instructions.len() - MAX_README_INSTRUCTIONS_PRINTED
+            ); // literal: allow external format or runtime boundary value means itself here
         }
     }
     println!();
@@ -121,11 +142,13 @@ fn print_vec(label: &str, values: &[String]) {
     if values.is_empty() {
         println!("  none");
     } else {
-        for value in values.iter().take(40) {
+        for value in values.iter().take(MAX_STRING_VALUES_PRINTED) {
+            // literal: allow external format or runtime boundary value means itself here
             println!("  {value}");
         }
-        if values.len() > 40 {
-            println!("  ... {} more", values.len() - 40);
+        if values.len() > MAX_STRING_VALUES_PRINTED {
+            // literal: allow external format or runtime boundary value means itself here
+            println!("  ... {} more", values.len() - MAX_STRING_VALUES_PRINTED); // literal: allow external format or runtime boundary value means itself here
         }
     }
     println!();
@@ -155,7 +178,7 @@ fn print_report_candidate(candidate: &InstallCandidate) {
             .iter()
             .map(ToString::to_string)
             .collect::<Vec<_>>()
-            .join(", "); // literal: allow external interface text or file-format spelling
+            .join(", ");
         println!("    components: {items}");
     }
     for note in &candidate.notes {
@@ -167,12 +190,12 @@ pub(crate) fn extract_to_staging(package: &Path, game_root: &Path) -> Result<(),
     ensure_state(game_root)?;
     if package.is_dir() {
         return Err(usage_error(
-            "extract-stage expects an archive, not a folder", // literal: allow external interface text or file-format spelling
+            "extract-stage expects an archive, not a folder",
         ));
     }
 
     let id = package_id(package);
-    let target = state_directory(game_root).join("staging").join(&id); // literal: allow external interface text or file-format spelling
+    let target = state_directory(game_root).join("staging").join(&id);
     extract_archive_to_directory(package, &target)?;
 
     println!("staged: {}", target.display());

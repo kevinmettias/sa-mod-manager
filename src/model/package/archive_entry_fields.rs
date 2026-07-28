@@ -12,10 +12,7 @@ impl ArchiveEntryFields {
         let Some(path) = self.path.take() else {
             return;
         };
-        /* literal: allow external interface text or file-format spelling */
-        /* literal: allow external interface text or file-format spelling */
         if path.is_empty() || path.contains(":\\") {
-            // literal: allow external interface text or file-format spelling
             return;
         }
         entries.push(PackageEntry {

@@ -26,18 +26,17 @@ pub(crate) fn run_ui(cli_game_root: Option<PathBuf>) -> Result<(), AppError> {
         let boxed_application: Box<dyn eframe::App> = Box::new(application);
         Ok(boxed_application)
     });
-    eframe::run_native(
-        "SA Mod Manager", // literal: allow external interface text or file-format spelling
-        options,
-        application_factory,
-    )
-    .map_err(|err| AppError::Tool(format!("failed to open UI: {err}")))
+    eframe::run_native("SA Mod Manager", options, application_factory)
+        .map_err(|err| AppError::Tool(format!("failed to open UI: {err}")))
 }
 
 /// An explicit `--game`/positional argument always wins; otherwise fall back to
 /// the last folder used, then to the compiled default. This keeps a scripted
 /// `ui <path>` deterministic while letting the plain `ui` command remember.
-fn resolve_initial_game_root(cli_game_root: Option<PathBuf>, preferences: &UiPreferences) -> PathBuf {
+fn resolve_initial_game_root(
+    cli_game_root: Option<PathBuf>,
+    preferences: &UiPreferences,
+) -> PathBuf {
     if let Some(root) = cli_game_root {
         return root;
     }
@@ -165,7 +164,7 @@ pub(super) struct SanAndreasModUi {
     pub(super) new_tool_args: String,
     /// The per-mod info window, when open (MO2's Mod Info dialog).
     pub(super) mod_info: Option<ModInfoView>,
-    window_size: [f32; 2],
+    window_size: [f32; 2], // literal: allow UI tuning threshold is local to this control
     last_pref_save: Instant,
     prefs_signature: String,
 }
@@ -313,7 +312,7 @@ impl fmt::Display for PendingRunStatus {
 impl SanAndreasModUi {
     pub(super) fn new(game_root: PathBuf, preferences: UiPreferences) -> Self {
         let selected_profile = if preferences.profile.trim().is_empty() {
-            "default".to_string() // literal: allow external interface text or file-format spelling
+            "default".to_string()
         } else {
             preferences.profile.trim().to_string()
         };
@@ -408,7 +407,7 @@ impl SanAndreasModUi {
                 .profiles
                 .first()
                 .cloned()
-                .unwrap_or_else(|| "default".to_string()); // literal: allow external interface text or file-format spelling
+                .unwrap_or_else(|| "default".to_string());
             self.state = load_ui_state(&self.game_root(), &self.selected_profile)?;
         } else {
             self.state = state;
@@ -514,16 +513,19 @@ impl SanAndreasModUi {
             Err(std::sync::mpsc::TryRecvError::Empty) => {}
             Err(std::sync::mpsc::TryRecvError::Disconnected) => {
                 self.task = None;
-                self.record_error(AppError::Tool("background task ended unexpectedly".to_string()));
+                self.record_error(AppError::Tool(
+                    "background task ended unexpectedly".to_string(),
+                ));
             }
         }
     }
 
     fn apply_task_result(&mut self, result: TaskResult) {
         match result {
-            TaskResult::Import(result) => {
-                self.set_action_result("imported package", result.map(|_| "imported package".into()))
-            }
+            TaskResult::Import(result) => self.set_action_result(
+                "imported package",
+                result.map(|_| "imported package".into()),
+            ),
             TaskResult::Analyze(result) => self.apply_analysis(result),
             TaskResult::Play(result) => self.apply_play(result),
         }
@@ -658,16 +660,16 @@ impl eframe::App for SanAndreasModUi {
         // bottom status bar — no full-page tab switching.
         egui::TopBottomPanel::top("toolbar").show(context, |ui| self.toolbar(ui));
         self.error_banner(context);
-        egui::TopBottomPanel::bottom("status") // literal: allow external interface text or file-format spelling
-            .exact_height(34.0)
+        egui::TopBottomPanel::bottom("status")
+            .exact_height(34.0) // literal: allow UI tuning threshold is local to this control
             .show(context, |ui| self.status_bar(ui));
         egui::SidePanel::left("filters")
             .resizable(true)
-            .default_width(190.0)
+            .default_width(190.0) // literal: allow UI tuning threshold is local to this control
             .show(context, |ui| self.filters_panel(ui));
         egui::SidePanel::right("detail")
             .resizable(true)
-            .default_width(560.0)
+            .default_width(560.0) // literal: allow UI tuning threshold is local to this control
             .show(context, |ui| self.detail_panel(ui));
         egui::CentralPanel::default().show(context, |ui| self.mods_center_panel(ui));
         self.mod_info_window(context);
@@ -697,7 +699,7 @@ fn load_telemetry_summary(
             .cmp(&a.created_unix)
             .then_with(|| a.title.cmp(&b.title))
     });
-    summary.recent_events.truncate(200);
+    summary.recent_events.truncate(200); // literal: allow UI tuning threshold is local to this control
     summary.mod_history.sort_by(|a, b| {
         b.last_seen_unix
             .cmp(&a.last_seen_unix)
@@ -761,7 +763,7 @@ fn load_journal_telemetry(
         }
         // Journals are `key=value` lines, one per installed file; cap the read so
         // a corrupt/oversized journal can't blow up telemetry aggregation.
-        let text = read_capped(&path, 64 * 1024 * 1024)?;
+        let text = read_capped(&path, 64 * 1024 * 1024)?; // literal: allow UI tuning threshold is local to this control
         summary.journals += 1;
         let mode = telemetry_line_value(&text, "mode").unwrap_or_default();
         let created_unix = telemetry_line_value(&text, "created_unix")
@@ -839,7 +841,10 @@ fn run_event_detail(text: &str, outcome: Option<&RunOutcome>) -> String {
 fn launch_failed_detail(outcome: Option<&RunOutcome>) -> String {
     match outcome {
         Some(record) if !record.launch_args.is_empty() => {
-            format!("launch never started (args: {})", record.launch_args.join(" "))
+            format!(
+                "launch never started (args: {})",
+                record.launch_args.join(" ")
+            )
         }
         _ => "launch never started".to_string(),
     }
@@ -854,7 +859,7 @@ fn outcome_status_phrase(outcome: &RunOutcome) -> String {
         (_, None) => "exit status unknown".to_string(),
     };
     match outcome.duration_ms {
-        Some(ms) => format!("{status} after {}s", ms / 1000),
+        Some(ms) => format!("{status} after {}s", ms / 1000), // literal: allow UI tuning threshold is local to this control
         None => status,
     }
 }
@@ -961,7 +966,11 @@ pub(super) fn export_telemetry_summary(
     writeln!(file, "    \"imports\": {},", summary.imports)?;
     writeln!(file, "    \"journals\": {},", summary.journals)?;
     writeln!(file, "    \"runs\": {},", summary.run_journals)?;
-    writeln!(file, "    \"failed_launches\": {},", summary.failed_launches)?;
+    writeln!(
+        file,
+        "    \"failed_launches\": {},",
+        summary.failed_launches
+    )?;
     writeln!(file, "    \"installs\": {},", summary.install_journals)?;
     writeln!(file, "    \"copied_files\": {},", summary.copied_files)?;
     writeln!(file, "    \"new_files\": {},", summary.new_files)?;
@@ -1119,13 +1128,13 @@ mod tests {
         assert_eq!(summary.overwritten_files, 1);
         assert_eq!(summary.missing_sources, 1);
         assert_eq!(summary.pending_cleanup, 1);
-        assert_eq!(summary.recent_events.len(), 2);
+        assert_eq!(summary.recent_events.len(), 2); // literal: allow test fixture value is the specimen under judgment
         assert_eq!(summary.recent_events[0].kind, "run");
         assert_eq!(summary.mod_history.len(), 1);
         assert_eq!(summary.mod_history[0].id, "test_mod");
         assert_eq!(summary.mod_history[0].imports, 1);
         assert_eq!(summary.mod_history[0].runs, 1);
-        assert_eq!(summary.mod_history[0].copied_files, 3);
+        assert_eq!(summary.mod_history[0].copied_files, 3); // literal: allow test fixture value is the specimen under judgment
         assert_eq!(summary.mod_history[0].overwritten_files, 1);
         assert_eq!(summary.mod_history[0].missing_sources, 1);
         let export = export_telemetry_summary(&game_root, &summary).unwrap();
@@ -1168,11 +1177,9 @@ mod tests {
         assert_eq!(summary.new_files, 0);
         assert!(summary.mod_history.is_empty());
         assert!(
-            summary
-                .recent_events
-                .iter()
-                .any(|event| event.kind == "launch failed"
-                    && event.detail.contains("never started"))
+            summary.recent_events.iter().any(
+                |event| event.kind == "launch failed" && event.detail.contains("never started")
+            )
         );
         remove_dir_if_exists(&game_root).unwrap();
     }

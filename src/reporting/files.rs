@@ -42,8 +42,8 @@ pub(crate) fn find_seven_zip() -> Option<PathBuf> {
     ];
     #[cfg(windows)]
     {
-        candidates.push(PathBuf::from(r"C:\Program Files\7-Zip\7z.exe")); // literal: allow external interface text or file-format spelling
-        candidates.push(PathBuf::from(r"C:\Program Files (x86)\7-Zip\7z.exe")); // literal: allow external interface text or file-format spelling
+        candidates.push(PathBuf::from(r"C:\Program Files\7-Zip\7z.exe"));
+        candidates.push(PathBuf::from(r"C:\Program Files (x86)\7-Zip\7z.exe"));
     }
 
     candidates.into_iter().find(command_candidate_works)
@@ -53,5 +53,5 @@ fn command_candidate_works(path: &PathBuf) -> bool {
     if path.is_absolute() && !path.exists() {
         return false;
     }
-    Command::new(path).arg("-h").output().is_ok() // literal: allow external interface text or file-format spelling
+    Command::new(path).arg("-h").output().is_ok()
 }

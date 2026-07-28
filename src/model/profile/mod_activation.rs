@@ -11,8 +11,8 @@ impl ModActivation {
 
     pub(crate) fn label(self) -> &'static str {
         match self {
-            Self::Enabled => "enabled", // literal: allow external interface text or file-format spelling
-            Self::Disabled => "disabled", // literal: allow external interface text or file-format spelling
+            Self::Enabled => "enabled",
+            Self::Disabled => "disabled",
         }
     }
 }

@@ -7,13 +7,17 @@ use super::rollback::rollback_journal;
 pub(crate) fn apply_install_plan(package: &Path, plan: &InstallPlan) -> Result<(), AppError> {
     ensure_gta_install(&plan.game_root)?;
     if plan.operations.is_empty() {
-        return Err(usage_error("install plan has no operations")); // literal: allow external interface text or file-format spelling
+        return Err(usage_error("install plan has no operations"));
     }
 
     let install_state = create_install_state(package, plan)?;
     // Claim the game folder before the destructive copy loop: blocks a second
     // concurrent install and refuses if a previous install is still unrecovered.
-    acquire_install_lock(&plan.game_root, &install_state.txid, &install_state.journal_path)?;
+    acquire_install_lock(
+        &plan.game_root,
+        &install_state.txid,
+        &install_state.journal_path,
+    )?;
     let apply_result = apply_locked_install(package, plan, &install_state);
     finish_install(&plan.game_root, &install_state, apply_result)
 }
@@ -84,9 +88,9 @@ fn create_install_state(package: &Path, plan: &InstallPlan) -> Result<InstallApp
     ensure_state(&plan.game_root)?;
     let txid = format!("{}-{}", plan.package_id, unix_now());
     let journal_path = state_directory(&plan.game_root)
-        .join("journals") // literal: allow external interface text or file-format spelling
+        .join("journals")
         .join(format!("{txid}.journal"));
-    let backup_root = state_directory(&plan.game_root).join("backups").join(&txid); // literal: allow external interface text or file-format spelling
+    let backup_root = state_directory(&plan.game_root).join("backups").join(&txid);
     fs::create_dir_all(&backup_root)?;
     let staging_root = staging_root_for_install(package, plan)?;
     Ok(InstallApplyState {

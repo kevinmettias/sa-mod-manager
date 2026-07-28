@@ -39,7 +39,35 @@ fn list_folder_entries(root: &Path) -> Result<Vec<PackageEntry>, AppError> {
 /// extraction entry cap: a listing bigger than what we would ever extract is
 /// hostile, and building the entry vector unbounded would let it dictate memory.
 const MAX_LISTED_ENTRIES: usize = 500_000;
-
+const README_SAMPLE_LIMIT: usize = 12;
+const INJECTABLE_DATA_MIN_NUMBERS: usize = 8;
+const LANGUAGE_PACK_MIN_HITS: usize = 2;
+const LANGUAGE_PACK_BASE_CONFIDENCE: f32 = 0.62;
+const LANGUAGE_PACK_HIT_CONFIDENCE: f32 = 0.06;
+const LANGUAGE_PACK_MAX_CONFIDENCE: f32 = 0.86;
+const SAVED_OVERRIDE_CONFIDENCE: f32 = 0.80;
+const EXPLICIT_CLEO_CONFIDENCE: f32 = 0.88;
+const CLEO_TEXT_CONFIDENCE: f32 = 0.74;
+const ROOT_HINT_CONFIDENCE: f32 = 0.66;
+const WRAP_HINT_CONFIDENCE: f32 = 0.62;
+const GTA3_IMG_CONFIDENCE: f32 = 0.82;
+const COPY_SCORE_BASE: f32 = 0.35;
+const COPY_SCORE_VERB_BONUS: f32 = 0.25;
+const COPY_SCORE_TARGET_BONUS: f32 = 0.25;
+const COPY_SCORE_SOURCE_BONUS: f32 = 0.12;
+const COPY_SCORE_CONTENT_BONUS: f32 = 0.06;
+const COPY_SCORE_CONTEXT_BONUS: f32 = 0.06;
+const COPY_SCORE_AMBIGUITY_PENALTY: f32 = 0.05;
+const COPY_SCORE_MAX: f32 = 0.97;
+const CONFIDENCE_PERCENT_SCALE: f32 = 100.0;
+const MAX_TARGET_PATH_DEPTH: usize = 3;
+const MIN_SOURCE_NAME_LEN: usize = 2;
+const SHORT_LINE_WORD_LIMIT: usize = 3;
+const MANIFEST_README_MAX_BYTES: usize = 64 * 1024;
+const REVIEW_CONFIDENCE_ASSERTION: f32 = 0.85;
+const BASIC_COPY_PROPOSAL_CONFIDENCE: f32 = 0.78;
+const STRONG_COPY_PROPOSAL_CONFIDENCE: f32 = 0.90;
+const MIN_PLAN_NOTE_COUNT: usize = 2;
 fn list_archive_entries(package: &Path) -> Result<Vec<PackageEntry>, AppError> {
     if let Some(entries) = list_archive_entries_native(package)? {
         return Ok(entries);
@@ -76,8 +104,8 @@ fn stream_archive_listing(
     let seven_zip = find_seven_zip().ok_or_else(|| missing_7zip_error_for_package(package))?;
     let mut child = Command::new(seven_zip)
         .env("LC_ALL", "C") // prefer stable tool output regardless of system locale
-        .arg("l") // literal: allow external interface text or file-format spelling
-        .arg("-slt") // literal: allow external interface text or file-format spelling
+        .arg("l")
+        .arg("-slt")
         .arg(package)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
@@ -101,31 +129,20 @@ fn parse_archive_listing_line(
     fields: &mut ArchiveEntryFields,
     entries: &mut Vec<PackageEntry>,
 ) {
-    /* literal: allow external interface text or file-format spelling */
-    /* literal: allow external interface text or file-format spelling */
     if let Some(value) = strip_listing_key(line, "Path = ") {
-        // literal: allow external interface text or file-format spelling
         fields.flush_into(entries);
-        fields.path = Some(value.trim().replace('\\', "/")); // literal: allow external interface text or file-format spelling
+        fields.path = Some(value.trim().replace('\\', "/"));
         fields.size = 0;
         fields.is_dir = false;
-    /* literal: allow external interface text or file-format spelling */
-    /* literal: allow external interface text or file-format spelling */
     } else if let Some(value) = strip_listing_key(line, "Size = ") {
-        // literal: allow external interface text or file-format spelling
         fields.size = value.trim().parse().unwrap_or(0);
-    /* literal: allow external interface text or file-format spelling */
-    /* literal: allow external interface text or file-format spelling */
     } else if let Some(value) = strip_listing_key(line, "Folder = ") {
         // 7-Zip marks directory entries with `Folder = +`, independent of the
         // localized attribute string.
         if value.trim() == "+" {
             fields.is_dir = true;
         }
-    /* literal: allow external interface text or file-format spelling */
-    /* literal: allow external interface text or file-format spelling */
     } else if let Some(value) = strip_listing_key(line, "Attributes = ") {
-        // literal: allow external interface text or file-format spelling
         if value.contains('D') {
             fields.is_dir = true;
         }
@@ -171,7 +188,7 @@ fn collect_readme_documents(report: &mut PackageReport) -> Result<(), AppError> 
     const MAX_README_BYTES: usize = 16 * 1024;
     let mut documents = Vec::new();
     let mut injectable = Vec::new();
-    for readme in report.readmes.iter().take(12) {
+    for readme in report.readmes.iter().take(README_SAMPLE_LIMIT) {
         if let Some(text) = read_package_text_file(&report.package, readme, MAX_README_BYTES)? {
             add_readme_context_hints(&text, &mut report.context_hints);
             // ModLoader's std.data claims `.txt` and scans readmes for pasteable
@@ -203,7 +220,10 @@ fn collect_readme_documents(report: &mut PackageReport) -> Result<(), AppError> 
 fn readme_has_injectable_data(text: &str) -> bool {
     text.lines().any(|raw| {
         let line = raw.trim();
-        if line.is_empty() || line.starts_with('#') || line.starts_with(';') || line.starts_with("//")
+        if line.is_empty()
+            || line.starts_with('#')
+            || line.starts_with(';')
+            || line.starts_with("//")
         {
             return false;
         }
@@ -214,7 +234,7 @@ fn readme_has_injectable_data(text: &str) -> bool {
                 !t.is_empty() && t.parse::<f64>().is_ok()
             })
             .count();
-        numeric >= 8
+        numeric >= INJECTABLE_DATA_MIN_NUMBERS
     })
 }
 
@@ -223,16 +243,9 @@ fn collect_readme_instructions(report: &mut PackageReport) {
     let mut instructions = Vec::new();
     for document in &report.readme_documents {
         for context in readme_line_contexts(&document.text) {
-            if let Some(instruction) = readme_instruction_from_line(
-                document,
-                context.line_number,
-                &context.original,
-                &context.normalized,
-                &context.paragraph,
-                &context.section,
-                &source_candidates,
-                report,
-            ) {
+            if let Some(instruction) =
+                readme_instruction_from_line(document, &context, &source_candidates, report)
+            {
                 add_readme_instruction_hint(&instruction, &mut report.context_hints);
                 instructions.push(instruction);
             }
@@ -272,62 +285,74 @@ fn add_instruction_insights(report: &PackageReport, insights: &mut Vec<ReadmeIns
             ReadmeAction::LoadAfter => "load-order or priority warning from readme".to_string(),
             ReadmeAction::DoNotInstall => "explicit do-not-install warning".to_string(),
         };
-        insights.push(readme_insight(
+        let insight = readme_insight(
             kind,
             instruction.action.to_string(),
             detail,
-            &instruction.source_readme,
-            instruction.line_number,
-            &instruction.text,
-            instruction.confidence,
-            &format!("readme.{}", instruction.action),
-        ));
+            ReadmeInsightMeta {
+                source_readme: &instruction.source_readme,
+                line_number: instruction.line_number,
+                evidence: &instruction.text,
+                confidence: instruction.confidence,
+                rule_id: &format!("readme.{}", instruction.action),
+            },
+        );
+        insights.push(insight);
     }
 }
 
 fn add_option_set_insights(report: &PackageReport, insights: &mut Vec<ReadmeInsight>) {
     for option in &report.option_groups {
-        insights.push(readme_insight(
+        let insight = readme_insight(
             ReadmeInsightKind::OptionSet,
             "package option".to_string(),
             format!("detected optional or mutually exclusive package folder: {option}"),
-            "package layout",
-            0,
-            option,
-            0.78,
-            "layout.option-folder",
-        ));
+            ReadmeInsightMeta {
+                source_readme: "package layout",
+                line_number: 0,
+                evidence: option,
+                confidence: BASIC_COPY_PROPOSAL_CONFIDENCE,
+                rule_id: "layout.option-folder",
+            },
+        );
+        insights.push(insight);
     }
 }
 
 fn add_layout_insights(report: &PackageReport, insights: &mut Vec<ReadmeInsight>) {
     for layout in detected_layout_templates(report) {
-        insights.push(readme_insight(
+        let insight = readme_insight(
             ReadmeInsightKind::Layout,
             "layout template".to_string(),
             layout,
-            "package layout",
-            0,
-            "",
-            0.86,
-            "layout.template",
-        ));
+            ReadmeInsightMeta {
+                source_readme: "package layout",
+                line_number: 0,
+                evidence: "",
+                confidence: LANGUAGE_PACK_MAX_CONFIDENCE,
+                rule_id: "layout.template",
+            },
+        );
+        insights.push(insight);
     }
 }
 
 fn add_rule_pack_insights(report: &PackageReport, insights: &mut Vec<ReadmeInsight>) {
     if !report.readme_instructions.is_empty() {
-        insights.push(readme_insight(
+        let insight = readme_insight(
             ReadmeInsightKind::Rule,
             "deterministic parser rules".to_string(),
             "used command verbs, fuzzy GTA SA targets, package contents, and confidence thresholds"
                 .to_string(),
-            "parser rules",
-            0,
-            "rules are local and human-editable in source/config-ready tables",
-            0.90,
-            "rules.deterministic-readme-v1",
-        ));
+            ReadmeInsightMeta {
+                source_readme: "parser rules",
+                line_number: 0,
+                evidence: "rules are local and human-editable in source/config-ready tables",
+                confidence: STRONG_COPY_PROPOSAL_CONFIDENCE,
+                rule_id: "rules.deterministic-readme-v1",
+            },
+        );
+        insights.push(insight);
     }
 }
 
@@ -345,41 +370,32 @@ fn add_dry_run_insights(report: &PackageReport, insights: &mut Vec<ReadmeInsight
         } else {
             "warning only"
         };
-        insights.push(readme_insight(
+        let insight = readme_insight(
             ReadmeInsightKind::DryRun,
             "install preview".to_string(),
             format!("{state}: {source} -> {target}"),
-            &instruction.source_readme,
-            instruction.line_number,
-            &instruction.text,
-            instruction.confidence,
-            "dry-run.readme-copy",
-        ));
+            ReadmeInsightMeta {
+                source_readme: &instruction.source_readme,
+                line_number: instruction.line_number,
+                evidence: &instruction.text,
+                confidence: instruction.confidence,
+                rule_id: "dry-run.readme-copy",
+            },
+        );
+        insights.push(insight);
     }
 }
 
 fn add_override_insights(report: &PackageReport, insights: &mut Vec<ReadmeInsight>) {
-    let needs_override = report
-        .readme_instructions
-        .iter()
-        .any(|instruction| {
-            matches!(instruction.action, ReadmeAction::Copy)
-                && (instruction.confidence < crate::settings::readme_auto_confidence()
-                    || instruction.source.is_none()
-                    || instruction.target.is_none())
-        });
+    let needs_override = report.readme_instructions.iter().any(|instruction| {
+        matches!(instruction.action, ReadmeAction::Copy)
+            && (instruction.confidence < crate::settings::readme_auto_confidence()
+                || instruction.source.is_none()
+                || instruction.target.is_none())
+    });
     if needs_override || !report.option_groups.is_empty() {
-        insights.push(readme_insight(
-            ReadmeInsightKind::Override,
-            "saved override recommended".to_string(),
-            "user decisions for ambiguous sources, targets, or options should be saved in mod.json install roots/options"
-                .to_string(),
-            "parser policy",
-            0,
-            "",
-            0.80,
-            "override.user-decision",
-        ));
+        let insight = readme_insight(             ReadmeInsightKind::Override,             "saved override recommended".to_string(),             "user decisions for ambiguous sources, targets, or options should be saved in mod.json install roots/options"                 .to_string(),             ReadmeInsightMeta {                 source_readme: "parser policy",                 line_number: 0,                 evidence: "",                 confidence: SAVED_OVERRIDE_CONFIDENCE,                 rule_id: "override.user-decision",             },         );
+        insights.push(insight);
     }
 }
 
@@ -387,42 +403,50 @@ fn add_language_insights(report: &PackageReport, insights: &mut Vec<ReadmeInsigh
     for document in &report.readme_documents {
         let normalized = normalize_readme_line(&document.text);
         for (language, confidence) in detected_language_packs(&normalized) {
-            insights.push(readme_insight(
+            let insight = readme_insight(
                 ReadmeInsightKind::Language,
                 format!("{language} keyword pack"),
-                format!("detected {language} install keywords; deterministic multilingual rules were applied"),
-                &document.path,
-                0,
-                "",
-                confidence,
-                &format!("language.{language}"),
-            ));
+                format!(
+                    "detected {language} install keywords; deterministic multilingual rules were applied"
+                ),
+                ReadmeInsightMeta {
+                    source_readme: &document.path,
+                    line_number: 0,
+                    evidence: "",
+                    confidence,
+                    rule_id: &format!("language.{language}"),
+                },
+            );
+            insights.push(insight);
         }
     }
+}
+
+struct ReadmeInsightMeta<'a> {
+    source_readme: &'a str,
+    line_number: usize,
+    evidence: &'a str,
+    confidence: f32,
+    rule_id: &'a str,
 }
 
 fn readme_insight(
     kind: ReadmeInsightKind,
     title: String,
     detail: String,
-    source_readme: &str,
-    line_number: usize,
-    evidence: &str,
-    confidence: f32,
-    rule_id: &str,
+    meta: ReadmeInsightMeta<'_>,
 ) -> ReadmeInsight {
     ReadmeInsight {
         kind,
         title,
         detail,
-        source_readme: source_readme.to_string(),
-        line_number,
-        evidence: evidence.to_string(),
-        confidence,
-        rule_id: rule_id.to_string(),
+        source_readme: meta.source_readme.to_string(),
+        line_number: meta.line_number,
+        evidence: meta.evidence.to_string(),
+        confidence: meta.confidence,
+        rule_id: meta.rule_id.to_string(),
     }
 }
-
 /// A `nodes<N>.dat` path-streaming file (nodes0.dat … nodes63.dat), which
 /// ModLoader's std.stream only loads from inside an `*.img` folder.
 fn is_streaming_nodes(path: &str) -> bool {
@@ -446,7 +470,10 @@ fn detected_layout_templates(report: &PackageReport) -> Vec<String> {
             || has(Component::Anim)
             || has(Component::Audio))
     {
-        layouts.push("modloader mirror: package has game-folder structure suitable for modloader".to_string());
+        layouts.push(
+            "modloader mirror: package has game-folder structure suitable for modloader"
+                .to_string(),
+        );
     }
     if has(Component::Cleo) || has(Component::CleoText) || has(Component::CleoPlugin) {
         layouts.push("CLEO package: .cs/.cs4/.cs3 → CLEO/, .cleo plugins → CLEO/cleo_plugins/, .fxt → CLEO/cleo_text/".to_string());
@@ -458,7 +485,8 @@ fn detected_layout_templates(report: &PackageReport) -> Vec<String> {
         layouts.push("gta3.img payload: loose .dff/.txd/.col files should be isolated under modloader/<mod>/gta3.img".to_string());
     }
     if has(Component::Text) {
-        layouts.push("language/text package: .gxt or text assets map to the text folder".to_string());
+        layouts
+            .push("language/text package: .gxt or text assets map to the text folder".to_string());
     }
     if report.entries.iter().any(|entry| {
         let path = normalize_path(&entry.path).to_ascii_lowercase();
@@ -471,12 +499,18 @@ fn detected_layout_templates(report: &PackageReport) -> Vec<String> {
         layouts.push("root mirror: archive contains direct game-folder names".to_string());
     }
     // std.stream layout requirements ModLoader enforces by folder name.
-    if report.entries.iter().any(|entry| is_streaming_nodes(&normalize_path(&entry.path))) {
+    if report
+        .entries
+        .iter()
+        .any(|entry| is_streaming_nodes(&normalize_path(&entry.path)))
+    {
         layouts.push("streaming nodes: nodesN.dat load only inside an *.img folder — place under modloader/<mod>/gta3.img/".to_string());
     }
     if report.entries.iter().any(|entry| {
         let lower = normalize_path(&entry.path).to_ascii_lowercase();
-        lower.split('/').any(|seg| seg == "player.img" || seg == "player_img")
+        lower
+            .split('/')
+            .any(|seg| seg == "player.img" || seg == "player_img")
     }) {
         layouts.push("clothing: new clothes must sit in a folder named player.img — modloader/<mod>/player.img/".to_string());
     }
@@ -532,8 +566,12 @@ fn detected_language_packs(text: &str) -> Vec<(&'static str, f32)> {
         .iter()
         .filter_map(|(language, words)| {
             let hits = words.iter().filter(|word| text.contains(**word)).count();
-            if hits >= 2 {
-                Some((*language, (0.62 + (hits as f32 * 0.06)).min(0.86)))
+            if hits >= LANGUAGE_PACK_MIN_HITS {
+                Some((
+                    *language,
+                    (LANGUAGE_PACK_BASE_CONFIDENCE + (hits as f32 * LANGUAGE_PACK_HIT_CONFIDENCE))
+                        .min(LANGUAGE_PACK_MAX_CONFIDENCE),
+                ))
             } else {
                 None
             }
@@ -552,6 +590,28 @@ struct ReadmeLineContext {
 struct ConfidenceScore {
     value: f32,
     reasons: Vec<String>,
+}
+
+struct ReadmeInstructionContext<'a> {
+    document: &'a ReadmeDocument,
+    line_number: usize,
+    text: &'a str,
+    normalized_text: &'a str,
+}
+
+struct ReadmeInstructionDraft {
+    action: ReadmeAction,
+    source: Option<String>,
+    target: Option<String>,
+    confidence: ConfidenceScore,
+}
+
+struct CopyInstructionScoreInput<'a> {
+    source: &'a Option<String>,
+    target: &'a Option<String>,
+    line: &'a str,
+    install_verb: bool,
+    install_section: bool,
 }
 
 fn readme_line_contexts(text: &str) -> Vec<ReadmeLineContext> {
@@ -598,97 +658,96 @@ fn readme_paragraph_context(lines: &[&str], index: usize) -> String {
 
 fn readme_instruction_from_line(
     document: &ReadmeDocument,
-    line_number: usize,
-    line: &str,
-    normalized: &str,
-    paragraph: &str,
-    section: &Option<String>,
+    context: &ReadmeLineContext,
     source_candidates: &[String],
     report: &PackageReport,
 ) -> Option<ReadmeInstruction> {
-    let trimmed = line.trim();
+    let trimmed = context.original.trim();
     if trimmed.is_empty() {
         return None;
     }
-    let lower = normalized;
-    let evidence_context = combined_readme_context(lower, paragraph, section);
+    let lower = context.normalized.as_str();
+    let evidence_context = combined_readme_context(lower, &context.paragraph, &context.section);
+    let instruction_context = ReadmeInstructionContext {
+        document,
+        line_number: context.line_number,
+        text: trimmed,
+        normalized_text: &evidence_context,
+    };
     if contains_do_not_install(lower) {
         return Some(readme_instruction(
-            document,
-            line_number,
-            ReadmeAction::DoNotInstall,
-            None,
-            None,
-            ConfidenceScore {
-                value: 0.88,
-                reasons: vec!["explicit do-not-install wording".to_string()],
+            &instruction_context,
+            ReadmeInstructionDraft {
+                action: ReadmeAction::DoNotInstall,
+                source: None,
+                target: None,
+                confidence: ConfidenceScore {
+                    value: EXPLICIT_CLEO_CONFIDENCE,
+                    reasons: vec!["explicit do-not-install wording".to_string()],
+                },
             },
-            trimmed,
-            &evidence_context,
         ));
     }
     if contains_conflict(lower) {
         return Some(readme_instruction(
-            document,
-            line_number,
-            ReadmeAction::Conflict,
-            None,
-            None,
-            ConfidenceScore {
-                value: 0.74,
-                reasons: vec!["compatibility/conflict wording".to_string()],
+            &instruction_context,
+            ReadmeInstructionDraft {
+                action: ReadmeAction::Conflict,
+                source: None,
+                target: None,
+                confidence: ConfidenceScore {
+                    value: CLEO_TEXT_CONFIDENCE,
+                    reasons: vec!["compatibility/conflict wording".to_string()],
+                },
             },
-            trimmed,
-            &evidence_context,
         ));
     }
     if contains_load_after(lower) {
         return Some(readme_instruction(
-            document,
-            line_number,
-            ReadmeAction::LoadAfter,
-            None,
-            None,
-            ConfidenceScore {
-                value: 0.66,
-                reasons: vec!["load-order wording".to_string()],
+            &instruction_context,
+            ReadmeInstructionDraft {
+                action: ReadmeAction::LoadAfter,
+                source: None,
+                target: None,
+                confidence: ConfidenceScore {
+                    value: ROOT_HINT_CONFIDENCE,
+                    reasons: vec!["load-order wording".to_string()],
+                },
             },
-            trimmed,
-            &evidence_context,
         ));
     }
     if contains_optional(lower) {
+        let optional_source = infer_source_from_line(&evidence_context, source_candidates);
         return Some(readme_instruction(
-            document,
-            line_number,
-            ReadmeAction::Optional,
-            infer_source_from_line(&evidence_context, source_candidates),
-            None,
-            ConfidenceScore {
-                value: 0.62,
-                reasons: vec!["optional/bonus wording".to_string()],
+            &instruction_context,
+            ReadmeInstructionDraft {
+                action: ReadmeAction::Optional,
+                source: optional_source,
+                target: None,
+                confidence: ConfidenceScore {
+                    value: WRAP_HINT_CONFIDENCE,
+                    reasons: vec!["optional/bonus wording".to_string()],
+                },
             },
-            trimmed,
-            &evidence_context,
         ));
     }
     if contains_requirement(lower) {
         return Some(readme_instruction(
-            document,
-            line_number,
-            ReadmeAction::Requires,
-            None,
-            requirement_target_from_line(&evidence_context),
-            ConfidenceScore {
-                value: 0.82,
-                reasons: vec!["requirement wording".to_string()],
+            &instruction_context,
+            ReadmeInstructionDraft {
+                action: ReadmeAction::Requires,
+                source: None,
+                target: requirement_target_from_line(&evidence_context),
+                confidence: ConfidenceScore {
+                    value: GTA3_IMG_CONFIDENCE,
+                    reasons: vec!["requirement wording".to_string()],
+                },
             },
-            trimmed,
-            &evidence_context,
         ));
     }
     let install_verb = contains_install_verb(lower);
-    let install_section = section
+    let install_section = context
+        .section
         .as_deref()
         .map(is_install_section_heading)
         .unwrap_or(false);
@@ -700,25 +759,23 @@ fn readme_instruction_from_line(
     if source.is_none() {
         source = infer_source_from_target_and_contents(target.as_deref(), report);
     }
-    let confidence = copy_instruction_score(
-        &source,
-        &target,
-        &evidence_context,
+    let confidence = copy_instruction_score(CopyInstructionScoreInput {
+        source: &source,
+        target: &target,
+        line: &evidence_context,
         install_verb,
         install_section,
-    );
+    });
     Some(readme_instruction(
-        document,
-        line_number,
-        ReadmeAction::Copy,
-        source,
-        target,
-        confidence,
-        trimmed,
-        &evidence_context,
+        &instruction_context,
+        ReadmeInstructionDraft {
+            action: ReadmeAction::Copy,
+            source,
+            target,
+            confidence,
+        },
     ))
 }
-
 fn combined_readme_context(line: &str, paragraph: &str, section: &Option<String>) -> String {
     let mut parts = Vec::new();
     if let Some(section) = section {
@@ -734,28 +791,21 @@ fn combined_readme_context(line: &str, paragraph: &str, section: &Option<String>
 }
 
 fn readme_instruction(
-    document: &ReadmeDocument,
-    line_number: usize,
-    action: ReadmeAction,
-    source: Option<String>,
-    target: Option<String>,
-    confidence: ConfidenceScore,
-    text: &str,
-    normalized_text: &str,
+    context: &ReadmeInstructionContext<'_>,
+    draft: ReadmeInstructionDraft,
 ) -> ReadmeInstruction {
     ReadmeInstruction {
-        source_readme: document.path.clone(),
-        line_number,
-        action,
-        source,
-        target,
-        confidence: confidence.value,
-        text: text.to_string(),
-        normalized_text: normalized_text.to_string(),
-        confidence_reasons: confidence.reasons,
+        source_readme: context.document.path.clone(),
+        line_number: context.line_number,
+        action: draft.action,
+        source: draft.source,
+        target: draft.target,
+        confidence: draft.confidence.value,
+        text: context.text.to_string(),
+        normalized_text: context.normalized_text.to_string(),
+        confidence_reasons: draft.confidence.reasons,
     }
 }
-
 fn normalize_readme_line(line: &str) -> String {
     line.replace('\\', "/")
         .replace(
@@ -786,7 +836,7 @@ fn package_source_candidates(report: &PackageReport) -> Vec<String> {
             .split('/')
             .filter(|part| !part.is_empty())
             .collect::<Vec<_>>();
-        for depth in 1..=parts.len().min(3) {
+        for depth in 1..=parts.len().min(MAX_TARGET_PATH_DEPTH) {
             candidates.insert(parts[..depth].join("/"));
         }
     }
@@ -806,7 +856,7 @@ fn infer_source_from_line(line: &str, candidates: &[String]) -> Option<String> {
 fn source_candidate_matches_line(candidate: &str, line: &str) -> bool {
     let lower = candidate.to_ascii_lowercase().replace('\\', "/");
     let name = file_name(&lower);
-    if name.len() < 2 {
+    if name.len() < MIN_SOURCE_NAME_LEN {
         return false;
     }
     line_contains_path(line, &lower)
@@ -991,47 +1041,42 @@ fn requirement_target_from_line(line: &str) -> Option<String> {
     }
 }
 
-fn copy_instruction_score(
-    source: &Option<String>,
-    target: &Option<String>,
-    line: &str,
-    install_verb: bool,
-    install_section: bool,
-) -> ConfidenceScore {
-    let mut confidence: f32 = 0.35;
+fn copy_instruction_score(input: CopyInstructionScoreInput<'_>) -> ConfidenceScore {
+    let mut confidence: f32 = COPY_SCORE_BASE;
     let mut reasons = Vec::new();
-    if source.is_some() {
-        confidence += 0.25;
+    if input.source.is_some() {
+        confidence += COPY_SCORE_VERB_BONUS;
         reasons.push("source matched readme/package contents".to_string());
     }
-    if target.is_some() {
-        confidence += 0.25;
+    if input.target.is_some() {
+        confidence += COPY_SCORE_TARGET_BONUS;
         reasons.push("target matched known GTA SA location".to_string());
     }
-    if install_verb {
-        confidence += 0.12;
+    if input.install_verb {
+        confidence += COPY_SCORE_SOURCE_BONUS;
         reasons.push("install/copy verb present".to_string());
     }
-    if install_section {
-        confidence += 0.06;
+    if input.install_section {
+        confidence += COPY_SCORE_CONTENT_BONUS;
         reasons.push("inside install/manual section".to_string());
     }
-    if mentions_game_root(line) || mentions_cleo(line) || mentions_modloader(line) {
-        confidence += 0.06;
+    if mentions_game_root(input.line) || mentions_cleo(input.line) || mentions_modloader(input.line)
+    {
+        confidence += COPY_SCORE_CONTEXT_BONUS;
         reasons.push("target wording is explicit".to_string());
     }
-    if line.contains("contents") {
-        confidence -= 0.05;
+    if input.line.contains("contents") {
+        confidence -= COPY_SCORE_AMBIGUITY_PENALTY;
         reasons.push("source wording says contents; review destination shape".to_string());
     }
-    if source.is_none() {
+    if input.source.is_none() {
         reasons.push("source not found".to_string());
     }
-    if target.is_none() {
+    if input.target.is_none() {
         reasons.push("target not found".to_string());
     }
     ConfidenceScore {
-        value: confidence.clamp(0.0, 0.97),
+        value: confidence.clamp(0.0, COPY_SCORE_MAX),
         reasons,
     }
 }
@@ -1044,7 +1089,7 @@ fn add_readme_instruction_hint(instruction: &ReadmeInstruction, hints: &mut BTre
         instruction.action,
         source,
         target,
-        instruction.confidence * 100.0,
+        instruction.confidence * CONFIDENCE_PERCENT_SCALE,
         instruction.source_readme,
         instruction.line_number
     ));
@@ -1094,7 +1139,7 @@ fn is_readme_section_heading(line: &str) -> bool {
 
 fn is_install_section_heading(line: &str) -> bool {
     let words = line.split_whitespace().count();
-    words <= 3
+    words <= SHORT_LINE_WORD_LIMIT
         && (line_contains_token(line, "install")
             || line_contains_token(line, "installation")
             || line_contains_token(line, "manual"))
@@ -1234,7 +1279,9 @@ fn collect_wrap_manifest_roots(report: &mut PackageReport) -> Result<(), AppErro
         }
         return Ok(());
     };
-    let Some(text) = read_package_text_file(&report.package, &manifest_path, 64 * 1024)? else {
+    let Some(text) =
+        read_package_text_file(&report.package, &manifest_path, MANIFEST_README_MAX_BYTES)?
+    else {
         return Ok(());
     };
     let manifest: WrapManifestFile = serde_json::from_str(&text)
@@ -1530,7 +1577,7 @@ fn package_entry_from_folder(root: &Path, path: &Path, metadata: &fs::Metadata) 
         .strip_prefix(root)
         .unwrap_or(path)
         .to_string_lossy()
-        .replace('\\', "/"); // literal: allow external interface text or file-format spelling
+        .replace('\\', "/");
     let size = if metadata.is_file() {
         metadata.len()
     } else {
@@ -1585,7 +1632,10 @@ mod tests {
 
         let report = analyze_package(&package, &root).unwrap();
         assert!(
-            report.risks.iter().any(|r| r.contains("std.data scans .txt")),
+            report
+                .risks
+                .iter()
+                .any(|r| r.contains("std.data scans .txt")),
             "risks: {:?}",
             report.risks
         );
@@ -1746,7 +1796,7 @@ mod tests {
             report.readme_instructions[0].target.as_deref(),
             Some("CLEO")
         );
-        assert!(report.readme_instructions[0].confidence >= 0.85);
+        assert!(report.readme_instructions[0].confidence >= REVIEW_CONFIDENCE_ASSERTION);
         assert_eq!(plan.operations.len(), 1);
         assert_eq!(plan.operations[0].source_root, "CLEO");
         assert_eq!(plan.operations[0].target_root, root.join("CLEO"));
@@ -1781,7 +1831,7 @@ mod tests {
         );
 
         assert_eq!(report.readme_instructions.len(), 1);
-        assert!(report.readme_instructions[0].confidence < 0.85);
+        assert!(report.readme_instructions[0].confidence < REVIEW_CONFIDENCE_ASSERTION);
         assert_eq!(plan.operations.len(), 1);
         assert_eq!(plan.operations[0].source_root, "CLEO");
         assert!(
@@ -1825,7 +1875,7 @@ mod tests {
             report.readme_instructions[0].target.as_deref(),
             Some("CLEO")
         );
-        assert!(report.readme_instructions[0].confidence >= 0.85);
+        assert!(report.readme_instructions[0].confidence >= REVIEW_CONFIDENCE_ASSERTION);
         assert!(
             report.readme_instructions[0]
                 .confidence_reasons
@@ -1835,7 +1885,7 @@ mod tests {
         assert_eq!(plan.operations.len(), 1);
         assert_eq!(plan.operations[0].source_root, "scripts");
         assert_eq!(plan.operations[0].target_root, root.join("CLEO"));
-        assert!(plan.operations[0].notes.len() >= 2);
+        assert!(plan.operations[0].notes.len() >= MIN_PLAN_NOTE_COUNT);
         remove_dir_if_exists(&root).unwrap();
     }
 
@@ -1871,7 +1921,7 @@ mod tests {
         assert_eq!(instruction.target.as_deref(), Some("."));
         assert!(instruction.normalized_text.contains("drag and drop"));
         assert!(instruction.normalized_text.contains("gta sa exe"));
-        assert!(instruction.confidence >= 0.85);
+        assert!(instruction.confidence >= REVIEW_CONFIDENCE_ASSERTION);
         assert_eq!(plan.operations.len(), 1);
         assert_eq!(plan.operations[0].source_root, "plugin");
         assert_eq!(plan.operations[0].target_root, root);
@@ -1912,7 +1962,7 @@ mod tests {
         assert_eq!(copy.source.as_deref(), Some("scripts"));
         assert_eq!(copy.target.as_deref(), Some("CLEO"));
         assert!(copy.normalized_text.contains("destination cleo folder"));
-        assert!(copy.confidence >= 0.85);
+        assert!(copy.confidence >= REVIEW_CONFIDENCE_ASSERTION);
         assert_eq!(plan.operations.len(), 1);
         assert_eq!(plan.operations[0].source_root, "scripts");
         assert_eq!(plan.operations[0].target_root, root.join("CLEO"));
@@ -1949,7 +1999,7 @@ mod tests {
             instruction.target.as_deref(),
             Some("modloader/vehicle/gta3.img")
         );
-        assert!(instruction.confidence >= 0.85);
+        assert!(instruction.confidence >= REVIEW_CONFIDENCE_ASSERTION);
         assert_eq!(plan.operations.len(), 1);
         assert_eq!(plan.operations[0].source_root, "models");
         assert_eq!(

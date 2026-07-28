@@ -16,10 +16,10 @@ impl Kind {
         }
         let ext = path.extension()?.to_string_lossy().to_ascii_lowercase();
         match ext.as_str() {
-            "zip" => Some(Self::Zip), // literal: allow external interface text or file-format spelling
-            "7z" => Some(Self::SevenZip), // literal: allow external interface text or file-format spelling
-            "rar" => Some(Self::Rar), // literal: allow external interface text or file-format spelling
-            "wrap" => Some(Self::Wrap), // literal: allow external interface text or file-format spelling
+            "zip" => Some(Self::Zip),
+            "7z" => Some(Self::SevenZip),
+            "rar" => Some(Self::Rar),
+            "wrap" => Some(Self::Wrap),
             _ => None,
         }
     }

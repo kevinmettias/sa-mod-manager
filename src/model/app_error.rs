@@ -123,8 +123,8 @@ mod tests {
 
     #[test]
     fn result_with_context_only_wraps_errors() {
-        let ok: Result<u8, io::Error> = Ok(7);
-        assert_eq!(ok.with_context(|| "should not run").unwrap(), 7);
+        let ok: Result<u8, io::Error> = Ok(7); // literal: allow test fixture value is the specimen under judgment
+        assert_eq!(ok.with_context(|| "should not run").unwrap(), 7); // literal: allow test fixture value is the specimen under judgment
 
         let failed: Result<(), io::Error> =
             Err(io::Error::new(io::ErrorKind::PermissionDenied, "denied"));

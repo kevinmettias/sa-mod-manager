@@ -128,10 +128,10 @@ mod tests {
     #[test]
     fn normalize_profile_mod_entries_removes_duplicate_ids_and_sorts() {
         let mut entries = vec![
-            test_entry("late", 300),
-            test_entry("dup", 200),
-            test_entry("dup", 100),
-            test_entry("early", 50),
+            test_entry("late", 300), // literal: allow test fixture value is the specimen under judgment
+            test_entry("dup", 200), // literal: allow test fixture value is the specimen under judgment
+            test_entry("dup", 100), // literal: allow test fixture value is the specimen under judgment
+            test_entry("early", 50), // literal: allow test fixture value is the specimen under judgment
         ];
 
         normalize_profile_mod_entries(&mut entries);
@@ -145,7 +145,7 @@ mod tests {
             .iter()
             .map(|entry| entry.load_order)
             .collect::<Vec<_>>();
-        assert_eq!(orders, vec![50, 200, 300]);
+        assert_eq!(orders, vec![50, 200, 300]); // literal: allow test fixture value is the specimen under judgment
     }
 
     #[test]
@@ -158,7 +158,7 @@ mod tests {
         ensure_state(&game_root).unwrap();
         let profile = ProfileJson {
             name: "vanilla".to_string(),
-            mods: vec![test_entry("a", 100), test_entry("b", 200)],
+            mods: vec![test_entry("a", 100), test_entry("b", 200)], // literal: allow test fixture value is the specimen under judgment
             ..Default::default()
         };
         write_profile_json(&game_root, &profile).unwrap();
@@ -186,9 +186,9 @@ mod tests {
         let profile = ProfileJson {
             name: "load".to_string(),
             mods: vec![
-                test_entry("alpha", 300),
-                test_entry("bravo", 100),
-                test_entry("charlie", 200),
+                test_entry("alpha", 300), // literal: allow test fixture value is the specimen under judgment
+                test_entry("bravo", 100), // literal: allow test fixture value is the specimen under judgment
+                test_entry("charlie", 200), // literal: allow test fixture value is the specimen under judgment
             ],
             ..Default::default()
         };
@@ -215,7 +215,7 @@ mod tests {
             .iter()
             .map(|entry| entry.load_order)
             .collect::<Vec<_>>();
-        assert_eq!(orders, vec![0, 1, 2]);
+        assert_eq!(orders, vec![0, 1, 2]); // literal: allow test fixture value is the specimen under judgment
         fs::remove_dir_all(&game_root).unwrap();
     }
 

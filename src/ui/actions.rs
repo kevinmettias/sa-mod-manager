@@ -1,6 +1,16 @@
-use crate::prelude::*;
 use crate::planning::readme_copy_install_root;
-use crate::workspace::append_mod_config_install_root;
+use crate::prelude::*;
+const MILLISECONDS_PER_SECOND: u64 = 1000;
+const README_ACCEPT_MAX_BYTES: u64 = 64 * 1024;
+const RUN_OUTCOME_JOURNAL_MAX_BYTES: u64 = 64 * 1024 * 1024;
+const MAX_MOD_INFO_READMES: usize = 12;
+#[cfg(test)]
+const TEST_PID: u32 = 1234;
+#[cfg(test)]
+const TEST_PENDING_PID: u32 = 42;
+#[cfg(test)]
+const OTHER_TEST_PID: u32 = 99;
+use crate::workspace::{ProfileRootSelector, append_mod_config_install_root};
 use eframe::egui;
 
 use super::san_andreas_mod_ui::{
@@ -79,10 +89,7 @@ impl SanAndreasModUi {
 
 impl SanAndreasModUi {
     pub(super) fn initialize_state(&mut self) {
-        /* literal: allow external interface text or file-format spelling */
-        /* literal: allow external interface text or file-format spelling */
         self.run_action("initialized manager state", |game_root| {
-            // literal: allow external interface text or file-format spelling
             init_state(game_root)
         });
     }
@@ -92,15 +99,12 @@ impl SanAndreasModUi {
     pub(super) fn add_mod_to_profile(&mut self, mod_id: &str) {
         let config_path = self
             .game_root()
-            .join(".sa-mod-manager") // literal: allow external interface text or file-format spelling
-            .join("mods") // literal: allow external interface text or file-format spelling
+            .join(".sa-mod-manager")
+            .join("mods")
             .join(mod_id)
-            .join("mod.json"); // literal: allow external interface text or file-format spelling
+            .join("mod.json");
         let profile = self.selected_profile.clone();
-        /* literal: allow external interface text or file-format spelling */
-        /* literal: allow external interface text or file-format spelling */
         self.run_action("added mod to profile", |game_root| {
-            // literal: allow external interface text or file-format spelling
             add_mod_to_profile_json(game_root, &profile, &config_path)
         });
     }
@@ -110,10 +114,7 @@ impl SanAndreasModUi {
     pub(super) fn set_mod_activation(&mut self, mod_id: &str, activation: ProfileModActivation) {
         let profile = self.selected_profile.clone();
         let mod_id = mod_id.to_string();
-        /* literal: allow external interface text or file-format spelling */
-        /* literal: allow external interface text or file-format spelling */
         self.run_action("updated mod toggle", |game_root| {
-            // literal: allow external interface text or file-format spelling
             set_profile_mod_activation(game_root, &profile, &mod_id, activation)
         });
     }
@@ -158,28 +159,10 @@ impl SanAndreasModUi {
                     .is_dir()
                     .then(|| item.config.package.clone())
             });
-        let mut files = Vec::new();
-        let mut readmes = Vec::new();
-        if let Some(root) = &source_root {
-            if let Ok(paths) = collect_files_recursive(root) {
-                for path in &paths {
-                    let Ok(relative) = path.strip_prefix(root) else {
-                        continue;
-                    };
-                    let relative = relative.to_string_lossy().replace('\\', "/");
-                    if readmes.len() < 12 {
-                        if let Some(name) = path.file_name().and_then(|name| name.to_str()) {
-                            if is_readme_name(name) {
-                                if let Ok(text) = read_capped(path, MAX_CONTROL_FILE_BYTES) {
-                                    readmes.push((relative.clone(), text));
-                                }
-                            }
-                        }
-                    }
-                    files.push(relative);
-                }
-            }
-        }
+        let (files, readmes) = source_root
+            .as_deref()
+            .map(mod_info_files_and_readmes)
+            .unwrap_or_default();
         let note_edit = self
             .mod_meta
             .get(mod_id)
@@ -259,7 +242,11 @@ impl SanAndreasModUi {
     pub(super) fn remove_separator(&mut self, id: &str) {
         self.separators.retain(|separator| separator.id != id);
         self.collapsed_separators.remove(id);
-        if self.separator_edit.as_ref().is_some_and(|(edit_id, _)| edit_id == id) {
+        if self
+            .separator_edit
+            .as_ref()
+            .is_some_and(|(edit_id, _)| edit_id == id)
+        {
             self.separator_edit = None;
         }
         self.persist_separators();
@@ -291,7 +278,8 @@ impl SanAndreasModUi {
     fn persist_modloader_overrides(&mut self) {
         let state_root = state_directory(&self.game_root());
         let profile = self.selected_profile.clone();
-        if let Err(err) = write_modloader_overrides(&state_root, &profile, &self.modloader_overrides)
+        if let Err(err) =
+            write_modloader_overrides(&state_root, &profile, &self.modloader_overrides)
         {
             self.record_error(err);
         }
@@ -389,8 +377,11 @@ impl SanAndreasModUi {
         );
         // Files in the game folder's mod areas that no enabled mod provides
         // (MO2's "overwrite") — computed from the index's owned target paths.
-        let owned: BTreeSet<String> =
-            index.entries.iter().map(|entry| entry.target.clone()).collect();
+        let owned: BTreeSet<String> = index
+            .entries
+            .iter()
+            .map(|entry| entry.target.clone())
+            .collect();
         self.overwrite_files = collect_overwrite_files(&self.game_root(), &owned);
         self.content_index = Some(index);
         // ModLoader's own priority config governs load order within modloader/;
@@ -407,10 +398,7 @@ impl SanAndreasModUi {
     pub(super) fn remove_mod_from_profile(&mut self, mod_id: &str) {
         let profile = self.selected_profile.clone();
         let mod_id = mod_id.to_string();
-        /* literal: allow external interface text or file-format spelling */
-        /* literal: allow external interface text or file-format spelling */
         self.run_action("removed mod from profile", |game_root| {
-            // literal: allow external interface text or file-format spelling
             remove_mod_from_profile_json(game_root, &profile, &mod_id)
         });
     }
@@ -441,6 +429,39 @@ impl SanAndreasModUi {
 /// non-empty relative paths with no `..` escape or drive-letter, the same
 /// containment rule the installer enforces. `kind` comes from a fixed dropdown,
 /// so it needs no check here.
+fn mod_info_files_and_readmes(root: &Path) -> (Vec<String>, Vec<(String, String)>) {
+    let Ok(paths) = collect_files_recursive(root) else {
+        return (Vec::new(), Vec::new());
+    };
+    let mut files = Vec::new();
+    let mut readmes = Vec::new();
+    for path in &paths {
+        let Ok(relative) = path.strip_prefix(root) else {
+            continue;
+        };
+        let relative = relative.to_string_lossy().replace('\\', "/");
+        push_mod_info_readme(path, &relative, &mut readmes);
+        files.push(relative);
+    }
+    (files, readmes)
+}
+
+fn push_mod_info_readme(path: &Path, relative: &str, readmes: &mut Vec<(String, String)>) {
+    if readmes.len() >= MAX_MOD_INFO_READMES {
+        // literal: allow UI tuning threshold is local to this control
+        return;
+    }
+    let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+        return;
+    };
+    if !is_readme_name(name) {
+        return;
+    }
+    if let Ok(text) = read_capped(path, MAX_CONTROL_FILE_BYTES) {
+        readmes.push((relative.to_string(), text));
+    }
+}
+
 fn validate_install_root(root: &ModInstallRootJson) -> Result<(), AppError> {
     validate_install_root_path("source", &root.source)?;
     validate_install_root_path("target", &root.target)
@@ -454,7 +475,9 @@ fn validate_install_root_path(label: &str, value: &str) -> Result<(), AppError> 
     path_from_package_root(&normalize_path(trimmed))
         .map(|_| ())
         .map_err(|err| {
-            AppError::Usage(format!("install root {label} `{trimmed}` is invalid: {err}"))
+            AppError::Usage(format!(
+                "install root {label} `{trimmed}` is invalid: {err}"
+            ))
         })
 }
 
@@ -559,7 +582,8 @@ impl SanAndreasModUi {
         let profile = self.selected_profile.clone();
         // Materialize (extract + copy) can be slow; run it off the UI thread.
         self.spawn_task(ctx, "preparing and launching", move || {
-            TaskResult::Play(materialize_and_launch_profile(&game_root, &profile))
+            let launch_result = materialize_and_launch_profile(&game_root, &profile);
+            TaskResult::Play(launch_result)
         });
     }
 
@@ -590,7 +614,7 @@ impl SanAndreasModUi {
 impl SanAndreasModUi {
     pub(super) fn cleanup_pending_run(&mut self) {
         let Some(record) = self.selected_pending_run() else {
-            self.status = "no cleanup record selected".to_string(); // literal: allow external interface text or file-format spelling
+            self.status = "no cleanup record selected".to_string();
             return;
         };
         if self.pending_run_is_running(&record) {
@@ -601,10 +625,7 @@ impl SanAndreasModUi {
         let cleanup_result = self.cleanup_journal(&journal);
         self.set_action_result(
             "cleaned temporary files",
-            cleanup_result.map(|_| {
-                // literal: allow external interface text or file-format spelling
-                "cleaned temporary files".to_string()
-            }),
+            cleanup_result.map(|_| "cleaned temporary files".to_string()),
         );
         if !pending_record_path(&self.game_root(), &journal).exists() {
             self.pending_journal = None;
@@ -752,7 +773,7 @@ impl SanAndreasModUi {
             duration_ms: Some(
                 finished_unix
                     .saturating_sub(active.started_unix)
-                    .saturating_mul(1000),
+                    .saturating_mul(MILLISECONDS_PER_SECOND),
             ),
             launch_args: active.launch_args,
             started_unix: active.started_unix,
@@ -865,14 +886,11 @@ impl SanAndreasModUi {
     pub(super) fn create_profile(&mut self) {
         let name = self.new_profile_input.trim().to_string();
         if name.is_empty() {
-            self.status = "profile name is required".to_string(); // literal: allow external interface text or file-format spelling
+            self.status = "profile name is required".to_string();
             return;
         }
         let (profile_name, note) = safe_profile_name(&name);
-        /* literal: allow external interface text or file-format spelling */
-        /* literal: allow external interface text or file-format spelling */
         self.run_action("created profile", |game_root| {
-            // literal: allow external interface text or file-format spelling
             create_profile(game_root, &profile_name)
         });
         // Only follow the picker to the new profile when it was actually created.
@@ -959,7 +977,7 @@ impl SanAndreasModUi {
         });
         // Fall back to `default` only if the delete actually happened.
         if self.last_error.is_none() {
-            self.selected_profile = "default".to_string(); // literal: allow external interface text or file-format spelling
+            self.selected_profile = "default".to_string();
         }
     }
 
@@ -981,7 +999,12 @@ impl SanAndreasModUi {
         let mod_id = mod_id.to_string();
         let source = source.to_string();
         self.run_action("updated root override", |game_root| {
-            set_profile_root_override(game_root, &profile, &mod_id, &source, enabled)
+            let selector = ProfileRootSelector {
+                profile_name: &profile,
+                mod_id: &mod_id,
+                source: &source,
+            };
+            set_profile_root_override(game_root, selector, enabled)
         });
     }
 
@@ -991,7 +1014,12 @@ impl SanAndreasModUi {
         let source = source.to_string();
         let target = target.to_string();
         self.run_action("retargeted install root", |game_root| {
-            set_profile_root_target(game_root, &profile, &mod_id, &source, &target)
+            let selector = ProfileRootSelector {
+                profile_name: &profile,
+                mod_id: &mod_id,
+                source: &source,
+            };
+            set_profile_root_target(game_root, selector, &target)
         });
     }
 }
@@ -1001,7 +1029,7 @@ impl SanAndreasModUi {
         let trimmed_package = self.import_path_input.trim();
         let package = PathBuf::from(trimmed_package);
         if package.as_os_str().is_empty() {
-            self.status = "package path is required".to_string(); // literal: allow external interface text or file-format spelling
+            self.status = "package path is required".to_string();
             return;
         }
         let profile = self.selected_profile.clone();
@@ -1015,7 +1043,8 @@ impl SanAndreasModUi {
                 excludes: BTreeSet::new(),
                 write_manifest: false,
             };
-            TaskResult::Import(import_package(&package, &options))
+            let import_result = import_package(&package, &options);
+            TaskResult::Import(import_result)
         });
     }
 }
@@ -1066,13 +1095,14 @@ impl SanAndreasModUi {
         let trimmed_package = self.import_path_input.trim();
         let package = PathBuf::from(trimmed_package);
         if package.as_os_str().is_empty() {
-            self.status = "package path is required".to_string(); // literal: allow external interface text or file-format spelling
+            self.status = "package path is required".to_string();
             return;
         }
         let game_root = self.game_root();
         // Listing/reading an archive can be slow; run it off the UI thread.
         self.spawn_task(ctx, "reviewing package", move || {
-            TaskResult::Analyze(analyze_package(&package, &game_root))
+            let analysis_result = analyze_package(&package, &game_root);
+            TaskResult::Analyze(analysis_result)
         });
     }
 
@@ -1153,9 +1183,7 @@ impl SanAndreasModUi {
                 "added install root from readme",
                 Ok(format!("{} -> {}", root.source, root.target)),
             ),
-            Ok(false) => {
-                self.status = "that install root is already in the mod config".to_string()
-            }
+            Ok(false) => self.status = "that install root is already in the mod config".to_string(),
             Err(err) => self.record_error(err),
         }
     }
@@ -1196,8 +1224,7 @@ fn readme_proposal_state(
     instruction: &ReadmeInstruction,
     thresholds: crate::settings::ReadmeThresholds,
 ) -> ReadmeProposalState {
-    if matches!(instruction.action, ReadmeAction::Copy)
-        && instruction.confidence >= thresholds.auto
+    if matches!(instruction.action, ReadmeAction::Copy) && instruction.confidence >= thresholds.auto
     {
         ReadmeProposalState::AutoSelected
     } else if instruction.confidence >= thresholds.review {
@@ -1247,7 +1274,13 @@ fn materialize_and_launch_profile(
         Err(launch_error) => {
             // The executable never started: record a launch-failed outcome so
             // this rolled-back attempt is not later counted as a run.
-            record_launch_failed_outcome(game_root, &journal, profile, &launch_args, started_unix);
+            record_launch_failed_outcome(LaunchFailedOutcomeContext {
+                game_root,
+                journal: &journal,
+                profile,
+                launch_args: &launch_args,
+                started_unix,
+            });
             let rollback_result = rollback_journal(&journal, game_root)
                 .and_then(|_| forget_pending_run(game_root, &journal));
             match rollback_result {
@@ -1261,26 +1294,32 @@ fn materialize_and_launch_profile(
     }
 }
 
-fn record_launch_failed_outcome(
-    game_root: &Path,
-    journal: &Path,
-    profile: &str,
-    launch_args: &[String],
+struct LaunchFailedOutcomeContext<'a> {
+    game_root: &'a Path,
+    journal: &'a Path,
+    profile: &'a str,
+    launch_args: &'a [String],
     started_unix: u64,
-) {
+}
+
+fn record_launch_failed_outcome(context: LaunchFailedOutcomeContext<'_>) {
     let finished_unix = unix_now();
     let outcome = RunOutcome {
         version: 1,
-        txid: txid_from_journal(journal),
-        profile: profile.to_string(),
+        txid: txid_from_journal(context.journal),
+        profile: context.profile.to_string(),
         result: RUN_RESULT_LAUNCH_FAILED.to_string(),
         exit_code: None,
-        duration_ms: Some(finished_unix.saturating_sub(started_unix).saturating_mul(1000)),
-        launch_args: launch_args.to_vec(),
-        started_unix,
+        duration_ms: Some(
+            finished_unix
+                .saturating_sub(context.started_unix)
+                .saturating_mul(MILLISECONDS_PER_SECOND),
+        ),
+        launch_args: context.launch_args.to_vec(),
+        started_unix: context.started_unix,
         finished_unix,
     };
-    if let Err(err) = write_run_outcome(&state_directory(game_root), &outcome) {
+    if let Err(err) = write_run_outcome(&state_directory(context.game_root), &outcome) {
         log_warn!("could not record launch-failed outcome: {err}");
     }
 }
@@ -1322,7 +1361,7 @@ fn load_pending_run_records(game_root: &Path) -> Result<Vec<PendingRunRecord>, A
 fn read_pending_run_record(path: &Path) -> Result<Option<PendingRunRecord>, AppError> {
     // A pending-run record is a handful of `key=value` lines; cap the read so a
     // corrupt/oversized file can't dictate our memory use.
-    let text = read_capped(path, 64 * 1024)?;
+    let text = read_capped(path, README_ACCEPT_MAX_BYTES)?;
     let mut journal = None;
     let mut pid = None;
     for line in text.lines() {
@@ -1391,7 +1430,7 @@ fn validate_pending_journal(game_root: &Path, journal: &Path) -> Result<(), AppE
             journals_root.display()
         )));
     }
-    let content = read_capped(journal, 64 * 1024 * 1024)?;
+    let content = read_capped(journal, RUN_OUTCOME_JOURNAL_MAX_BYTES)?;
     if !content.lines().any(|line| line == "mode=ephemeral-run") {
         return Err(AppError::Usage(format!(
             "pending journal is not an ephemeral run journal: {}",
@@ -1460,12 +1499,12 @@ mod tests {
         )
         .unwrap();
 
-        remember_pending_run(&game_root, &journal, Some(1234)).unwrap();
+        remember_pending_run(&game_root, &journal, Some(TEST_PID)).unwrap();
         let records = load_pending_run_records(&game_root).unwrap();
 
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].journal, journal);
-        assert_eq!(records[0].pid, Some(1234));
+        assert_eq!(records[0].pid, Some(TEST_PID));
 
         forget_pending_run(&game_root, &journal).unwrap();
         assert!(load_pending_run_records(&game_root).unwrap().is_empty());
@@ -1526,7 +1565,7 @@ mod tests {
         remember_pending_run(&game_root, &journal, Some(u32::MAX)).unwrap();
 
         let mut ui = SanAndreasModUi::new(game_root.clone(), test_preferences());
-        ui.last_pending_watch = Instant::now() - Duration::from_secs(3);
+        ui.last_pending_watch = Instant::now() - Duration::from_secs(3); // literal: allow test fixture value is the specimen under judgment
         ui.tick_pending_run_watcher();
 
         assert!(!materialized.exists());
@@ -1540,9 +1579,9 @@ mod tests {
         // Explicit thresholds keep the classification independent of any local
         // config the developer may have set.
         let thresholds = crate::settings::ReadmeThresholds::default();
-        let high = test_readme_instruction(ReadmeAction::Copy, 0.90);
-        let medium = test_readme_instruction(ReadmeAction::Copy, 0.72);
-        let low = test_readme_instruction(ReadmeAction::Copy, 0.40);
+        let high = test_readme_instruction(ReadmeAction::Copy, 0.90); // literal: allow test fixture value is the specimen under judgment
+        let medium = test_readme_instruction(ReadmeAction::Copy, 0.72); // literal: allow test fixture value is the specimen under judgment
+        let low = test_readme_instruction(ReadmeAction::Copy, 0.40); // literal: allow test fixture value is the specimen under judgment
 
         assert_eq!(
             readme_proposal_from_instruction(&high, thresholds).review_state,
@@ -1562,26 +1601,35 @@ mod tests {
     fn launch_guard_allows_only_current_session_running_pending_record() {
         let current = PendingRunRecord {
             journal: PathBuf::from("current.journal"),
-            pid: Some(42),
+            pid: Some(TEST_PENDING_PID),
             status: PendingRunStatus::Running,
             detail: String::new(),
         };
         let external = PendingRunRecord {
             journal: PathBuf::from("external.journal"),
-            pid: Some(99),
+            pid: Some(OTHER_TEST_PID),
             status: PendingRunStatus::Running,
             detail: String::new(),
         };
         let stale = PendingRunRecord {
             journal: PathBuf::from("stale.journal"),
-            pid: Some(42),
+            pid: Some(TEST_PENDING_PID),
             status: PendingRunStatus::Stale,
             detail: String::new(),
         };
 
-        assert!(pending_run_matches_current_session(&current, Some(42)));
-        assert!(!pending_run_matches_current_session(&external, Some(42)));
-        assert!(!pending_run_matches_current_session(&stale, Some(42)));
+        assert!(pending_run_matches_current_session(
+            &current,
+            Some(TEST_PENDING_PID)
+        ));
+        assert!(!pending_run_matches_current_session(
+            &external,
+            Some(TEST_PENDING_PID)
+        ));
+        assert!(!pending_run_matches_current_session(
+            &stale,
+            Some(TEST_PENDING_PID)
+        ));
         assert!(!pending_run_matches_current_session(&current, None));
     }
 
@@ -1634,7 +1682,7 @@ mod tests {
     fn test_readme_instruction(action: ReadmeAction, confidence: f32) -> ReadmeInstruction {
         ReadmeInstruction {
             source_readme: "README.txt".to_string(),
-            line_number: 8,
+            line_number: 8, // literal: allow test fixture value is the specimen under judgment
             action,
             source: Some("CLEO".to_string()),
             target: Some("CLEO".to_string()),

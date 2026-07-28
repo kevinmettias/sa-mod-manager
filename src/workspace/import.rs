@@ -1,5 +1,7 @@
 use crate::prelude::*;
 
+const MAX_IMPORT_STAGING_COLLISIONS: usize = 1000;
+
 pub(crate) fn import_package(package: &Path, options: &CommandOptions) -> Result<(), AppError> {
     ensure_gta_install(&options.game_root)?;
     ensure_state(&options.game_root)?;
@@ -7,9 +9,9 @@ pub(crate) fn import_package(package: &Path, options: &CommandOptions) -> Result
     let plan = build_install_plan(&report, options);
     let package_id = plan.package_id.clone();
     let library_root = state_directory(&options.game_root)
-        .join("library") // literal: allow external interface text or file-format spelling
+        .join("library")
         .join(&package_id);
-    let source_root = library_root.join("source"); // literal: allow external interface text or file-format spelling
+    let source_root = library_root.join("source");
     fs::create_dir_all(&library_root)?;
 
     let staged_source = stage_import_source(package, &library_root, &package_id)?;
@@ -46,7 +48,8 @@ fn stage_import_source(
 
 fn unique_import_staging_path(library_root: &Path, package_id: &str) -> PathBuf {
     let base = format!(".pending-source-{}-{}", safe_name(package_id), unix_now());
-    for suffix in 0..1000 {
+    for suffix in 0..MAX_IMPORT_STAGING_COLLISIONS {
+        // literal: allow domain threshold is documented by the surrounding code
         let name = if suffix == 0 {
             base.clone()
         } else {
@@ -148,7 +151,7 @@ fn write_import_manifest(
     plan: &InstallPlan,
 ) -> Result<(), AppError> {
     fs::create_dir_all(library_root)?;
-    let import_manifest = library_root.join("import.json"); // literal: allow external interface text or file-format spelling
+    let import_manifest = library_root.join("import.json");
     let manifest = ImportManifest {
         version: 1,
         id: plan.package_id.clone(),
@@ -168,15 +171,18 @@ fn write_import_manifest(
 pub(crate) fn target_template(kind: &TargetKind, package_id: &str) -> String {
     match kind {
         TargetKind::ModLoader => {
-            format!("modloader/{}", crate::settings::modloader_folder_name(package_id))
+            format!(
+                "modloader/{}",
+                crate::settings::modloader_folder_name(package_id)
+            )
         }
-        TargetKind::Cleo => "CLEO".to_string(), // literal: allow external interface text or file-format spelling
-        TargetKind::CleoText => "CLEO/cleo_text".to_string(), // literal: allow external interface text or file-format spelling
-        TargetKind::CleoPlugin => "CLEO/cleo_plugins".to_string(), // literal: allow external interface text or file-format spelling
-        TargetKind::CleoModules => "CLEO/cleo_modules".to_string(), // literal: allow external interface text or file-format spelling
-        TargetKind::CleoSaves => "CLEO/cleo_saves".to_string(), // literal: allow external interface text or file-format spelling
-        TargetKind::Asi | TargetKind::Bootstrap => ".".to_string(), // literal: allow external interface text or file-format spelling
-        TargetKind::DirectManaged => ".".to_string(), // literal: allow external interface text or file-format spelling
+        TargetKind::Cleo => "CLEO".to_string(),
+        TargetKind::CleoText => "CLEO/cleo_text".to_string(),
+        TargetKind::CleoPlugin => "CLEO/cleo_plugins".to_string(),
+        TargetKind::CleoModules => "CLEO/cleo_modules".to_string(),
+        TargetKind::CleoSaves => "CLEO/cleo_saves".to_string(),
+        TargetKind::Asi | TargetKind::Bootstrap => ".".to_string(),
+        TargetKind::DirectManaged => ".".to_string(),
     }
 }
 
@@ -199,9 +205,9 @@ mod tests {
         let manifest = read_import_manifest(&path).unwrap();
 
         assert_eq!(manifest.id, "minified_mod");
-        assert_eq!(manifest.imported_unix, 1234);
-        assert_eq!(manifest.entry_count, 9);
-        assert_eq!(manifest.operation_count, 7);
+        assert_eq!(manifest.imported_unix, 1234); // literal: allow test fixture value is the specimen under judgment
+        assert_eq!(manifest.entry_count, 9); // literal: allow test fixture value is the specimen under judgment
+        assert_eq!(manifest.operation_count, 7); // literal: allow test fixture value is the specimen under judgment
         remove_dir_if_exists(&root).unwrap();
     }
 

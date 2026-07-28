@@ -9,7 +9,7 @@ pub(crate) fn extract_archive_to_named_staging(
     game_root: &Path,
     package_id: &str,
 ) -> Result<PathBuf, AppError> {
-    let target = state_directory(game_root).join("staging").join(package_id); // literal: allow external interface text or file-format spelling
+    let target = state_directory(game_root).join("staging").join(package_id);
     // Reused, per-package staging path: clear any prior extraction first so stale
     // files from an earlier (possibly different) version of this package cannot
     // linger and mix into the fresh contents. Import uses unique dirs instead, so
@@ -57,8 +57,8 @@ fn extract_with_seven_zip(
     fs::create_dir_all(target)?;
     let output = Command::new(&seven_zip)
         .env("LC_ALL", "C") // prefer stable, English tool messages regardless of system locale
-        .arg("x") // literal: allow external interface text or file-format spelling
-        .arg("-y") // literal: allow external interface text or file-format spelling
+        .arg("x")
+        .arg("-y")
         .arg(format!("-o{}", target.display()))
         .arg(package)
         .output()?;
@@ -82,15 +82,17 @@ fn seven_zip_preflight(
 
     let mut child = Command::new(seven_zip)
         .env("LC_ALL", "C") // prefer stable tool output regardless of system locale
-        .arg("l") // literal: allow external interface text or file-format spelling
-        .arg("-slt") // literal: allow external interface text or file-format spelling
+        .arg("l")
+        .arg("-slt")
         .arg(package)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()?;
 
-    let mut declared_bytes: u64 = 0;
-    let mut declared_entries: usize = 0;
+    let mut declared = SevenZipListingTotals {
+        bytes: 0,
+        entries: 0,
+    };
     // 7-Zip prints an archive-level block first (whose `Path` is the archive's
     // own, often absolute, path); real entries follow the `----------` divider.
     let mut past_header = false;
@@ -104,17 +106,7 @@ fn seven_zip_preflight(
             if !past_header {
                 continue;
             }
-            if let Some(value) = strip_listing_key(&line, "Path = ") {
-                declared_entries = declared_entries.saturating_add(1);
-                if declared_entries > budget.remaining_entries() {
-                    return Err(too_many_entries_error(package));
-                }
-                ensure_contained_entry(value.trim(), package)?;
-            } else if let Some(value) = strip_listing_key(&line, "Size = ")
-                && let Ok(size) = value.trim().parse::<u64>()
-            {
-                declared_bytes = declared_bytes.saturating_add(size);
-            }
+            process_seven_zip_listing_line(&line, package, budget, &mut declared)?;
         }
     }
     let output = child.wait_with_output()?;
@@ -122,21 +114,48 @@ fn seven_zip_preflight(
         return Err(list_archive_failed_error_detail(package, &output.stderr));
     }
 
-    if declared_entries > budget.remaining_entries() {
+    if declared.entries > budget.remaining_entries() {
         return Err(too_many_entries_error(package));
     }
-    if declared_bytes > budget.remaining_bytes() {
+    if declared.bytes > budget.remaining_bytes() {
         return Err(archive_too_large_error(package));
     }
     // Charge the declared totals so nested archives draw down the same budget,
     // mirroring the native path's per-entry accounting.
-    budget.charge(declared_bytes, declared_entries);
+    budget.charge(declared.bytes, declared.entries);
     Ok(())
 }
 
 /// Reject a listed archive entry whose path would extract outside the target —
 /// absolute, drive-qualified (`C:\…`), or containing a `..` component. This is
 /// the 7-Zip-path equivalent of the native backend's `enclosed_name()` guard.
+struct SevenZipListingTotals {
+    bytes: u64,
+    entries: usize,
+}
+
+fn process_seven_zip_listing_line(
+    line: &str,
+    package: &Path,
+    budget: &ExtractBudget,
+    declared: &mut SevenZipListingTotals,
+) -> Result<(), AppError> {
+    if let Some(value) = strip_listing_key(line, "Path = ") {
+        declared.entries = declared.entries.saturating_add(1);
+        if declared.entries > budget.remaining_entries() {
+            return Err(too_many_entries_error(package));
+        }
+        ensure_contained_entry(value.trim(), package)?;
+        return Ok(());
+    }
+    if let Some(value) = strip_listing_key(line, "Size = ")
+        && let Ok(size) = value.trim().parse::<u64>()
+    {
+        declared.bytes = declared.bytes.saturating_add(size);
+    }
+    Ok(())
+}
+
 fn ensure_contained_entry(entry_path: &str, package: &Path) -> Result<(), AppError> {
     let normalized = entry_path.replace('\\', "/");
     let drive_qualified = normalized
@@ -308,7 +327,7 @@ fn seven_zip_extract_error(package: &Path, stderr: &[u8]) -> AppError {
 fn stderr_snippet(text: &str) -> String {
     match text.lines().rev().find(|line| !line.trim().is_empty()) {
         Some(line) => {
-            let capped: String = line.trim().chars().take(200).collect();
+            let capped: String = line.trim().chars().take(200).collect(); // literal: allow external format or runtime boundary value means itself here
             format!(": {capped}")
         }
         None => String::new(),
@@ -335,6 +354,10 @@ const MAX_EXTRACT_ENTRIES: usize = 500_000;
 const MAX_EXTRACT_WORKERS: usize = 8;
 const MAX_NESTED_DEPTH: usize = 3;
 const NESTED_ARCHIVE_EXTENSIONS: [&str; 3] = ["zip", "7z", "rar"];
+#[cfg(test)]
+const PARALLEL_ZIP_TEST_FILE_COUNT: usize = 40;
+#[cfg(test)]
+const PARALLEL_ZIP_TEST_DIRECTORY_MODULUS: usize = 3;
 
 /// Atomic so it can be shared (`&self`) across parallel extraction workers; the
 /// cap is enforced globally even though per-entry byte limits read approximately.
@@ -402,7 +425,7 @@ fn archive_too_large_error(package: &Path) -> AppError {
     AppError::Tool(format!(
         "{} expands past the {} GiB extraction limit; refusing to continue",
         package.display(),
-        MAX_EXTRACT_BYTES / (1024 * 1024 * 1024)
+        MAX_EXTRACT_BYTES / (1024 * 1024 * 1024) // literal: allow external format or runtime boundary value means itself here
     ))
 }
 
@@ -415,7 +438,8 @@ fn too_many_entries_error(package: &Path) -> AppError {
 }
 
 fn is_symlink_mode(mode: Option<u32>) -> bool {
-    mode.map(|value| value & 0o170000 == 0o120000).unwrap_or(false)
+    mode.map(|value| value & 0o170000 == 0o120000) // literal: allow external format or runtime boundary value means itself here
+        .unwrap_or(false)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -459,11 +483,16 @@ fn extract_zip_to_directory(
     fs::create_dir_all(target)?;
     let count = open_zip(package)?.len();
 
+    let context = ZipExtractContext {
+        package,
+        target,
+        budget,
+    };
     let workers = extraction_worker_count(count);
     if workers <= 1 {
         let mut archive = open_zip(package)?;
         for idx in 0..count {
-            extract_zip_entry(&mut archive, idx, package, target, budget)?;
+            extract_zip_entry(&mut archive, idx, context)?;
         }
         return Ok(());
     }
@@ -471,16 +500,20 @@ fn extract_zip_to_directory(
     // Each worker opens its own archive handle (`ZipArchive` isn't `Sync`) and
     // pulls entry indices from a shared atomic dispenser. deflate decompression
     // is CPU-bound, so this scales extraction across cores.
-    let next = AtomicUsize::new(0);
-    let first_error: Mutex<Option<AppError>> = Mutex::new(None);
+    let state = ZipExtractWorkerState {
+        count,
+        next: AtomicUsize::new(0),
+        first_error: Mutex::new(None),
+    };
     std::thread::scope(|scope| {
         for _ in 0..workers {
             scope.spawn(|| {
-                extract_zip_worker(package, target, budget, count, &next, &first_error);
+                extract_zip_worker(context, &state);
             });
         }
     });
-    match first_error
+    match state
+        .first_error
         .into_inner()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
     {
@@ -505,35 +538,41 @@ fn extraction_worker_count(entry_count: usize) -> usize {
     cpus.clamp(1, MAX_EXTRACT_WORKERS).min(entry_count)
 }
 
-fn extract_zip_worker(
-    package: &Path,
-    target: &Path,
-    budget: &ExtractBudget,
+#[derive(Clone, Copy)]
+struct ZipExtractContext<'a> {
+    package: &'a Path,
+    target: &'a Path,
+    budget: &'a ExtractBudget,
+}
+
+struct ZipExtractWorkerState {
     count: usize,
-    next: &AtomicUsize,
-    first_error: &Mutex<Option<AppError>>,
-) {
-    let mut archive = match open_zip(package) {
+    next: AtomicUsize,
+    first_error: Mutex<Option<AppError>>,
+}
+fn extract_zip_worker(context: ZipExtractContext<'_>, state: &ZipExtractWorkerState) {
+    let mut archive = match open_zip(context.package) {
         Ok(archive) => archive,
         Err(err) => {
-            record_first_error(first_error, err);
+            record_first_error(&state.first_error, err);
             return;
         }
     };
     loop {
-        if first_error
+        if state
+            .first_error
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .is_some()
         {
             break;
         }
-        let idx = next.fetch_add(1, Ordering::Relaxed);
-        if idx >= count {
+        let idx = state.next.fetch_add(1, Ordering::Relaxed);
+        if idx >= state.count {
             break;
         }
-        if let Err(err) = extract_zip_entry(&mut archive, idx, package, target, budget) {
-            record_first_error(first_error, err);
+        if let Err(err) = extract_zip_entry(&mut archive, idx, context) {
+            record_first_error(&state.first_error, err);
             break;
         }
     }
@@ -549,14 +588,12 @@ fn record_first_error(slot: &Mutex<Option<AppError>>, err: AppError) {
 fn extract_zip_entry(
     archive: &mut zip::ZipArchive<fs::File>,
     idx: usize,
-    package: &Path,
-    target: &Path,
-    budget: &ExtractBudget,
+    context: ZipExtractContext<'_>,
 ) -> Result<(), AppError> {
-    budget.take_entry(package)?;
+    context.budget.take_entry(context.package)?;
     let mut entry = archive
         .by_index(idx)
-        .map_err(|err| zip_entry_error(package, &err))?;
+        .map_err(|err| zip_entry_error(context.package, &err))?;
     let raw_name = entry.name().to_string();
     let Some(enclosed) = entry.enclosed_name() else {
         // A traversal/absolute entry is dropped rather than extracted; surface
@@ -570,7 +607,7 @@ fn extract_zip_entry(
         log_warn!("skipped symlink zip entry: {raw_name}");
         return Ok(());
     }
-    let dest = target.join(enclosed);
+    let dest = context.target.join(enclosed);
     if entry.is_dir() {
         fs::create_dir_all(dest)?;
         return Ok(());
@@ -582,9 +619,9 @@ fn extract_zip_entry(
     // Bound the *actual* decompressed bytes (not the header-declared size) so a
     // zip bomb cannot exhaust the disk: read at most one byte past the budget,
     // then charge what was written, which fails once the limit is crossed.
-    let limit = budget.remaining_bytes().saturating_add(1);
+    let limit = context.budget.remaining_bytes().saturating_add(1);
     let written = io::copy(&mut entry.by_ref().take(limit), &mut out)?;
-    budget.take_bytes(written, package)?;
+    context.budget.take_bytes(written, context.package)?;
     Ok(())
 }
 
@@ -699,7 +736,7 @@ mod tests {
         );
 
         let entries = list_archive_entries_native(&package).unwrap().unwrap();
-        let readme = read_package_text_file(&package, "README.txt", 1024)
+        let readme = read_package_text_file(&package, "README.txt", 1024) // literal: allow test fixture value is the specimen under judgment
             .unwrap()
             .unwrap();
         let target = root.join("extract");
@@ -718,10 +755,10 @@ mod tests {
     fn extraction_enforces_total_byte_budget() {
         let root = test_root("zip_byte_budget");
         let package = root.join("big.zip");
-        let payload = "x".repeat(64);
+        let payload = "x".repeat(64); // literal: allow test fixture value is the specimen under judgment
         write_zip_package(&package, &[("data/file.bin", payload.as_str())]);
 
-        let budget = ExtractBudget::with_limits(16, 100);
+        let budget = ExtractBudget::with_limits(16, 100); // literal: allow test fixture value is the specimen under judgment
         let err = extract_zip_to_directory(&package, &root.join("out"), &budget)
             .unwrap_err()
             .to_string();
@@ -736,7 +773,7 @@ mod tests {
         let package = root.join("many.zip");
         write_zip_package(&package, &[("a.txt", "a"), ("b.txt", "b")]);
 
-        let budget = ExtractBudget::with_limits(1 << 20, 1);
+        let budget = ExtractBudget::with_limits(1 << 20, 1); // literal: allow test fixture value is the specimen under judgment
         let err = extract_zip_to_directory(&package, &root.join("out"), &budget)
             .unwrap_err()
             .to_string();
@@ -749,9 +786,9 @@ mod tests {
     fn symlink_modes_are_detected_and_regular_modes_are_not() {
         // Extraction skips any entry whose unix mode marks it a symlink (S_IFLNK),
         // the bits real unix archivers set on link entries.
-        assert!(is_symlink_mode(Some(0o120777)));
-        assert!(!is_symlink_mode(Some(0o100644))); // regular file
-        assert!(!is_symlink_mode(Some(0o040755))); // directory
+        assert!(is_symlink_mode(Some(0o120777))); // literal: allow test fixture value is the specimen under judgment
+        assert!(!is_symlink_mode(Some(0o100644))); // regular file // literal: allow test fixture value is the specimen under judgment
+        assert!(!is_symlink_mode(Some(0o040755))); // directory // literal: allow test fixture value is the specimen under judgment
         assert!(!is_symlink_mode(None)); // no unix mode recorded
     }
 
@@ -845,9 +882,10 @@ mod tests {
         let root = test_root("zip_parallel");
         let package = root.join("many.zip");
         // Enough files across nested dirs to fan out over multiple workers.
-        let entries: Vec<(String, String)> = (0..40)
+        let entries: Vec<(String, String)> = (0..PARALLEL_ZIP_TEST_FILE_COUNT)
             .map(|idx| {
-                let name = if idx % 3 == 0 {
+                let name = if idx % PARALLEL_ZIP_TEST_DIRECTORY_MODULUS == 0 {
+                    // literal: allow test fixture value is the specimen under judgment
                     format!("data/file-{idx:02}.txt")
                 } else {
                     format!("cleo/nested/file-{idx:02}.txt")

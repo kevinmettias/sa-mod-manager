@@ -14,10 +14,10 @@ pub(crate) fn write_mod_config_json_with_source(
 ) -> Result<(), AppError> {
     ensure_state(&plan.game_root)?;
     let dir = state_directory(&plan.game_root)
-        .join("mods") // literal: allow external interface text or file-format spelling
+        .join("mods")
         .join(&plan.package_id);
     fs::create_dir_all(&dir)?;
-    let config_path = dir.join("mod.json"); // literal: allow external interface text or file-format spelling
+    let config_path = dir.join("mod.json");
     let mut file = fs::File::create(&config_path)?;
 
     write_mod_config_header(&mut file, report, plan, source_root)?;
@@ -86,7 +86,10 @@ pub(crate) fn append_mod_config_install_root(
                 config_path.display()
             ))
         })?;
-    if roots.iter().any(|existing| install_root_matches(existing, root)) {
+    if roots
+        .iter()
+        .any(|existing| install_root_matches(existing, root))
+    {
         return Ok(false);
     }
     let value = serde_json::to_value(root)
@@ -203,7 +206,7 @@ fn write_mod_config_notes(file: &mut fs::File, report: &PackageReport) -> Result
         format!(
             "readme {} {:.0}% [{}] {} ({}:{}): {} | evidence: {}",
             insight.kind,
-            insight.confidence * 100.0,
+            insight.confidence * 100.0, // literal: allow domain threshold is documented by the surrounding code
             insight.rule_id,
             insight.title,
             insight.source_readme,
@@ -312,16 +315,20 @@ mod tests {
         // First append writes and reports it added.
         assert!(append_mod_config_install_root(&config_path, &added).unwrap());
         let parsed = read_mod_config_json(&config_path).unwrap();
-        assert_eq!(parsed.install_roots.len(), 2);
+        assert_eq!(parsed.install_roots.len(), 2); // literal: allow test fixture value is the specimen under judgment
         assert_eq!(parsed.install_roots[1].source, "files/CLEO");
         // Other fields and the original root survive.
         assert_eq!(parsed.install_roots[0].source, "old");
-        assert!(fs::read_to_string(&config_path).unwrap().contains("keep me"));
+        assert!(
+            fs::read_to_string(&config_path)
+                .unwrap()
+                .contains("keep me")
+        );
 
         // Re-appending the same source/target/kind is a no-op.
         assert!(!append_mod_config_install_root(&config_path, &added).unwrap());
         let reparsed = read_mod_config_json(&config_path).unwrap();
-        assert_eq!(reparsed.install_roots.len(), 2);
+        assert_eq!(reparsed.install_roots.len(), 2); // literal: allow test fixture value is the specimen under judgment
         remove_dir_if_exists(&root).unwrap();
     }
 
