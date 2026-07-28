@@ -412,14 +412,37 @@ fn write_modloader_priorities_for_run(
     let existing_ref = existing.as_deref().unwrap_or("");
     let limit = modloader_priority_limit(existing_ref);
 
-    let folder_priorities = modloader_folder_priorities(entries, limit)?;
+    let mut folder_priorities = modloader_folder_priorities(entries, limit)?;
     if folder_priorities.is_empty() {
         return Ok(());
     }
     // Disabled modloader mods still sitting in `modloader/` (a persistent install)
     // are expressed as IgnoreMods so ModLoader skips them; never ignore a folder an
     // enabled mod is actively using.
-    let ignore_folders = disabled_modloader_folders(game_root, profile_name, &folder_priorities)?;
+    let mut ignore_folders =
+        disabled_modloader_folders(game_root, profile_name, &folder_priorities)?;
+    // Layer the profile's ModLoader priority-panel overrides on top of the
+    // load-order-derived defaults: a positive value overrides that folder's
+    // priority, while 0 disables it *in ModLoader* (via IgnoreMods) even though the
+    // mod stays manager-enabled and its files are installed.
+    let overrides = read_modloader_overrides(&state_directory(game_root), profile_name);
+    for (folder, priority) in &overrides {
+        let Some(key) = folder_priorities
+            .keys()
+            .find(|existing| existing.eq_ignore_ascii_case(folder))
+            .cloned()
+        else {
+            continue;
+        };
+        if *priority <= 0 {
+            folder_priorities.remove(&key);
+            if !ignore_folders.iter().any(|f| f.eq_ignore_ascii_case(&key)) {
+                ignore_folders.push(key);
+            }
+        } else {
+            folder_priorities.insert(key, (*priority).clamp(1, limit));
+        }
+    }
     // Per-file exclusion globs the profile declares (a hand-added `ignore_files`
     // list), mapped to ModLoader's own `[IgnoreFiles]` so one file can be hidden
     // inside a mod without editing the mod.

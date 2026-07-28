@@ -2,7 +2,7 @@ use crate::prelude::*;
 use eframe::egui;
 
 use super::san_andreas_mod_ui::{
-    ModStatusFilter, ModTelemetry, PendingRunStatus, ROW_HEIGHT, ReadmeProposal,
+    ModInfoTab, ModStatusFilter, ModTelemetry, PendingRunStatus, ROW_HEIGHT, ReadmeProposal,
     ReadmeProposalState, SanAndreasModUi, TelemetryEvent,
 };
 use super::state::{ModConfigItem, UiTab};
@@ -175,6 +175,35 @@ impl SanAndreasModUi {
         }
         ui.separator();
 
+        // User-assigned categories (from mod annotations), if any exist.
+        let user_categories: std::collections::BTreeSet<String> = self
+            .mod_meta
+            .values()
+            .flat_map(|meta| meta.categories.iter().cloned())
+            .collect();
+        if !user_categories.is_empty() {
+            ui.horizontal(|ui| {
+                ui.label("My categories"); // literal: allow external interface text or file-format spelling
+                if ui.small_button("clear").clicked() {
+                    self.mod_filter_user_category = None;
+                }
+            });
+            if ui
+                .selectable_label(self.mod_filter_user_category.is_none(), "Any")
+                .clicked()
+            {
+                self.mod_filter_user_category = None;
+            }
+            for category in &user_categories {
+                let selected =
+                    self.mod_filter_user_category.as_deref() == Some(category.as_str());
+                if ui.selectable_label(selected, category).clicked() {
+                    self.mod_filter_user_category = Some(category.clone());
+                }
+            }
+            ui.separator();
+        }
+
         let scanned = self.content_index.is_some();
         ui.add_enabled_ui(scanned, |ui| {
             ui.checkbox(&mut self.mod_filter_conflicts, "Conflicts only")
@@ -204,6 +233,94 @@ impl SanAndreasModUi {
         if !scanned && (self.mod_filter_category.is_some() || self.mod_filter_conflicts) {
             ui.weak("category/conflict filters need Analyze");
         }
+
+        ui.separator();
+        ui.strong("Diagnostics"); // literal: allow external interface text or file-format spelling
+        self.diagnostics_summary(ui);
+    }
+
+    /// ModLoader last-run log health and CLEO health, from the last content scan.
+    /// Each issue line is clickable and jumps to its viewer in the Content tab.
+    fn diagnostics_summary(&mut self, ui: &mut egui::Ui) {
+        // Snapshot counts first so the borrow on `self.*` is released before a
+        // click mutates `self.tab`/`self.content_category`.
+        let modloader = self
+            .modloader_log
+            .as_ref()
+            .map(|log| (log.is_clean(), log.errors.len(), log.warnings.len()));
+        let cleo = self.cleo_diagnostics.as_ref().map(|diag| {
+            (
+                diag.is_empty(),
+                diag.blacklisted_plugins.len() + diag.fxt_conflicts.len() + diag.script_issues.len(),
+            )
+        });
+        let warn = ui.visuals().warn_fg_color;
+
+        let modloader_jump = match modloader {
+            None => {
+                ui.weak("ModLoader: run Analyze");
+                false
+            }
+            Some((true, _, _)) => {
+                ui.weak("ModLoader: clean last run");
+                false
+            }
+            Some((false, errors, warnings)) => ui
+                .selectable_label(
+                    false,
+                    egui::RichText::new(format!("ModLoader: {errors} err · {warnings} warn"))
+                        .color(warn),
+                )
+                .on_hover_text("Open the ModLoader viewer")
+                .clicked(),
+        };
+        if modloader_jump {
+            self.content_category = Some(ContentCategory::ModLoader);
+            self.tab = UiTab::Content;
+        }
+
+        let cleo_jump = match cleo {
+            None => {
+                ui.weak("CLEO: run Analyze");
+                false
+            }
+            Some((true, _)) => {
+                ui.weak("CLEO: healthy");
+                false
+            }
+            Some((false, count)) => ui
+                .selectable_label(
+                    false,
+                    egui::RichText::new(format!(
+                        "CLEO: {count} issue{}",
+                        if count == 1 { "" } else { "s" }
+                    ))
+                    .color(warn),
+                )
+                .on_hover_text("Open the CLEO viewer")
+                .clicked(),
+        };
+        if cleo_jump {
+            self.content_category = Some(ContentCategory::Cleo);
+            self.tab = UiTab::Content;
+        }
+
+        // Overwrite (unmanaged game-folder files) — only meaningful after a scan.
+        if self.content_index.is_some() {
+            let unmanaged = self.overwrite_files.len();
+            if unmanaged == 0 {
+                ui.weak("Unmanaged: none");
+            } else if ui
+                .selectable_label(
+                    false,
+                    egui::RichText::new(format!("Unmanaged: {unmanaged} files")).color(warn),
+                )
+                .on_hover_text("Game-folder files no enabled mod owns — see the Play tab")
+                .clicked()
+            {
+                self.tab = UiTab::Run;
+            }
+        }
     }
 
     /// The centre pane — the always-visible mod list (load order) with its profile
@@ -232,6 +349,15 @@ impl SanAndreasModUi {
             });
             return;
         }
+        ui.horizontal(|ui| {
+            if ui
+                .button("＋ Separator")
+                .on_hover_text("Add a labeled group divider at the top; move it with ▲/▼")
+                .clicked()
+            {
+                self.add_separator(0);
+            }
+        });
         let visible = self.compute_visible_mods(&entries);
         self.profile_mod_order_list(ui, &entries, visible.as_ref());
         self.profile_root_overrides_panel(ui, &entries);
@@ -243,6 +369,7 @@ impl SanAndreasModUi {
         ui.add_space(2.0);
         ui.horizontal_wrapped(|ui| {
             ui.selectable_value(&mut self.tab, UiTab::Content, "Content");
+            ui.selectable_value(&mut self.tab, UiTab::ModLoader, "ModLoader");
             ui.selectable_value(&mut self.tab, UiTab::Import, "Import");
             ui.selectable_value(&mut self.tab, UiTab::Run, "Play");
             ui.selectable_value(&mut self.tab, UiTab::Mods, "Library");
@@ -260,6 +387,7 @@ impl SanAndreasModUi {
                     .id_salt("detail_scroll")
                     .auto_shrink([false, false])
                     .show(ui, |ui| match other {
+                        UiTab::ModLoader => self.modloader_panel(ui),
                         UiTab::Import => self.import_panel(ui),
                         UiTab::Run => self.run_panel(ui),
                         UiTab::Telemetry => self.telemetry_panel(ui),
@@ -282,15 +410,60 @@ impl SanAndreasModUi {
             }
             ui.strong(readiness_label(self));
             ui.separator();
-            ui.label(&self.status);
-            if let Some(journal) = &self.pending_journal {
+
+            // At-a-glance state chips, so the status bar is more than a log line.
+            let enabled = selected_profile_entries(&self.state, &self.selected_profile)
+                .iter()
+                .filter(|entry| entry.enabled)
+                .count();
+            ui.label(format!("{enabled} enabled"));
+
+            if self.game_child.is_some() {
                 ui.separator();
-                ui.label(format!("cleanup record: {}", journal.display()));
+                ui.colored_label(egui::Color32::from_rgb(120, 190, 120), "▶ running");
             }
-            if !self.pending_runs.is_empty() {
+            if let Some(index) = &self.content_index {
                 ui.separator();
-                ui.label("temporary files need cleanup before another launch");
+                let conflicts = index.conflict_count();
+                if conflicts > 0 {
+                    let warn = ui.visuals().warn_fg_color;
+                    ui.colored_label(warn, format!("{conflicts} conflicts"));
+                } else {
+                    ui.weak("0 conflicts");
+                }
             }
+            let pending = self.pending_runs.len();
+            if pending > 0 {
+                ui.separator();
+                let warn = ui.visuals().warn_fg_color;
+                ui.colored_label(warn, format!("⚠ {pending} to clean"));
+            }
+            // Post-scan reality checks: what ModLoader logged last run and CLEO
+            // health. Only shown when there is something to flag.
+            if let Some(log) = &self.modloader_log {
+                if !log.is_clean() {
+                    ui.separator();
+                    let warn = ui.visuals().warn_fg_color;
+                    ui.colored_label(warn, format!("ML {} err", log.errors.len()))
+                        .on_hover_text("ModLoader reported errors last run — see the ModLoader viewer");
+                }
+            }
+            if let Some(diag) = &self.cleo_diagnostics {
+                let issues = diag.blacklisted_plugins.len()
+                    + diag.fxt_conflicts.len()
+                    + diag.script_issues.len();
+                if issues > 0 {
+                    ui.separator();
+                    let warn = ui.visuals().warn_fg_color;
+                    ui.colored_label(warn, format!("CLEO {issues}"))
+                        .on_hover_text("CLEO health issues — see the CLEO viewer");
+                }
+            }
+
+            ui.separator();
+            // Status message last, truncated so a long line can't push the chips
+            // off-screen.
+            ui.add(egui::Label::new(&self.status).truncate());
         });
     }
 
@@ -401,6 +574,26 @@ fn summary_tile(ui: &mut egui::Ui, label: &str, value: &str) {
     });
 }
 
+/// A dense inline stat (`label value`) with a trailing separator, for packing
+/// many counts onto one wrapping line instead of a wall of boxed tiles.
+fn stat_inline(ui: &mut egui::Ui, label: &str, value: impl std::fmt::Display) {
+    ui.label(label);
+    ui.strong(value.to_string());
+    ui.separator();
+}
+
+/// Shorten `text` to at most `max` characters with an ellipsis, so long free-text
+/// cells cannot blow out a grid's width (full text stays available on hover).
+fn clip_text(text: &str, max: usize) -> String {
+    if text.chars().count() > max {
+        let mut clipped: String = text.chars().take(max.saturating_sub(1)).collect();
+        clipped.push('…');
+        clipped
+    } else {
+        text.to_string()
+    }
+}
+
 /// A compact install-status list for the left panel: one ✓/✗ line per detected
 /// component (executable, ModLoader, CLEO, ASI), hovering shows the full path.
 /// Fits the narrow column, unlike the wide `infrastructure_grid`.
@@ -457,31 +650,27 @@ impl SanAndreasModUi {
 
     fn workflow_panel(&mut self, ui: &mut egui::Ui) {
         ui.heading("Workflow");
+        // Game setup lives in the always-visible left panel, so it is not repeated
+        // here — the workflow starts from importing mods.
         egui::Grid::new("home_workflow")
             .striped(true)
             .min_col_width(120.0)
             .show(ui, |ui| {
                 workflow_row(
                     ui,
-                    "1. Game setup",
-                    setup_status(self),
-                    "Verify executable, Mod Loader, CLEO, and ASI loader paths.",
-                );
-                workflow_row(
-                    ui,
-                    "2. Import",
+                    "1. Import",
                     import_status(self),
                     "Review archive contents and readme-driven install proposals.",
                 );
                 workflow_row(
                     ui,
-                    "3. Profile",
+                    "2. Profile",
                     profile_status(self),
-                    "Choose enabled mods and load order for this profile.",
+                    "Enable mods and set load order in the centre list.",
                 );
                 workflow_row(
                     ui,
-                    "4. Play",
+                    "3. Play",
                     run_status(self),
                     "Launch temporarily, then clean the game folder back to vanilla.",
                 );
@@ -550,10 +739,10 @@ fn recommended_action(ui_state: &SanAndreasModUi) -> RecommendedAction {
     }
     if enabled_profile_count(ui_state) == 0 {
         return RecommendedAction {
-            detail: "The selected profile has no enabled mods yet.",
-            primary_label: "Build profile",
-            primary_tab: Some(UiTab::Profiles),
-            secondary: Some(("Open library", UiTab::Mods)),
+            detail: "The selected profile has no enabled mods yet — tick them in the centre list.",
+            primary_label: "Open library",
+            primary_tab: Some(UiTab::Mods),
+            secondary: None,
         };
     }
     RecommendedAction {
@@ -585,14 +774,6 @@ impl WorkflowStatus {
             WorkflowStatus::Review => "needs review",
             WorkflowStatus::Waiting => "waiting",
         }
-    }
-}
-
-fn setup_status(ui_state: &SanAndreasModUi) -> WorkflowStatus {
-    if game_executable_present(ui_state) {
-        WorkflowStatus::Ready
-    } else {
-        WorkflowStatus::Review
     }
 }
 
@@ -749,7 +930,8 @@ impl SanAndreasModUi {
         let filtering = !text.is_empty()
             || self.mod_filter_status != ModStatusFilter::All
             || self.mod_filter_category.is_some()
-            || self.mod_filter_conflicts;
+            || self.mod_filter_conflicts
+            || self.mod_filter_user_category.is_some();
         if !filtering {
             return None;
         }
@@ -769,7 +951,14 @@ impl SanAndreasModUi {
                     .is_none_or(|category| mod_flags.is_some_and(|f| f.categories.contains(&category)));
                 let conflict_ok = !self.mod_filter_conflicts
                     || mod_flags.is_some_and(|f| f.overwrites_others || f.overwritten);
-                text_ok && status_ok && category_ok && conflict_ok
+                let user_category_ok = self.mod_filter_user_category.as_ref().is_none_or(|wanted| {
+                    self.mod_meta.get(&entry.id).is_some_and(|meta| {
+                        meta.categories
+                            .iter()
+                            .any(|category| category.eq_ignore_ascii_case(wanted))
+                    })
+                });
+                text_ok && status_ok && category_ok && conflict_ok && user_category_ok
             })
             .map(|entry| entry.id.clone())
             .collect();
@@ -789,6 +978,42 @@ impl SanAndreasModUi {
         let flags_map = self.content_index.as_ref().map(per_mod_flags);
         let overwrite_color = egui::Color32::from_rgb(120, 190, 120);
         let overwritten_color = ui.visuals().warn_fg_color;
+        // Subsystem badges (ModLoader / CLEO / ASI) derived from each mod's
+        // install-root kinds — always shown, no content scan required.
+        let subsystems: std::collections::BTreeMap<String, (bool, bool, bool)> = self
+            .state
+            .mods
+            .iter()
+            .map(|item| {
+                let mut modloader = false;
+                let mut cleo = false;
+                let mut asi = false;
+                for root in &item.config.install_roots {
+                    match root.kind.to_ascii_lowercase().as_str() {
+                        "modloader" => modloader = true,
+                        "cleo" | "cleo_text" | "cleo_plugin" => cleo = true,
+                        "asi" | "plugin" => asi = true,
+                        _ => {}
+                    }
+                }
+                (item.config.id.clone(), (modloader, cleo, asi))
+            })
+            .collect();
+        // Per-mod color label + note presence, snapshotted so rows read them
+        // without holding a borrow on `self.mod_meta`.
+        let mod_marks: std::collections::BTreeMap<String, (Option<egui::Color32>, bool)> = self
+            .mod_meta
+            .iter()
+            .map(|(id, meta)| {
+                (
+                    id.clone(),
+                    (
+                        meta.color.as_deref().and_then(meta_color),
+                        !meta.note.trim().is_empty(),
+                    ),
+                )
+            })
+            .collect();
         // A filter hides rows, which would make drag targets and priority indices
         // point at the wrong slots, so ordering is disabled while one is active.
         let reorderable = visible.is_none();
@@ -799,6 +1024,26 @@ impl SanAndreasModUi {
         let mut reorder: Option<Vec<String>> = None;
         // (mod id, conflicts_only) for a "Show in Content" cross-link click.
         let mut focus: Option<(String, bool)> = None;
+        // Mod id to open the per-mod info window for.
+        let mut details: Option<String> = None;
+
+        // Separators (labeled dividers) render only in the unfiltered, reorderable
+        // view — they are organizational and reordering is off while filtering.
+        let entries_len = entries.len();
+        let separators = if reorderable {
+            self.separators.clone()
+        } else {
+            Vec::new()
+        };
+        let collapsed = self.collapsed_separators.clone();
+        let mut sep_edit = self.separator_edit.clone();
+        let hidden = collapsed_hidden_indices(&separators, &collapsed, entries_len);
+        // Deferred separator effects.
+        let mut sep_remove: Option<String> = None;
+        let mut sep_move: Option<(String, usize)> = None;
+        let mut sep_collapse: Option<String> = None;
+        let mut sep_rename: Option<(String, String)> = None;
+        let mut sep_start_edit: Option<String> = None;
 
         // Fixed column widths so every row lines up as a real table; the name
         // column flexes to fill whatever the centre pane leaves.
@@ -806,12 +1051,20 @@ impl SanAndreasModUi {
         const ON_W: f32 = 26.0;
         const PRIO_W: f32 = 52.0;
         const MOVE_W: f32 = 54.0;
+        const SUBSYS_W: f32 = 78.0;
         const FLAGS_W: f32 = 170.0;
         const MAX_CHIPS: usize = 4;
         // Reserve for the trailing Remove/⋯ actions, inter-cell spacing, and the
         // scrollbar; underfill (a small gap) rather than overflow the row.
-        let name_w = (ui.available_width() - GRIP_W - ON_W - PRIO_W - MOVE_W - FLAGS_W - 160.0)
-            .max(160.0);
+        let name_w = (ui.available_width()
+            - GRIP_W
+            - ON_W
+            - PRIO_W
+            - MOVE_W
+            - SUBSYS_W
+            - FLAGS_W
+            - 160.0)
+            .max(140.0);
 
         ui.horizontal(|ui| {
             table_cell(ui, GRIP_W, |_ui| {});
@@ -824,6 +1077,9 @@ impl SanAndreasModUi {
             table_cell(ui, MOVE_W, |_ui| {});
             table_cell(ui, name_w, |ui| {
                 ui.strong("Mod");
+            });
+            table_cell(ui, SUBSYS_W, |ui| {
+                ui.strong("Subsys").on_hover_text("ModLoader / CLEO / ASI");
             });
             table_cell(ui, FLAGS_W, |ui| {
                 ui.strong("Flags");
@@ -842,12 +1098,43 @@ impl SanAndreasModUi {
                 let mut drop_to: Option<usize> = None;
 
                 for (idx, entry) in entries.iter().enumerate() {
+                    // Any separators anchored to this display slot render above it.
+                    for sep in separators.iter().filter(|sep| sep.position == idx) {
+                        let editing = sep_edit.as_ref().is_some_and(|(id, _)| *id == sep.id);
+                        let mut buf =
+                            sep_edit.as_ref().map(|(_, name)| name.clone()).unwrap_or_default();
+                        let action =
+                            separator_header(ui, sep, collapsed.contains(&sep.id), editing, &mut buf);
+                        if editing {
+                            if let Some((_, name)) = sep_edit.as_mut() {
+                                *name = buf.clone();
+                            }
+                        }
+                        match action {
+                            Some(SepAction::ToggleCollapse) => sep_collapse = Some(sep.id.clone()),
+                            Some(SepAction::StartEdit) => sep_start_edit = Some(sep.id.clone()),
+                            Some(SepAction::Commit) => sep_rename = Some((sep.id.clone(), buf)),
+                            Some(SepAction::Remove) => sep_remove = Some(sep.id.clone()),
+                            Some(SepAction::MoveUp) => {
+                                sep_move = Some((sep.id.clone(), sep.position.saturating_sub(1)));
+                            }
+                            Some(SepAction::MoveDown) => {
+                                sep_move =
+                                    Some((sep.id.clone(), (sep.position + 1).min(entries_len)));
+                            }
+                            None => {}
+                        }
+                    }
                     // Skip rows hidden by the active filter, but keep `idx` tied to
                     // the full list so priority ranks stay truthful.
                     if let Some(set) = visible {
                         if !set.contains(&entry.id) {
                             continue;
                         }
+                    }
+                    // Hidden inside a collapsed separator section.
+                    if hidden.contains(&idx) {
+                        continue;
                     }
                     // A move requested by this row via a button or the index field.
                     let mut move_to: Option<usize> = None;
@@ -931,25 +1218,58 @@ impl SanAndreasModUi {
                             // — can be grabbed to reorder. Truncated to the column
                             // and greyed when disabled.
                             table_cell(ui, name_w, |ui| {
+                                let marks =
+                                    mod_marks.get(&entry.id).copied().unwrap_or((None, false));
+                                if let Some(color) = marks.0 {
+                                    ui.colored_label(color, "●").on_hover_text("Color label");
+                                }
                                 let text = if entry.enabled {
                                     egui::RichText::new(&entry.id)
                                 } else {
                                     egui::RichText::new(&entry.id).weak()
                                 };
-                                let label = egui::Label::new(text).truncate();
-                                let name = if reorderable {
-                                    ui.dnd_drag_source(
-                                        egui::Id::new(("mod_name", &entry.id)),
-                                        idx,
-                                        |ui| {
-                                            ui.add(label);
-                                        },
-                                    )
-                                    .response
+                                // Double-click opens the Mod Info dialog. When the
+                                // list is reorderable the name is also a drag
+                                // source (click_and_drag), so dragging it still
+                                // reorders — we feed the drag payload manually.
+                                let sense = if reorderable {
+                                    egui::Sense::click_and_drag()
                                 } else {
-                                    ui.add(label)
+                                    egui::Sense::click()
                                 };
+                                let name =
+                                    ui.add(egui::Label::new(text).truncate().sense(sense));
+                                if reorderable && name.dragged() {
+                                    egui::DragAndDrop::set_payload(ui.ctx(), idx);
+                                }
+                                if name.double_clicked() {
+                                    details = Some(entry.id.clone());
+                                }
                                 name.on_hover_text(entry.config.display().to_string());
+                                if marks.1 {
+                                    ui.small("📝").on_hover_text("Has a note (see Details)");
+                                }
+                            });
+
+                            // Subsystem badges (always on): which loader systems
+                            // this mod installs into.
+                            table_cell(ui, SUBSYS_W, |ui| {
+                                if let Some((modloader, cleo, asi)) =
+                                    subsystems.get(&entry.id).copied()
+                                {
+                                    if modloader {
+                                        ui.colored_label(egui::Color32::from_rgb(90, 150, 220), "M")
+                                            .on_hover_text("ModLoader mod");
+                                    }
+                                    if cleo {
+                                        ui.colored_label(egui::Color32::from_rgb(120, 190, 120), "C")
+                                            .on_hover_text("CLEO script");
+                                    }
+                                    if asi {
+                                        ui.colored_label(egui::Color32::from_rgb(220, 140, 60), "A")
+                                            .on_hover_text("ASI plugin");
+                                    }
+                                }
                             });
 
                             // Content flags (MO2-style): conflict arrows first,
@@ -988,6 +1308,10 @@ impl SanAndreasModUi {
                                 remove = Some(entry.id.clone());
                             }
                             ui.menu_button("⋯", |ui| {
+                                if ui.button("Details…").clicked() {
+                                    details = Some(entry.id.clone());
+                                    ui.close_menu();
+                                }
                                 if ui.button("Show files in Content").clicked() {
                                     focus = Some((entry.id.clone(), false));
                                     ui.close_menu();
@@ -998,7 +1322,7 @@ impl SanAndreasModUi {
                                 }
                             })
                             .response
-                            .on_hover_text("Show this mod's files or conflicts in the Content tab");
+                            .on_hover_text("Open this mod's details, files, or conflicts");
                         })
                         .response;
 
@@ -1041,6 +1365,32 @@ impl SanAndreasModUi {
                     }
                 }
 
+                // Separators positioned at or past the end sit below every mod.
+                for sep in separators.iter().filter(|sep| sep.position >= entries_len) {
+                    let editing = sep_edit.as_ref().is_some_and(|(id, _)| *id == sep.id);
+                    let mut buf = sep_edit.as_ref().map(|(_, name)| name.clone()).unwrap_or_default();
+                    let action =
+                        separator_header(ui, sep, collapsed.contains(&sep.id), editing, &mut buf);
+                    if editing {
+                        if let Some((_, name)) = sep_edit.as_mut() {
+                            *name = buf.clone();
+                        }
+                    }
+                    match action {
+                        Some(SepAction::ToggleCollapse) => sep_collapse = Some(sep.id.clone()),
+                        Some(SepAction::StartEdit) => sep_start_edit = Some(sep.id.clone()),
+                        Some(SepAction::Commit) => sep_rename = Some((sep.id.clone(), buf)),
+                        Some(SepAction::Remove) => sep_remove = Some(sep.id.clone()),
+                        Some(SepAction::MoveUp) => {
+                            sep_move = Some((sep.id.clone(), sep.position.saturating_sub(1)));
+                        }
+                        Some(SepAction::MoveDown) => {
+                            sep_move = Some((sep.id.clone(), (sep.position + 1).min(entries_len)));
+                        }
+                        None => {}
+                    }
+                }
+
                 if let (Some(from), Some(to)) = (drag_from, drop_to) {
                     // A drop onto the source's own slot (or its lower edge) is a no-op.
                     if to != from && to != from + 1 {
@@ -1066,6 +1416,34 @@ impl SanAndreasModUi {
         }
         if let Some((mod_id, conflicts_only)) = focus {
             self.focus_mod_in_content(&mod_id, conflicts_only);
+        }
+        if let Some(mod_id) = details {
+            self.open_mod_info(&mod_id);
+        }
+
+        // Persist the in-progress rename buffer across frames, then apply any
+        // separator action (start-edit overrides the buffer; commit/others write).
+        self.separator_edit = sep_edit;
+        if let Some(id) = sep_start_edit {
+            let name = self
+                .separators
+                .iter()
+                .find(|sep| sep.id == id)
+                .map(|sep| sep.name.clone())
+                .unwrap_or_default();
+            self.separator_edit = Some((id, name));
+        }
+        if let Some(id) = sep_collapse {
+            self.toggle_separator_collapsed(&id);
+        }
+        if let Some((id, name)) = sep_rename {
+            self.rename_separator(&id, name);
+        }
+        if let Some((id, position)) = sep_move {
+            self.move_separator(&id, position);
+        }
+        if let Some(id) = sep_remove {
+            self.remove_separator(&id);
         }
     }
 
@@ -1276,6 +1654,108 @@ impl SanAndreasModUi {
 
 fn mod_root_edit_key(path: &Path, root_index: usize) -> String {
     format!("{}#{root_index}", path.display())
+}
+
+/// The preset color-label palette for mod annotations (name → swatch), mirroring
+/// MO2's color labels. Names are what get persisted.
+const MOD_COLORS: [(&str, egui::Color32); 7] = [
+    ("red", egui::Color32::from_rgb(210, 80, 80)),
+    ("orange", egui::Color32::from_rgb(220, 140, 60)),
+    ("yellow", egui::Color32::from_rgb(210, 190, 80)),
+    ("green", egui::Color32::from_rgb(120, 190, 120)),
+    ("blue", egui::Color32::from_rgb(90, 150, 220)),
+    ("purple", egui::Color32::from_rgb(170, 120, 210)),
+    ("gray", egui::Color32::from_rgb(150, 150, 150)),
+];
+
+/// Resolve a stored color-label name to its swatch color.
+fn meta_color(name: &str) -> Option<egui::Color32> {
+    MOD_COLORS
+        .iter()
+        .find(|(candidate, _)| *candidate == name)
+        .map(|(_, color)| *color)
+}
+
+/// An action a separator header row can request.
+#[derive(Clone, Copy)]
+enum SepAction {
+    ToggleCollapse,
+    StartEdit,
+    Commit,
+    Remove,
+    MoveUp,
+    MoveDown,
+}
+
+/// Render one separator (group divider) row: collapse toggle, name or rename
+/// field, and move/remove controls. Returns the action the user requested.
+fn separator_header(
+    ui: &mut egui::Ui,
+    separator: &Separator,
+    collapsed: bool,
+    editing: bool,
+    buf: &mut String,
+) -> Option<SepAction> {
+    let mut action = None;
+    ui.horizontal(|ui| {
+        if ui
+            .small_button(if collapsed { "▶" } else { "▼" })
+            .on_hover_text("Collapse or expand this section")
+            .clicked()
+        {
+            action = Some(SepAction::ToggleCollapse);
+        }
+        if editing {
+            let response = ui.add(egui::TextEdit::singleline(buf).desired_width(220.0));
+            let committed_with_enter =
+                response.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
+            if ui.small_button("✔").on_hover_text("Save name").clicked() || committed_with_enter {
+                action = Some(SepAction::Commit);
+            }
+        } else {
+            ui.strong(format!("═══  {}  ═══", separator.name));
+            if ui.small_button("✎").on_hover_text("Rename").clicked() {
+                action = Some(SepAction::StartEdit);
+            }
+        }
+        if ui.small_button("▲").on_hover_text("Move divider up").clicked() {
+            action = Some(SepAction::MoveUp);
+        }
+        if ui.small_button("▼").on_hover_text("Move divider down").clicked() {
+            action = Some(SepAction::MoveDown);
+        }
+        if ui.small_button("✕").on_hover_text("Remove divider").clicked() {
+            action = Some(SepAction::Remove);
+        }
+    });
+    action
+}
+
+/// The set of mod display indices hidden inside a collapsed separator section
+/// (from the separator's slot up to the next separator, or the end).
+fn collapsed_hidden_indices(
+    separators: &[Separator],
+    collapsed: &std::collections::BTreeSet<String>,
+    count: usize,
+) -> std::collections::BTreeSet<usize> {
+    let mut positions: Vec<usize> = separators.iter().map(|sep| sep.position).collect();
+    positions.sort_unstable();
+    let mut hidden = std::collections::BTreeSet::new();
+    for separator in separators {
+        if collapsed.contains(&separator.id) {
+            let start = separator.position.min(count);
+            let end = positions
+                .iter()
+                .copied()
+                .find(|&position| position > separator.position)
+                .unwrap_or(count)
+                .min(count);
+            for index in start..end {
+                hidden.insert(index);
+            }
+        }
+    }
+    hidden
 }
 
 /// A fixed-width, vertically-centred table cell, so the mod list's columns line
@@ -1965,7 +2445,288 @@ fn base_name(target: &str) -> &str {
     target.rsplit('/').next().unwrap_or(target)
 }
 
+/// The ModLoader mod folder a materialized target belongs to: the segment right
+/// after a `modloader` segment, when there is a path component beneath it (so a
+/// loose file at `modloader/` isn't mistaken for a mod folder). Reserved
+/// dot-folders (`.data`, …) yield `None`.
+fn modloader_folder_of(target: &str) -> Option<String> {
+    let mut segments = target.split('/');
+    while let Some(segment) = segments.next() {
+        if segment.eq_ignore_ascii_case("modloader") {
+            let folder = segments.next()?;
+            if folder.starts_with('.') {
+                return None;
+            }
+            segments.next()?; // require a component beneath the folder
+            return Some(folder.to_string());
+        }
+    }
+    None
+}
+
 impl SanAndreasModUi {
+    /// The per-mod info window (MO2's Mod Info dialog): Files / Conflicts / Install
+    /// roots / Readme for one mod. Shown as a floating, closable window.
+    pub(super) fn mod_info_window(&mut self, ctx: &egui::Context) {
+        let Some(info) = &self.mod_info else {
+            return;
+        };
+        let id = info.id.clone();
+        let mut tab = info.tab;
+        let mut open = true;
+        egui::Window::new(format!("Mod: {id}"))
+            .id(egui::Id::new("mod_info_window"))
+            .open(&mut open)
+            .resizable(true)
+            .default_size([560.0, 440.0])
+            .show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    ui.selectable_value(&mut tab, ModInfoTab::Files, "Files");
+                    ui.selectable_value(&mut tab, ModInfoTab::Conflicts, "Conflicts");
+                    ui.selectable_value(&mut tab, ModInfoTab::Roots, "Install roots");
+                    ui.selectable_value(&mut tab, ModInfoTab::Readme, "Readme");
+                    ui.selectable_value(&mut tab, ModInfoTab::Notes, "Notes");
+                });
+                ui.separator();
+                match tab {
+                    ModInfoTab::Files => self.mod_info_files_tab(ui),
+                    ModInfoTab::Conflicts => self.mod_info_conflicts_tab(ui, &id),
+                    ModInfoTab::Roots => self.mod_info_roots_tab(ui, &id),
+                    ModInfoTab::Readme => self.mod_info_readme_tab(ui),
+                    ModInfoTab::Notes => self.mod_info_notes_tab(ui, &id),
+                }
+            });
+        if let Some(info) = self.mod_info.as_mut() {
+            info.tab = tab;
+        }
+        if !open {
+            self.mod_info = None;
+        }
+    }
+
+    fn mod_info_files_tab(&mut self, ui: &mut egui::Ui) {
+        let Some(info) = &self.mod_info else {
+            return;
+        };
+        match &info.source_root {
+            Some(root) => {
+                ui.weak(format!("Library: {}", root.display()));
+            }
+            None => {
+                ui.weak("Not extracted to the library — file list unavailable.");
+            }
+        }
+        ui.label(format!("{} files", info.files.len()));
+        egui::ScrollArea::vertical()
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                for file in info.files.iter().take(5000) {
+                    ui.monospace(file);
+                }
+                if info.files.len() > 5000 {
+                    ui.weak(format!("{} more not shown", info.files.len() - 5000));
+                }
+            });
+    }
+
+    fn mod_info_conflicts_tab(&mut self, ui: &mut egui::Ui, id: &str) {
+        let Some(index) = &self.content_index else {
+            ui.label("Run Analyze content (left panel) to compute conflicts.");
+            return;
+        };
+        let conflicts: Vec<&ContentEntry> = index
+            .entries
+            .iter()
+            .filter(|entry| entry.is_conflict() && entry.providers.iter().any(|p| p == id))
+            .collect();
+        if conflicts.is_empty() {
+            ui.label("None of this mod's files conflict with another enabled mod.");
+            return;
+        }
+        ui.label(format!("{} conflicting files", conflicts.len()));
+        let win_color = egui::Color32::from_rgb(120, 190, 120);
+        let lose_color = ui.visuals().warn_fg_color;
+        egui::ScrollArea::vertical()
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                egui::Grid::new("mod_info_conflicts")
+                    .striped(true)
+                    .num_columns(3)
+                    .min_col_width(60.0)
+                    .show(ui, |ui| {
+                        ui.strong("File");
+                        ui.strong("This mod");
+                        ui.strong("Winner");
+                        ui.end_row();
+                        for entry in &conflicts {
+                            ui.monospace(&entry.target);
+                            if entry.winner() == id {
+                                ui.colored_label(win_color, "wins");
+                            } else {
+                                ui.colored_label(lose_color, "overwritten");
+                            }
+                            ui.label(entry.winner());
+                            ui.end_row();
+                        }
+                    });
+            });
+    }
+
+    fn mod_info_roots_tab(&mut self, ui: &mut egui::Ui, id: &str) {
+        let Some(item) = self.state.mods.iter().find(|item| item.config.id == id) else {
+            ui.label("Mod not found in the library.");
+            return;
+        };
+        ui.monospace(format!("package: {}", item.config.package.display()));
+        if let Some(source_root) = &item.config.source_root {
+            ui.monospace(format!("library: {}", source_root.display()));
+        }
+        ui.separator();
+        if item.config.install_roots.is_empty() {
+            ui.label("No install roots detected for this mod.");
+            return;
+        }
+        egui::Grid::new("mod_info_roots")
+            .striped(true)
+            .num_columns(4)
+            .min_col_width(60.0)
+            .show(ui, |ui| {
+                ui.strong("Source");
+                ui.strong("Target");
+                ui.strong("Kind");
+                ui.strong("On");
+                ui.end_row();
+                for root in &item.config.install_roots {
+                    ui.monospace(&root.source);
+                    ui.monospace(&root.target);
+                    ui.label(&root.kind);
+                    ui.label(if root.enabled { "yes" } else { "no" });
+                    ui.end_row();
+                }
+            });
+    }
+
+    fn mod_info_readme_tab(&mut self, ui: &mut egui::Ui) {
+        let Some(info) = &self.mod_info else {
+            return;
+        };
+        if info.readmes.is_empty() {
+            ui.label("No readme files found in this mod.");
+            return;
+        }
+        egui::ScrollArea::vertical()
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                for (name, text) in &info.readmes {
+                    egui::CollapsingHeader::new(name)
+                        .id_salt(name)
+                        .default_open(info.readmes.len() == 1)
+                        .show(ui, |ui| {
+                            ui.monospace(text);
+                        });
+                }
+            });
+    }
+
+    /// Editor for a mod's user annotations: color label, categories, and note.
+    /// All mutations are deferred until after the widgets render, so `self.mod_meta`
+    /// / `self.mod_info` are never borrowed while a setter (which takes `&mut self`)
+    /// runs.
+    fn mod_info_notes_tab(&mut self, ui: &mut egui::Ui, id: &str) {
+        let meta = self.mod_meta.get(id).cloned().unwrap_or_default();
+        let mut set_color: Option<Option<String>> = None;
+        let mut toggle_category: Option<String> = None;
+        let mut add_category = false;
+        let mut save_note = false;
+
+        ui.horizontal(|ui| {
+            ui.label("Color");
+            for (name, color) in MOD_COLORS {
+                let selected = meta.color.as_deref() == Some(name);
+                let label = if selected { "●" } else { "  " };
+                if ui
+                    .add(egui::Button::new(label).fill(color).min_size(egui::vec2(22.0, 18.0)))
+                    .on_hover_text(name)
+                    .clicked()
+                {
+                    set_color = Some(Some(name.to_string()));
+                }
+            }
+            if ui.button("none").clicked() {
+                set_color = Some(None);
+            }
+        });
+
+        ui.horizontal_wrapped(|ui| {
+            ui.label("Categories");
+            for category in &meta.categories {
+                if ui
+                    .button(format!("{category} ✕"))
+                    .on_hover_text("Remove this category")
+                    .clicked()
+                {
+                    toggle_category = Some(category.clone());
+                }
+            }
+            if meta.categories.is_empty() {
+                ui.weak("none yet");
+            }
+        });
+        ui.horizontal(|ui| {
+            if let Some(info) = self.mod_info.as_mut() {
+                ui.add(
+                    egui::TextEdit::singleline(&mut info.new_category)
+                        .hint_text("new category")
+                        .desired_width(160.0),
+                );
+            }
+            if ui.button("Add").clicked() {
+                add_category = true;
+            }
+        });
+
+        ui.separator();
+        ui.label("Note");
+        if let Some(info) = self.mod_info.as_mut() {
+            ui.add(
+                egui::TextEdit::multiline(&mut info.note_edit)
+                    .desired_rows(4)
+                    .desired_width(f32::INFINITY),
+            );
+        }
+        if ui.button("Save note").clicked() {
+            save_note = true;
+        }
+
+        if let Some(color) = set_color {
+            self.set_mod_color(id, color);
+        }
+        if let Some(category) = toggle_category {
+            self.toggle_mod_category(id, &category);
+        }
+        if add_category {
+            let category = self
+                .mod_info
+                .as_ref()
+                .map(|info| info.new_category.trim().to_string())
+                .unwrap_or_default();
+            if !category.is_empty() {
+                self.toggle_mod_category(id, &category);
+                if let Some(info) = self.mod_info.as_mut() {
+                    info.new_category.clear();
+                }
+            }
+        }
+        if save_note {
+            let note = self
+                .mod_info
+                .as_ref()
+                .map(|info| info.note_edit.clone())
+                .unwrap_or_default();
+            self.set_mod_note(id, note);
+        }
+    }
+
     pub(super) fn import_panel(&mut self, ui: &mut egui::Ui) {
         ui.heading("Import Mod"); // literal: allow external interface text or file-format spelling
         ui.label("Review first, then import. Medium-confidence readme matches stay visible for human judgment.");
@@ -2049,9 +2810,9 @@ impl SanAndreasModUi {
             .filter(|proposal| proposal.review_state == ReadmeProposalState::WarningOnly)
             .count();
         ui.horizontal_wrapped(|ui| {
-            summary_tile(ui, "Auto-selected", &auto_selected.to_string());
-            summary_tile(ui, "Needs review", &needs_review.to_string());
-            summary_tile(ui, "Warnings", &warnings.to_string());
+            stat_inline(ui, "Auto-selected", auto_selected);
+            stat_inline(ui, "Needs review", needs_review);
+            stat_inline(ui, "Warnings", warnings);
         });
         // A Copy proposal can only be written into a config that already exists,
         // i.e. after the package has been imported. Surface that state once so
@@ -2084,29 +2845,30 @@ impl SanAndreasModUi {
 /// Returns `true` when the user clicked "Add to config" for this proposal.
 fn readme_proposal_panel(ui: &mut egui::Ui, proposal: &ReadmeProposal, imported: bool) -> bool {
     let mut accepted = false;
+    let evidence = format!(
+        "{} line {}: {}",
+        proposal.source_readme, proposal.line_number, proposal.evidence
+    );
     ui.group(|ui| {
+        // Header: title, confidence, state — and the action button, so a proposal
+        // is one compact row plus its evidence, not a five-line stack.
         ui.horizontal(|ui| {
             ui.strong(readme_proposal_title(proposal));
-            ui.separator();
-            ui.label(format!("{:.0}% confidence", proposal.confidence * 100.0));
-            ui.separator();
-            ui.label(proposal.review_state.to_string());
+            ui.weak(format!("{:.0}%", proposal.confidence * 100.0));
+            ui.weak(proposal.review_state.to_string());
+            if readme_proposal_is_actionable(proposal) {
+                accepted = ui
+                    .add_enabled(imported, egui::Button::new("Add to config"))
+                    .on_hover_text("Append this copy as an install root on the imported mod's config")
+                    .on_disabled_hover_text("Import this package to the library first")
+                    .clicked();
+            }
         });
-        ui.label(format!("Proposed install: {}", proposal.proposed_install));
-        ui.label(format!(
-            "Evidence: {} line {}: {}",
-            proposal.source_readme, proposal.line_number, proposal.evidence
-        ));
-        ui.label(format!("Normalized match: {}", proposal.normalized_text));
+        ui.label(format!("→ {}", proposal.proposed_install));
+        ui.small(clip_text(&evidence, 100))
+            .on_hover_text(format!("{evidence}\nNormalized: {}", proposal.normalized_text));
         if !proposal.reasons.is_empty() {
-            ui.label(format!("Why: {}", proposal.reasons.join("; ")));
-        }
-        if readme_proposal_is_actionable(proposal) {
-            accepted = ui
-                .add_enabled(imported, egui::Button::new("Add to config"))
-                .on_hover_text("Append this copy as an install root on the imported mod's config")
-                .on_disabled_hover_text("Import this package to the library first")
-                .clicked();
+            ui.small(format!("Why: {}", proposal.reasons.join("; ")));
         }
     });
     accepted
@@ -2189,6 +2951,148 @@ impl SanAndreasModUi {
             });
     }
 
+    /// View, compare and edit every ModLoader mod's priority for this profile,
+    /// and enable/disable them within ModLoader (priority 0). Edits persist per
+    /// profile and are written to modloader.ini via Apply. Requires a content
+    /// scan to know which mods are ModLoader mods.
+    pub(super) fn modloader_panel(&mut self, ui: &mut egui::Ui) {
+        ui.heading("ModLoader Priority");
+        ui.label(
+            "Order and compare ModLoader mods for this profile. Higher priority wins file \
+             conflicts; priority 0 disables the mod in ModLoader — its files stay installed and it \
+             still shows in the in-game Mod Configuration menu. These override the load-order \
+             defaults and are applied automatically when you Play through the manager. Use Apply to \
+             also write them into your active ModLoader profile for playing outside the manager.",
+        );
+        ui.separator();
+
+        let Some(index) = &self.content_index else {
+            ui.weak("Run Analyze content (left panel) to list ModLoader mods.");
+            return;
+        };
+        let mut folders: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+        for entry in &index.entries {
+            if entry.category == ContentCategory::ModLoader {
+                if let Some(folder) = modloader_folder_of(&entry.target) {
+                    folders.insert(folder);
+                }
+            }
+        }
+        if folders.is_empty() {
+            ui.label("No ModLoader mods found in this profile's content.");
+            return;
+        }
+
+        let priorities = self.modloader_priorities.as_ref();
+        let mut rows: Vec<(String, i32)> = folders
+            .iter()
+            .map(|folder| {
+                let priority = self
+                    .modloader_overrides
+                    .get(folder)
+                    .copied()
+                    .or_else(|| priorities.map(|table| table.for_folder(folder)))
+                    .unwrap_or(50);
+                (folder.clone(), priority)
+            })
+            .collect();
+        // Highest priority (runtime winner) first, then by name.
+        rows.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+
+        let mut set_priority: Option<(String, i32)> = None;
+        let mut apply = false;
+        ui.horizontal(|ui| {
+            if ui
+                .button("Apply to modloader.ini")
+                .on_hover_text("Write these priorities into modloader.ini's active profile")
+                .clicked()
+            {
+                apply = true;
+            }
+            let overrides = self.modloader_overrides.len();
+            if overrides > 0 {
+                ui.weak(format!("{overrides} override(s) set for this profile"));
+            }
+        });
+        ui.separator();
+
+        egui::Grid::new("modloader_priority_grid")
+            .striped(true)
+            .num_columns(3)
+            .min_col_width(64.0)
+            .show(ui, |ui| {
+                ui.strong("On");
+                ui.strong("Priority");
+                ui.strong("ModLoader folder");
+                ui.end_row();
+                for (folder, priority) in &rows {
+                    let mut enabled = *priority > 0;
+                    if ui
+                        .checkbox(&mut enabled, "")
+                        .on_hover_text(
+                            "Enabled in ModLoader — uncheck to set priority 0 (disabled, but still \
+                             installed and shown in the in-game menu)",
+                        )
+                        .changed()
+                    {
+                        set_priority = Some((folder.clone(), if enabled { 50 } else { 0 }));
+                    }
+                    let mut value = *priority;
+                    let response = ui.add_enabled(
+                        *priority > 0,
+                        egui::DragValue::new(&mut value).range(0..=100).speed(0.25),
+                    );
+                    if response.changed() {
+                        set_priority = Some((folder.clone(), value.clamp(0, 100)));
+                    }
+                    ui.label(folder);
+                    ui.end_row();
+                }
+            });
+
+        if let Some((folder, priority)) = set_priority {
+            self.set_modloader_priority(&folder, priority);
+        }
+        if apply {
+            self.apply_modloader_priorities();
+        }
+    }
+
+    /// MO2's "overwrite": game-folder files under mod areas that no enabled mod
+    /// provides — installed by hand or left by a tool. Computed on the last
+    /// content scan; the manager never touches these, so they persist across runs.
+    fn overwrite_panel(&mut self, ui: &mut egui::Ui) {
+        ui.heading("Unmanaged Files (Overwrite)");
+        if self.content_index.is_none() {
+            ui.weak("Run Analyze content (left panel) to detect unmanaged files.");
+            return;
+        }
+        if self.overwrite_files.is_empty() {
+            ui.label(
+                "No unmanaged files under modloader/ or cleo/ — everything there is provided by an \
+                 enabled mod or is loader infrastructure.",
+            );
+            return;
+        }
+        ui.label(format!(
+            "{} file(s) under modloader/ or cleo/ that no enabled mod in this profile provides. \
+             Installed manually or left by a tool — the manager does not touch them.",
+            self.overwrite_files.len()
+        ));
+        egui::ScrollArea::vertical()
+            .id_salt("overwrite_files")
+            .auto_shrink([false, true])
+            .max_height(200.0)
+            .show(ui, |ui| {
+                for file in self.overwrite_files.iter().take(2000) {
+                    ui.monospace(file);
+                }
+                if self.overwrite_files.len() > 2000 {
+                    ui.weak(format!("{} more not shown", self.overwrite_files.len() - 2000));
+                }
+            });
+    }
+
     pub(super) fn run_panel(&mut self, ui: &mut egui::Ui) {
         ui.heading("Play Selected Profile"); // literal: allow external interface text or file-format spelling
         ui.separator();
@@ -2234,6 +3138,8 @@ impl SanAndreasModUi {
             }
         });
         self.executables_editor(ui);
+        ui.separator();
+        self.overwrite_panel(ui);
         ui.separator();
         ui.heading("Temporary Files Cleanup");
         if self.pending_runs.is_empty() {
@@ -2292,40 +3198,17 @@ impl SanAndreasModUi {
         ui.heading("Telemetry");
         ui.separator();
         ui.horizontal_wrapped(|ui| {
-            summary_tile(ui, "Imports", &self.telemetry.imports.to_string());
-            summary_tile(ui, "Runs", &self.telemetry.run_journals.to_string());
-            summary_tile(
-                ui,
-                "Failed launches",
-                &self.telemetry.failed_launches.to_string(),
-            );
-            summary_tile(ui, "Installs", &self.telemetry.install_journals.to_string());
-            summary_tile(ui, "Copied files", &self.telemetry.copied_files.to_string());
-            summary_tile(
-                ui,
-                "Overwrites",
-                &self.telemetry.overwritten_files.to_string(),
-            );
-            summary_tile(
-                ui,
-                "Cleanup needed",
-                &self.telemetry.pending_cleanup.to_string(),
-            );
-        });
-        ui.add_space(8.0);
-        ui.horizontal_wrapped(|ui| {
-            summary_tile(ui, "New files", &self.telemetry.new_files.to_string());
-            summary_tile(
-                ui,
-                "Blocked bootstrap",
-                &self.telemetry.blocked_bootstrap.to_string(),
-            );
-            summary_tile(
-                ui,
-                "Missing sources",
-                &self.telemetry.missing_sources.to_string(),
-            );
-            summary_tile(ui, "Journals", &self.telemetry.journals.to_string());
+            stat_inline(ui, "Imports", self.telemetry.imports);
+            stat_inline(ui, "Runs", self.telemetry.run_journals);
+            stat_inline(ui, "Failed", self.telemetry.failed_launches);
+            stat_inline(ui, "Installs", self.telemetry.install_journals);
+            stat_inline(ui, "Copied", self.telemetry.copied_files);
+            stat_inline(ui, "Overwrites", self.telemetry.overwritten_files);
+            stat_inline(ui, "Cleanup", self.telemetry.pending_cleanup);
+            stat_inline(ui, "New files", self.telemetry.new_files);
+            stat_inline(ui, "Blocked bootstrap", self.telemetry.blocked_bootstrap);
+            stat_inline(ui, "Missing sources", self.telemetry.missing_sources);
+            stat_inline(ui, "Journals", self.telemetry.journals);
         });
         ui.separator();
         ui.horizontal(|ui| {
@@ -2366,7 +3249,7 @@ impl SanAndreasModUi {
         } else {
             egui::Grid::new("telemetry_recent_events")
                 .striped(true)
-                .min_col_width(96.0)
+                .min_col_width(48.0)
                 .show(ui, |ui| {
                     ui.strong("Type");
                     ui.strong("When");
@@ -2377,8 +3260,9 @@ impl SanAndreasModUi {
                         ui.label(&event.kind);
                         ui.monospace(human_datetime(event.created_unix))
                             .on_hover_text(format!("unix {}", event.created_unix));
-                        ui.label(&event.title);
-                        ui.label(&event.detail);
+                        ui.label(clip_text(&event.title, 40)).on_hover_text(&event.title);
+                        ui.label(clip_text(&event.detail, 72))
+                            .on_hover_text(&event.detail);
                         ui.end_row();
                     }
                 });
@@ -2392,7 +3276,7 @@ impl SanAndreasModUi {
         }
         egui::Grid::new("telemetry_mod_history")
             .striped(true)
-            .min_col_width(96.0)
+            .min_col_width(48.0)
             .show(ui, |ui| {
                 ui.strong("Mod");
                 ui.strong("Imports");
