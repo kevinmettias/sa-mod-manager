@@ -25,14 +25,14 @@ fn infer_source_from_line(line: &str, candidates: &[String]) -> Option<String>
 {
     let mut matches = candidates
         .iter()
-        .filter(|candidate| source_candidate_matches_line(SourceCandidateLine { candidate: candidate, line: line }))
+        .filter(|candidate| is_source_candidate_match_for_line(SourceCandidateLine { candidate: candidate, line: line }))
         .cloned()
         .collect::<Vec<_>>();
-    matches.sort_by(|a, b| b.len().cmp(&a.len()).then_with(|| a.cmp(b)));
+    matches.sort_by(|left, right| right.len().cmp(&left.len()).then_with(|| left.cmp(right)));
     return matches.into_iter().next()
 }
 
-fn source_candidate_matches_line(context: SourceCandidateLine<'_>) -> bool
+fn is_source_candidate_match_for_line(context: SourceCandidateLine<'_>) -> bool
 {
     let candidate = context.candidate;
     let line = context.line;
@@ -42,8 +42,8 @@ fn source_candidate_matches_line(context: SourceCandidateLine<'_>) -> bool
     {
         return false;
     }
-    return line_contains_path(LinePath { line: line, path: &lower })
-        || line_contains_token(LineNeedle { line: line, needle: name })
+    return has_line_path(LinePath { line: line, path: &lower })
+        || has_line_token(LineNeedle { line: line, needle: name })
         || line.contains(&format!("folder {name}"))
         || line.contains(&format!("directory {name}"))
         || line.contains(&format!("contents of {name}"))
@@ -62,42 +62,42 @@ fn infer_target_from_line(
     report: &PackageReport,
 ) -> Option<String>
 {
-    if mentions_gta3_img(line)
+    if has_gta3_img_mention(line)
     {
         return Some(format!(
             "modloader/{}/gta3.img",
             safe_name(&package_id(&report.package))
         ));
     }
-    if mentions_cleo(line)
+    if has_cleo_mention(line)
     {
         return Some("CLEO".to_string());
     }
-    if mentions_modloader(line)
+    if has_modloader_mention(line)
     {
         return Some("modloader".to_string());
     }
-    if mentions_game_data_folder(GameDataFolderMention { line: line, folder: "data" })
+    if has_game_asset_folder_mention(GameAssetFolderMention { line: line, folder: "data" })
     {
         return Some("data".to_string());
     }
-    if mentions_game_data_folder(GameDataFolderMention { line: line, folder: "models" })
+    if has_game_asset_folder_mention(GameAssetFolderMention { line: line, folder: "models" })
     {
         return Some("models".to_string());
     }
-    if mentions_game_data_folder(GameDataFolderMention { line: line, folder: "text" })
+    if has_game_asset_folder_mention(GameAssetFolderMention { line: line, folder: "text" })
     {
         return Some("text".to_string());
     }
-    if mentions_game_data_folder(GameDataFolderMention { line: line, folder: "anim" })
+    if has_game_asset_folder_mention(GameAssetFolderMention { line: line, folder: "anim" })
     {
         return Some("anim".to_string());
     }
-    if mentions_game_data_folder(GameDataFolderMention { line: line, folder: "audio" })
+    if has_game_asset_folder_mention(GameAssetFolderMention { line: line, folder: "audio" })
     {
         return Some("audio".to_string());
     }
-    if mentions_game_root(line)
+    if has_game_root_mention(line)
     {
         if let Some(source) = source
         {
@@ -115,7 +115,7 @@ fn infer_target_from_line(
     return None
 }
 
-fn mentions_gta3_img(line: &str) -> bool
+fn has_gta3_img_mention(line: &str) -> bool
 {
     return line.contains("gta3 img")
         || line.contains("gta3img")
@@ -251,11 +251,11 @@ fn source_with_game_mirror(report: &PackageReport) -> Option<String>
 
 fn requirement_target_from_line(line: &str) -> Option<String>
 {
-    if mentions_cleo(line)
+    if has_cleo_mention(line)
     {
         return Some("CLEO".to_string());
     }
-    if mentions_modloader(line)
+    if has_modloader_mention(line)
     {
         return Some("Mod Loader".to_string());
     }
@@ -301,7 +301,7 @@ fn copy_instruction_score(input: CopyInstructionScoreInput<'_>) -> ConfidenceSco
         confidence += COPY_SCORE_CONTENT_BONUS;
         reasons.push("inside install/manual section".to_string());
     }
-    if mentions_game_root(input.line) || mentions_cleo(input.line) || mentions_modloader(input.line)
+    if has_game_root_mention(input.line) || has_cleo_mention(input.line) || has_modloader_mention(input.line)
     {
         confidence += COPY_SCORE_CONTEXT_BONUS;
         reasons.push("target wording is explicit".to_string());
@@ -340,7 +340,7 @@ fn add_readme_instruction_hint(instruction: &ReadmeInstruction, hints: &mut BTre
     ));
 }
 
-fn contains_install_verb(line: &str) -> bool
+fn has_install_verb(line: &str) -> bool
 {
     return [
         "copy",
@@ -372,28 +372,28 @@ fn contains_install_verb(line: &str) -> bool
         "ustanovka",
     ]
     .iter()
-    .any(|word| line_contains_token(LineNeedle { line: line, needle: word }))
+    .any(|word| has_line_token(LineNeedle { line: line, needle: word }))
 }
 
 fn is_readme_section_heading(line: &str) -> bool
 {
     return is_install_section_heading(line)
-        || line_contains_token(LineNeedle { line: line, needle: "optional" })
-        || line_contains_token(LineNeedle { line: line, needle: "requirements" })
-        || line_contains_token(LineNeedle { line: line, needle: "requirement" })
-        || line_contains_token(LineNeedle { line: line, needle: "compatibility" })
+        || has_line_token(LineNeedle { line: line, needle: "optional" })
+        || has_line_token(LineNeedle { line: line, needle: "requirements" })
+        || has_line_token(LineNeedle { line: line, needle: "requirement" })
+        || has_line_token(LineNeedle { line: line, needle: "compatibility" })
 }
 
 fn is_install_section_heading(line: &str) -> bool
 {
     let words = line.split_whitespace().count();
     return words <= SHORT_LINE_WORD_LIMIT
-        && (line_contains_token(LineNeedle { line: line, needle: "install" })
-            || line_contains_token(LineNeedle { line: line, needle: "installation" })
-            || line_contains_token(LineNeedle { line: line, needle: "manual" }))
+        && (has_line_token(LineNeedle { line: line, needle: "install" })
+            || has_line_token(LineNeedle { line: line, needle: "installation" })
+            || has_line_token(LineNeedle { line: line, needle: "manual" }))
 }
 
-fn contains_requirement(line: &str) -> bool
+fn has_requirement(line: &str) -> bool
 {
     return line.contains("requires")
         || line.contains("require ")
@@ -406,16 +406,16 @@ fn contains_requirement(line: &str) -> bool
         || line.contains("you need")
 }
 
-fn contains_optional(line: &str) -> bool
+fn has_optional_marker(line: &str) -> bool
 {
-    return line_contains_token(LineNeedle { line: line, needle: "optional" })
-        || line_contains_token(LineNeedle { line: line, needle: "bonus" })
+    return has_line_token(LineNeedle { line: line, needle: "optional" })
+        || has_line_token(LineNeedle { line: line, needle: "bonus" })
         || line.contains("for rosa")
         || line.contains("compatibility patch")
         || line.contains("if you want")
 }
 
-fn contains_conflict(line: &str) -> bool
+fn has_conflict_marker(line: &str) -> bool
 {
     return line.contains("conflict")
         || line.contains("incompatible")
@@ -423,12 +423,12 @@ fn contains_conflict(line: &str) -> bool
         || line.contains("dont use with")
 }
 
-fn contains_load_after(line: &str) -> bool
+fn has_load_after_marker(line: &str) -> bool
 {
     return line.contains("load after") || line.contains("priority after")
 }
 
-fn contains_do_not_install(line: &str) -> bool
+fn has_skip_install_marker(line: &str) -> bool
 {
     return line.contains("do not install")
         || line.contains("dont install")
@@ -453,24 +453,18 @@ fn shortest_source(roots: BTreeSet<String>) -> Option<String>
 {
     return roots
         .into_iter()
-        .min_by(|a, b| a.len().cmp(&b.len()).then_with(|| a.cmp(b)))
+        .min_by(|left, right| left.len().cmp(&right.len()).then_with(|| left.cmp(right)))
 }
 
-fn mentions_cleo(line: &str) -> bool
+fn has_cleo_mention(line: &str) -> bool
 {
-    return line_contains_token(LineNeedle { line: line, needle: "cleo" })
+    return has_line_token(LineNeedle { line: line, needle: "cleo" })
         || line.contains("cleo folder")
         || line.contains("cleo directory")
         || line.contains("cleo dir")
 }
 
-fn mentions_modloader(line: &str) -> bool
+fn has_modloader_mention(line: &str) -> bool
 {
     return line.contains("modloader") || line.contains("mod loader") || line.contains("mod-loader");
 }
-
-
-
-
-
-

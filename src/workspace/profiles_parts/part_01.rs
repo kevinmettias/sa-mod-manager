@@ -23,7 +23,7 @@ fn profile_files(profiles: &Path) -> Result<Vec<PathBuf>, AppError>
     {
         let entry = entry?;
         let path = entry.path();
-        if extension_eq(&path, "profile") || extension_eq(&path, "json")
+        if has_extension_equal_to(&path, "profile") || has_extension_equal_to(&path, "json")
         {
             found.push(path);
         }
@@ -187,10 +187,10 @@ pub(crate) fn add_mod_to_profile_json(
         config: config_path.to_path_buf(),
         ..Default::default()
     });
-    profile.mods.sort_by(|a, b| {
-        a.load_order
-            .cmp(&b.load_order)
-            .then_with(|| a.id.cmp(&b.id))
+    profile.mods.sort_by(|left, right| {
+        left.load_order
+            .cmp(&right.load_order)
+            .then_with(|| left.id.cmp(&right.id))
     });
     return write_profile_json(game_root, &profile);
 }
@@ -203,10 +203,10 @@ pub(crate) fn show_profile_json(game_root: &Path, profile_name: &str) -> Result<
     println!();
 
     let mut mods = profile.mods;
-    mods.sort_by(|a, b| {
-        a.load_order
-            .cmp(&b.load_order)
-            .then_with(|| a.id.cmp(&b.id))
+    mods.sort_by(|left, right| {
+        left.load_order
+            .cmp(&right.load_order)
+            .then_with(|| left.id.cmp(&right.id))
     });
 
     if mods.is_empty()
@@ -308,7 +308,7 @@ pub(crate) fn profile_launch_settings(
     };
     return Ok((
         resolve_launch_args(profile_args, crate::settings::default_launch_args()),
-        resolve_launch_env(profile_env, crate::settings::default_launch_env()),
+        resolve_launch_environment(profile_env, crate::settings::default_launch_environment()),
     ));
 }
 
@@ -329,7 +329,7 @@ fn resolve_launch_args(profile_args: Vec<String>, defaults: &[String]) -> Vec<St
 
 /// Merge the config default launch env under the profile's own env; a key set by
 /// the profile overrides the same key from the default.
-fn resolve_launch_env(
+fn resolve_launch_environment(
     profile_env: BTreeMap<String, String>,
     defaults: &BTreeMap<String, String>,
 ) -> BTreeMap<String, String>

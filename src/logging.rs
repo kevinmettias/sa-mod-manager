@@ -100,7 +100,7 @@ pub(crate) fn open_log_file(path: &Path)
             eprintln!("WARN: could not create log directory {}: {err}", parent.display());
         }
     }
-    rotate_if_over(path, MAX_LOG_BYTES);
+    has_rotated_if_over_limit(path, MAX_LOG_BYTES);
     if let Ok(file) = fs::OpenOptions::new().create(true).append(true).open(path)
     {
         *guard = Some(file);
@@ -114,7 +114,7 @@ const MAX_LOG_BYTES: u64 = 5 * 1024 * 1024;
 /// If `path` is larger than `max_bytes`, move it to its `.1` backup (replacing
 /// any previous backup) so the next open starts fresh. Returns whether it
 /// rotated. All I/O errors are treated as "did not rotate".
-fn rotate_if_over(path: &Path, max_bytes: u64) -> bool
+fn has_rotated_if_over_limit(path: &Path, max_bytes: u64) -> bool
 {
     let size = fs::metadata(path).map(|meta| meta.len()).unwrap_or(0);
     if size <= max_bytes
@@ -125,7 +125,7 @@ fn rotate_if_over(path: &Path, max_bytes: u64) -> bool
     if let Err(err) = fs::remove_file(&backup)
         && err.kind() != io::ErrorKind::NotFound
     {
-        eprintln!("WARN: could not remove old log backup {}: {err}", backup.display());
+        eprintln!("WARN: could not remove_profile_fixture old log backup {}: {err}", backup.display());
         return false;
     }
     return fs::rename(path, &backup).is_ok();
@@ -141,7 +141,7 @@ fn log_backup_path(path: &Path) -> PathBuf
 
 /// Emit a diagnostic. Console output goes to stderr (keeping stdout clean for
 /// command results); the log file additionally captures it with a timestamp.
-pub(crate) fn record(level: Level, args: fmt::Arguments)
+pub(crate) fn record_log_message_from_arguments(level: Level, args: fmt::Arguments)
 {
     if level <= console_level()
     {
@@ -149,7 +149,7 @@ pub(crate) fn record(level: Level, args: fmt::Arguments)
     }
     if level <= FILE_LEVEL
     {
-        write_to_file(level, args);
+        write_log_message_arguments_to_file(level, args);
     }
 }
 
@@ -159,7 +159,7 @@ fn console_level() -> Level
     return Level::from_u8(CONSOLE_LEVEL.load(Ordering::Relaxed));
 }
 
-fn write_to_file(level: Level, args: fmt::Arguments)
+fn write_log_message_arguments_to_file(level: Level, args: fmt::Arguments)
 {
     let Ok(mut guard) = LOG_FILE.lock() else {
         return;
@@ -178,16 +178,16 @@ fn write_to_file(level: Level, args: fmt::Arguments)
 }
 
 macro_rules! log_error {
-    ($($arg:tt)*) => { $crate::logging::record($crate::logging::Level::Error, format_args!($($arg)*)) };
+    ($($arg:tt)*) => { $crate::logging::record_log_message_from_arguments($crate::logging::Level::Error, format_args!($($arg)*)) };
 }
 macro_rules! log_warn {
-    ($($arg:tt)*) => { $crate::logging::record($crate::logging::Level::Warn, format_args!($($arg)*)) };
+    ($($arg:tt)*) => { $crate::logging::record_log_message_from_arguments($crate::logging::Level::Warn, format_args!($($arg)*)) };
 }
 macro_rules! log_info {
-    ($($arg:tt)*) => { $crate::logging::record($crate::logging::Level::Info, format_args!($($arg)*)) };
+    ($($arg:tt)*) => { $crate::logging::record_log_message_from_arguments($crate::logging::Level::Info, format_args!($($arg)*)) };
 }
 macro_rules! log_debug {
-    ($($arg:tt)*) => { $crate::logging::record($crate::logging::Level::Debug, format_args!($($arg)*)) };
+    ($($arg:tt)*) => { $crate::logging::record_log_message_from_arguments($crate::logging::Level::Debug, format_args!($($arg)*)) };
 }
 
 pub(crate) use {log_debug, log_error, log_info, log_warn};
@@ -213,7 +213,7 @@ mod tests
         // A small file is left in place.
         fs::write(&log, b"tiny")
             .expect("the test fixture is created before this assertion reads it");
-        assert!(!rotate_if_over(&log, 100)); // literal: allow test fixture value is the specimen under judgment
+        assert!(!has_rotated_if_over_limit(&log, 100)); // literal: allow test fixture value is the specimen under judgment
         assert!(log.exists());
         assert!(!backup.exists());
 
@@ -221,7 +221,7 @@ mod tests
         const OVERSIZED_LOG_BYTES: usize = 200;
         fs::write(&log, vec![b'x'; OVERSIZED_LOG_BYTES])
             .expect("the test fixture is created before this assertion reads it"); // literal: allow test fixture value is the specimen under judgment
-        assert!(rotate_if_over(&log, 100)); // literal: allow test fixture value is the specimen under judgment
+        assert!(has_rotated_if_over_limit(&log, 100)); // literal: allow test fixture value is the specimen under judgment
         assert!(!log.exists());
         assert_eq!(
             fs::read(&backup)
@@ -233,7 +233,7 @@ mod tests
         // A second rotation replaces the previous backup rather than piling up.
         fs::write(&log, vec![b'y'; 150])
             .expect("the test fixture is created before this assertion reads it"); // literal: allow test fixture value is the specimen under judgment
-        assert!(rotate_if_over(&log, 100)); // literal: allow test fixture value is the specimen under judgment
+        assert!(has_rotated_if_over_limit(&log, 100)); // literal: allow test fixture value is the specimen under judgment
         assert_eq!(
             fs::read(&backup).expect("the test fixture is created before this assertion reads it")
                 [0],
@@ -244,6 +244,3 @@ mod tests
             .expect("the test fixture is created before this assertion reads it");
     }
 }
-
-
-

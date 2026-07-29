@@ -1,4 +1,4 @@
-use crate::prelude::*;
+﻿use crate::prelude::*;
 
 use super::{InfrastructureItem, ModConfigItem};
 

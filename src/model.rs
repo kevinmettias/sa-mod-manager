@@ -1,4 +1,4 @@
-mod app_error;
+﻿mod app_error;
 mod config;
 mod install;
 mod package;

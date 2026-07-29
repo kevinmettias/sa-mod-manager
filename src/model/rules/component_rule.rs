@@ -1,6 +1,6 @@
-use crate::prelude::*;
+﻿use crate::prelude::*;
 
-/// A rule that classifies a package path into a [`Component`]. Owned strings so
+/// A rule that classifies a package path into a [`Component`]. Owned string_list so
 /// rules can come from the built-in set *or* a user config file at runtime.
 pub(crate) struct ComponentRule
 {

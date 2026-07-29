@@ -1,10 +1,10 @@
-use crate::prelude::*;
+﻿use crate::prelude::*;
 use crate::ui::actions::{ContentFocus, ModCategoryToggle, ProfileRootTargetEdit, ProfileRootToggle};
 use crate::workspace::ProfileRootEnabledState;
 use eframe::egui;
 
 use super::san_andreas_mod_ui::{
-    ModInfoTab, ModStatusFilter, ModTelemetry, PendingRunStatus, ROW_HEIGHT, ReadmeProposal,
+    ModDetailsTab, ModStatusFilter, ModTelemetry, PendingRunStatus, ROW_HEIGHT, ReadmeProposal,
     ReadmeProposalState, SanAndreasModUi, TelemetryEvent,
 };
 use super::state::{ModConfigItem, UiTab};
@@ -117,12 +117,12 @@ impl SanAndreasModUi
 
             // Run target (MO2's run dropdown), always at hand in the toolbar.
             let selected_label = if self.selected_run_target == 0 {
-                "▶ Play current profile".to_string()
+                "â–¶ Play current profile".to_string()
             } else {
                 self.executables
                     .get(self.selected_run_target - 1)
                     .map(|tool| tool.name.clone())
-                    .unwrap_or_else(|| "▶ Play current profile".to_string())
+                    .unwrap_or_else(|| "â–¶ Play current profile".to_string())
             };
             let tool_names: Vec<String> = self
                 .executables
@@ -133,7 +133,7 @@ impl SanAndreasModUi
                 .selected_text(selected_label)
                 .width(RUN_TARGET_COMBO_WIDTH)
                 .show_ui(ui, |ui| {
-                    ui.selectable_value(&mut self.selected_run_target, 0, "▶ Play current profile");
+                    ui.selectable_value(&mut self.selected_run_target, 0, "â–¶ Play current profile");
                     for (index, name) in tool_names.iter().enumerate()
                     {
                         ui.selectable_value(&mut self.selected_run_target, index + 1, name);
@@ -141,9 +141,9 @@ impl SanAndreasModUi
                 });
             let idle = !self.is_busy();
             let run_label = if self.selected_run_target == 0 {
-                "Run ▶"
+                "Run â–¶"
             } else {
-                "Run tool ▶"
+                "Run tool â–¶"
             };
             if ui
                 .add_enabled(idle, egui::Button::new(run_label))
@@ -161,7 +161,7 @@ impl SanAndreasModUi
                 egui::TextEdit::singleline(&mut self.inputs.game_root),
             );
             if ui
-                .button("Browse…")
+                .button("Browseâ€¦")
                 .on_hover_text("Pick the GTA San Andreas folder")
                 .clicked()
             {
@@ -202,6 +202,3 @@ impl SanAndreasModUi
         });
     }
 }
-
-
-

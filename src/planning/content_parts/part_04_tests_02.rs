@@ -1,9 +1,9 @@
-
+﻿
     #[test]
     fn equal_priority_conflict_is_flagged_ambiguous()
     {
-        let a = ml_entry("modloader/ModA/player.txd");
-        let b = ml_entry("modloader/ModB/player.txd");
+        let a = modloader_entry("modloader/ModA/player.txd");
+        let b = modloader_entry("modloader/ModB/player.txd");
         let refs = vec![&a, &b];
         // Both fall back to the default priority.
         let priorities = ModLoaderPriorities {
@@ -18,12 +18,12 @@
             "equal priorities are non-deterministic"
         );
         // A single-folder asset is never a conflict.
-        let solo = ml_entry("modloader/ModA/unique.dff");
+        let solo = modloader_entry("modloader/ModA/unique.dff");
         assert!(modloader_conflicts(&[&solo], &priorities).is_empty());
     }
 
     #[test]
-    fn mergeable_data_files_are_recognized()
+    fn mergeable_game_resource_files_are_recognized()
     {
         for f in [
             "modloader/x/data/handling.cfg",
@@ -32,7 +32,7 @@
             "weapon.dat",
         ]
         {
-            assert!(is_mergeable_data_file(f), "{f} should be mergeable");
+            assert!(is_mergeable_game_resource_file(f), "{f} should be mergeable");
         }
         // Override-only data, models, and map files are winner-take-all.
         for f in [
@@ -42,27 +42,27 @@
             "readme.txt",
         ]
         {
-            assert!(!is_mergeable_data_file(f), "{f} should not be mergeable");
+            assert!(!is_mergeable_game_resource_file(f), "{f} should not be mergeable");
         }
     }
 
     #[test]
-    fn conflict_marks_merge_vs_override()
+    fn conflict_marks_merge_against_override()
     {
         let priorities = ModLoaderPriorities {
             default: MODLOADER_BUILTIN_DEFAULT_PRIORITY,
             by_folder: BTreeMap::new(),
         };
         // Two mods both ship handling.cfg -> mergeable (soft).
-        let a = ml_entry("modloader/ModA/data/handling.cfg");
-        let b = ml_entry("modloader/ModB/data/handling.cfg");
+        let a = modloader_entry("modloader/ModA/data/handling.cfg");
+        let b = modloader_entry("modloader/ModB/data/handling.cfg");
         let merged = modloader_conflicts(&[&a, &b], &priorities);
         assert_eq!(merged.len(), 1);
         assert!(merged[0].mergeable, "handling.cfg is merged by ModLoader");
 
         // Two mods both ship an .ipl -> override (hard).
-        let c = ml_entry("modloader/ModA/data/maps/city.ipl");
-        let d = ml_entry("modloader/ModB/data/maps/city.ipl");
+        let c = modloader_entry("modloader/ModA/data/maps/city.ipl");
+        let d = modloader_entry("modloader/ModB/data/maps/city.ipl");
         let overridden = modloader_conflicts(&[&c, &d], &priorities);
         assert_eq!(overridden.len(), 1);
         assert!(!overridden[0].mergeable, ".ipl is override-only");
@@ -73,8 +73,8 @@
     {
         let priorities = ModLoaderPriorities::default();
         // A file under modloader/.data must not become a conflicting "mod folder".
-        let cached = ml_entry("modloader/.data/plugins/x.dff");
-        let real = ml_entry("modloader/RealMod/x.dff");
+        let cached = modloader_entry("modloader/.data/plugins/x.dff");
+        let real = modloader_entry("modloader/RealMod/x.dff");
         assert!(modloader_conflicts(&[&cached, &real], &priorities).is_empty());
         // And the priority/ignore writer never targets a reserved folder.
         assert_eq!(modloader_folder_from_target("modloader/.data/x"), None);

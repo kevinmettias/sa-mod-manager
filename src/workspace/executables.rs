@@ -1,7 +1,7 @@
-use crate::prelude::*;
+﻿use crate::prelude::*;
 
 /// A user-configured run target (MO2's "executables"): an external tool the
-/// manager can launch directly — a map editor, IMG tool, CLEO debugger, or the
+/// manager can launch directly â€” a map editor, IMG tool, CLEO debugger, or the
 /// game with custom arguments. Stored globally for the install under
 /// `.sa-mod-manager/executables.json`; the built-in "play current profile"
 /// target is not stored here (it always exists in the UI).
@@ -19,7 +19,7 @@ pub(crate) struct Executable
 impl Executable
 {
     /// The arguments as a launch-ready vector (whitespace-split). Quoting is not
-    /// interpreted — adequate for the simple flags SA tools take.
+    /// interpreted â€” adequate for the simple flags SA tools take.
     pub(crate) fn arg_list(&self) -> Vec<String>
     {
         return self.args.split_whitespace().map(str::to_string).collect();
@@ -35,7 +35,7 @@ struct ExecutablesFile
 }
 
 /// Read the configured run targets, or an empty list when none are saved or the
-/// file is unreadable — a missing tool list must never break the Play tab.
+/// file is unreadable â€” a missing tool list must never break the Play tab.
 pub(crate) fn read_executables(state_root: &Path) -> Vec<Executable>
 {
     let Ok(text) = read_capped(&executables_path(state_root), MAX_CONTROL_FILE_BYTES) else {

@@ -1,4 +1,4 @@
-
+﻿
 /// Single source of truth for the command list. Both the full usage screen and
 /// per-command help (`help <cmd>`, `<cmd> --help`) render from this, so there is
 /// no second table to keep in sync.
@@ -29,7 +29,7 @@ const COMMAND_USAGE_LINES: &[&str] = &[
     "  profile-enable <profile> <mod>   Enable a profile mod",
     "  profile-disable <profile> <mod>  Disable a profile mod",
     "  profile-order <profile> <mod> N  Set profile load order",
-    "  profile-remove <profile> <mod>   Remove a mod from a profile",
+    "  profile-remove_profile_fixture <profile> <mod>   Remove a mod from a profile",
     "  profile-all-off <profile>        Disable every mod (vanilla mode)",
     "  profile-all-on <profile>         Enable every mod in a profile",
     "  prepare-run [profile] [--game]   Materialize a profile (default: active) into the game folder",
@@ -96,7 +96,7 @@ fn print_default_usage()
     // compiled-in fallbacks.
     let configured_roots = default_mod_roots();
     let mod_roots = if configured_roots.is_empty() {
-        "(none set — pass folders to `scan` or set mod_roots in the config)".to_string()
+        "(none set â€” pass folders to `scan` or set mod_roots in the config)".to_string()
     } else {
         configured_roots
             .iter()

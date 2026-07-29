@@ -1,4 +1,4 @@
-use crate::prelude::*;
+﻿use crate::prelude::*;
 
 mod infrastructure_item;
 mod mod_config_item;
@@ -46,7 +46,7 @@ fn list_profile_names(game_root: &Path) -> Result<Vec<String>, AppError>
     for entry in fs::read_dir(profiles_root)?
     {
         let path = entry?.path();
-        if extension_eq(&path, "json")
+        if has_extension_equal_to(&path, "json")
         {
             let name = path
                 .file_stem()
@@ -100,7 +100,7 @@ fn list_mod_configs(
             in_selected_profile,
         });
     }
-    items.sort_by(|a, b| a.config.id.cmp(&b.config.id));
+    items.sort_by(|left, right| left.config.id.cmp(&right.config.id));
     return Ok(items);
 }
 

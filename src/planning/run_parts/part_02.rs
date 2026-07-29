@@ -1,4 +1,4 @@
-fn write_modloader_priorities_for_run(
+﻿fn write_modloader_priorities_for_run(
     context: ModLoaderPriorityRunContext<'_>,
     journal: &mut fs::File,
 ) -> Result<(), AppError>
@@ -36,7 +36,7 @@ fn write_modloader_priorities_for_run(
         if *priority <= 0
         {
             folder_priorities.remove(&key);
-            if !ignore_folders.iter().any(|f| f.eq_ignore_ascii_case(&key))
+            if !ignore_folders.iter().any(|folder| folder.eq_ignore_ascii_case(&key))
             {
                 ignore_folders.push(key);
             }
@@ -152,7 +152,7 @@ fn disabled_modloader_folders(
 /// array (preserved verbatim in the profile's `extra` map). Each becomes a
 /// `[Profiles.<name>.IgnoreFiles]` entry; ModLoader matches them against a file's
 /// basename and its mod-relative path (`*`/`?` globs, case-insensitive). Absent or
-/// malformed → no exclusions.
+/// malformed â†’ no exclusions.
 fn profile_ignore_files(game_root: &Path, profile_name: &str) -> Result<Vec<String>, AppError>
 {
     let profile_path = state_directory(game_root)
@@ -162,8 +162,8 @@ fn profile_ignore_files(game_root: &Path, profile_name: &str) -> Result<Vec<Stri
     return Ok(extract_ignore_files(&profile.extra));
 }
 
-/// Pull a `["*.dff", …]` string array out of the profile's unmodeled `extra`,
-/// trimming blanks. Anything that is not an array of strings is ignored.
+/// Pull a `["*.dff", â€¦]` string array out of the profile's unmodeled `extra`,
+/// trimming blanks. Anything that is not an array of string_list is ignored.
 fn extract_ignore_files(extra: &BTreeMap<String, serde_json::Value>) -> Vec<String>
 {
     return extra
@@ -173,8 +173,8 @@ fn extract_ignore_files(extra: &BTreeMap<String, serde_json::Value>) -> Vec<Stri
             items
                 .iter()
                 .filter_map(|item| item.as_str())
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty())
+                .map(|text| text.trim().to_string())
+                .filter(|text| !text.is_empty())
                 .collect()
         })
         .unwrap_or_default();
@@ -182,16 +182,16 @@ fn extract_ignore_files(extra: &BTreeMap<String, serde_json::Value>) -> Vec<Stri
 
 /// The `-modprof` profile name to activate for this run, or `None` when no
 /// managed profile is present to activate. Decided by the just-written
-/// `modloader.ini` itself — the presence of our `[Profiles.<name>.Priority]`
-/// section is exactly the condition for activating it — so the launch argument
+/// `modloader.ini` itself â€” the presence of our `[Profiles.<name>.Priority]`
+/// section is exactly the condition for activating it â€” so the launch argument
 /// can never disagree with what was written, and an unreadable/absent ini simply
 /// means "don't pass -modprof" (a no-op for the game either way).
 /// Whether the user's launch args already pick a ModLoader mode (`-nomods`,
 /// `-mod`, or `-modprof`). ModLoader treats these as mutually exclusive, so the
-/// manager must not append its own `-modprof` on top — it would be ignored, and
+/// manager must not append its own `-modprof` on top â€” it would be ignored, and
 /// silently overriding an explicit `-nomods` would be worse. Matched
 /// case-insensitively, like ModLoader's own `_wcsicmp` parsing.
-fn launch_args_select_modloader_mode(args: &[String]) -> bool
+fn should_launch_args_select_modloader_mode(args: &[String]) -> bool
 {
     return args.iter().any(|arg| {
         let arg = arg.trim();

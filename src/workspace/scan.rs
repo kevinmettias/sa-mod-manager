@@ -1,11 +1,11 @@
-use crate::prelude::*;
+﻿use crate::prelude::*;
 
 pub(crate) fn scan_roots(roots: &[PathBuf]) -> Result<(), AppError>
 {
     let mut packages = Vec::new();
     collect_packages_from_roots(roots, &mut packages)?;
 
-    packages.sort_by(|a, b| a.path.cmp(&b.path));
+    packages.sort_by(|left, right| left.path.cmp(&right.path));
     let summary = summarize_packages(&packages);
     return print_package_summary(&summary, packages);
 }

@@ -1,4 +1,4 @@
-mod archive_entry_fields;
+﻿mod archive_entry_fields;
 mod entry;
 mod entry_classification_state;
 mod kind;

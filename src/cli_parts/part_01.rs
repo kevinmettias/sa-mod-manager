@@ -1,4 +1,4 @@
-use crate::prelude::*;
+﻿use crate::prelude::*;
 use crate::workspace::{ProfileCopyRequest, ProfileModSelection, ProfileRootEnabledState, ProfileRootSelector};
 
 const CONFIG_FLAG: &str = "--config";
@@ -39,18 +39,18 @@ pub(crate) fn main()
 fn run() -> Result<(), AppError>
 {
     let mut shell_arguments: Vec<String> = env::args().skip(1).collect();
-    let cli_level = extract_verbosity(&mut shell_arguments);
+    let cli_level = extract_verbosity_from_arguments(&mut shell_arguments);
     // Resolve `--config`/`--7z`/`--mod-roots` before any command touches settings,
     // so they win over env and config the way explicit overrides should.
-    if let Some(config) = extract_flag_value(&mut shell_arguments, CONFIG_FLAG)
+    if let Some(config) = extract_flag_value_from_arguments(&mut shell_arguments, CONFIG_FLAG)
     {
         crate::settings::set_cli_config_path(PathBuf::from(config));
     }
-    if let Some(seven_zip) = extract_flag_value(&mut shell_arguments, SEVEN_ZIP_FLAG)
+    if let Some(seven_zip) = extract_flag_value_from_arguments(&mut shell_arguments, SEVEN_ZIP_FLAG)
     {
         crate::settings::set_cli_seven_zip(PathBuf::from(seven_zip));
     }
-    if let Some(mod_roots) = extract_flag_value(&mut shell_arguments, MOD_ROOTS_FLAG)
+    if let Some(mod_roots) = extract_flag_value_from_arguments(&mut shell_arguments, MOD_ROOTS_FLAG)
     {
         let roots: Vec<PathBuf> = env::split_paths(&mod_roots)
             .filter(|path| !path.as_os_str().is_empty())
@@ -74,7 +74,7 @@ fn run() -> Result<(), AppError>
 /// Remove global `--verbose`/`--quiet` flags (usable anywhere on the line) and
 /// resolve them to a console log level. Each `-v` raises verbosity, each `-q`
 /// lowers it.
-fn extract_verbosity(arguments: &mut Vec<String>) -> Option<crate::logging::Level>
+fn extract_verbosity_from_arguments(arguments: &mut Vec<String>) -> Option<crate::logging::Level>
 {
     use crate::logging::Level;
     let mut verbosity: i32 = 0;
@@ -119,7 +119,7 @@ fn extract_verbosity(arguments: &mut Vec<String>) -> Option<crate::logging::Leve
 /// Remove a global `--<flag> <value>` option (usable anywhere on the line) and
 /// return its value. A trailing flag with no following value is dropped and
 /// ignored rather than swallowing the next flag.
-fn extract_flag_value(arguments: &mut Vec<String>, flag: &str) -> Option<String>
+fn extract_flag_value_from_arguments(arguments: &mut Vec<String>, flag: &str) -> Option<String>
 {
     let index = arguments.iter().position(|arg| arg == flag)?;
     arguments.remove(index);
@@ -143,7 +143,7 @@ fn dispatch_command(command: &str, arguments: Vec<String>) -> Result<(), AppErro
             | VERSION_COMMAND
             | VERSION_FLAG
             | VERSION_SHORT_FLAG
-    ) && arguments_request_help(&arguments)
+    ) && should_arguments_request_help(&arguments)
     {
         print_command_help(command);
         return Ok(());
@@ -163,7 +163,7 @@ fn dispatch_command(command: &str, arguments: Vec<String>) -> Result<(), AppErro
         "profile-enable" => handle_profile_enable_command(arguments),
         "profile-disable" => handle_profile_disable_command(arguments),
         "profile-order" => handle_profile_order_command(arguments),
-        "profile-remove" => handle_profile_remove_command(arguments),
+        "profile-remove_profile_fixture" => handle_profile_remove_command(arguments),
         "prepare-run" => handle_prepare_run_command(arguments),
         "cleanup-run" => handle_cleanup_run_command(arguments),
         "extract-stage" => handle_extract_stage_command(arguments),
@@ -203,7 +203,7 @@ fn dispatch_command(command: &str, arguments: Vec<String>) -> Result<(), AppErro
     };
 }
 
-fn arguments_request_help(arguments: &[String]) -> bool
+fn should_arguments_request_help(arguments: &[String]) -> bool
 {
     return arguments
         .iter()
@@ -228,14 +228,14 @@ fn handle_scan_command(arguments: Vec<String>) -> Result<(), AppError>
 
 fn handle_ui_command(arguments: Vec<String>) -> Result<(), AppError>
 {
-    let game_root = optional_explicit_game_root(arguments);
+    let game_root = optional_explicit_game_root_from_arguments(arguments);
     return crate::ui::run_ui(game_root);
 }
 
 /// Like [`optional_game_root_from_raw_arguments`], but returns `None` when the
 /// user gave no folder, so the UI can fall back to the last-used folder rather
 /// than always forcing the compiled default.
-fn optional_explicit_game_root(arguments: Vec<String>) -> Option<PathBuf>
+fn optional_explicit_game_root_from_arguments(arguments: Vec<String>) -> Option<PathBuf>
 {
     let mut cursor = CliArguments::new(arguments);
     return match cursor.next_optional()
@@ -455,8 +455,3 @@ fn default_mod_roots() -> Vec<PathBuf>
 {
     return crate::settings::default_mod_roots();
 }
-
-
-
-
-

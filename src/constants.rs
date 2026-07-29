@@ -1,6 +1,6 @@
-use crate::prelude::*;
+﻿use crate::prelude::*;
 
-fn strings(items: &[&str]) -> Vec<String>
+fn string_list(items: &[&str]) -> Vec<String>
 {
     return items.iter().map(|item| item.to_string()).collect();
 }
@@ -10,7 +10,7 @@ fn strings(items: &[&str]) -> Vec<String>
 /// they can never drift apart. These are the only script extensions the CLEO5
 /// engine recognizes: `.cs` (CLEO5), `.cs4` (CLEO4 compatibility mode), `.cs3`
 /// (CLEO3 compatibility mode). There is no `.cs5`. Plugin modules (`.cleo`) and
-/// text (`.fxt`) are deliberately not here — they are their own subsystems.
+/// text (`.fxt`) are deliberately not here â€” they are their own subsystems.
 pub(crate) const CLEO_SCRIPT_EXTENSIONS: [&str; 3] = ["cs", "cs4", "cs3"];
 
 /// Whether a lowercased path ends in a CLEO script extension (with its dot), e.g.
@@ -25,8 +25,8 @@ pub(crate) fn has_cleo_script_extension(lower: &str) -> bool
     });
 }
 
-/// The CLEO script extensions as dotted suffixes (`.cs`, `.cs4`, …), for building
-/// classification rules that match on suffix strings.
+/// The CLEO script extensions as dotted suffixes (`.cs`, `.cs4`, â€¦), for building
+/// classification rules that match on suffix string_list.
 pub(crate) fn cleo_script_suffixes() -> Vec<String>
 {
     return CLEO_SCRIPT_EXTENSIONS
@@ -42,86 +42,86 @@ pub(crate) fn builtin_component_rules() -> Vec<ComponentRule>
     return vec![
         ComponentRule {
             component: Component::ModLoader,
-            contains: strings(&["modloader"]),
-            prefixes: strings(&[]),
-            suffixes: strings(&[]),
+            contains: string_list(&["modloader"]),
+            prefixes: string_list(&[]),
+            suffixes: string_list(&[]),
         },
         ComponentRule {
             // CLEO5 plugin modules load from CLEO/cleo_plugins/, so they must be
             // routed there rather than dropped in the CLEO script folder.
             component: Component::CleoPlugin,
-            contains: strings(&["cleo_plugins"]),
-            prefixes: strings(&[]),
-            suffixes: strings(&[".cleo"]),
+            contains: string_list(&["cleo_plugins"]),
+            prefixes: string_list(&[]),
+            suffixes: string_list(&[".cleo"]),
         },
         ComponentRule {
             component: Component::CleoText,
-            contains: strings(&["cleo_text"]),
-            prefixes: strings(&[]),
-            suffixes: strings(&[".fxt"]),
+            contains: string_list(&["cleo_text"]),
+            prefixes: string_list(&[]),
+            suffixes: string_list(&[".fxt"]),
         },
         ComponentRule {
             // Shared script modules reached via the `modules:` path prefix.
             component: Component::CleoModules,
-            contains: strings(&["cleo_modules"]),
-            prefixes: strings(&[]),
-            suffixes: strings(&[]),
+            contains: string_list(&["cleo_modules"]),
+            prefixes: string_list(&[]),
+            suffixes: string_list(&[]),
         },
         ComponentRule {
             // Runtime-generated per-script save data; a mod shipping it is unusual.
             component: Component::CleoSaves,
-            contains: strings(&["cleo_saves"]),
-            prefixes: strings(&[]),
-            suffixes: strings(&[]),
+            contains: string_list(&["cleo_saves"]),
+            prefixes: string_list(&[]),
+            suffixes: string_list(&[]),
         },
         ComponentRule {
             // .cs = CLEO5, .cs4 = CLEO4 compat mode, .cs3 = CLEO3 compat mode.
             component: Component::Cleo,
-            contains: strings(&["cleo"]),
-            prefixes: strings(&[]),
+            contains: string_list(&["cleo"]),
+            prefixes: string_list(&[]),
             suffixes: cleo_script_suffixes(),
         },
         ComponentRule {
             component: Component::Asi,
-            contains: strings(&[]),
-            prefixes: strings(&[]),
-            suffixes: strings(&[".asi"]),
+            contains: string_list(&[]),
+            prefixes: string_list(&[]),
+            suffixes: string_list(&[".asi"]),
         },
         ComponentRule {
             component: Component::ImgReplacement,
-            contains: strings(&["gta3.img"]),
-            prefixes: strings(&[]),
-            suffixes: strings(&[".dff", ".txd"]),
+            contains: string_list(&["gta3.img"]),
+            prefixes: string_list(&[]),
+            suffixes: string_list(&[".dff", ".txd"]),
         },
         ComponentRule {
             component: Component::Data,
-            contains: strings(&["/data/"]),
-            prefixes: strings(&["data/"]),
-            suffixes: strings(&[]),
+            contains: string_list(&["/data/"]),
+            prefixes: string_list(&["data/"]),
+            suffixes: string_list(&[]),
         },
         ComponentRule {
             component: Component::Models,
-            contains: strings(&["/models/"]),
-            prefixes: strings(&["models/"]),
-            suffixes: strings(&[]),
+            contains: string_list(&["/models/"]),
+            prefixes: string_list(&["models/"]),
+            suffixes: string_list(&[]),
         },
         ComponentRule {
             component: Component::Text,
-            contains: strings(&["/text/"]),
-            prefixes: strings(&["text/"]),
-            suffixes: strings(&[".gxt"]),
+            contains: string_list(&["/text/"]),
+            prefixes: string_list(&["text/"]),
+            suffixes: string_list(&[".gxt"]),
         },
         ComponentRule {
             component: Component::Anim,
-            contains: strings(&["/anim/"]),
-            prefixes: strings(&["anim/"]),
-            suffixes: strings(&[]),
+            contains: string_list(&["/anim/"]),
+            prefixes: string_list(&["anim/"]),
+            suffixes: string_list(&[]),
         },
         ComponentRule {
             component: Component::Audio,
-            contains: strings(&["/audio/"]),
-            prefixes: strings(&["audio/"]),
-            suffixes: strings(&[]),
+            contains: string_list(&["/audio/"]),
+            prefixes: string_list(&["audio/"]),
+            suffixes: string_list(&[]),
         },
     ];
 }
@@ -131,35 +131,35 @@ pub(crate) fn builtin_context_rules() -> Vec<ContextRule>
 {
     return vec![
         ContextRule {
-            aliases: strings(&["rosa"]),
+            aliases: string_list(&["rosa"]),
             hint: "RoSA compatibility path likely matters".to_string(),
         },
         ContextRule {
-            aliases: strings(&["proper fixes"]),
+            aliases: string_list(&["proper fixes"]),
             hint: "Proper Fixes can have RoSA-specific variants".to_string(),
         },
         ContextRule {
-            aliases: strings(&["open limit adjuster"]),
+            aliases: string_list(&["open limit adjuster"]),
             hint: "Limit adjuster should be installed before large model/IMG packs".to_string(),
         },
         ContextRule {
-            aliases: strings(&["improvedstreaming", "improved streaming"]),
+            aliases: string_list(&["improvedstreaming", "improved streaming"]),
             hint: "Streaming settings should match texture/model pack size".to_string(),
         },
         ContextRule {
-            aliases: strings(&["sky gfx", "skygfx", "enb"]),
+            aliases: string_list(&["sky gfx", "skygfx", "enb"]),
             hint: "Graphics pipeline mod; ENB/SkyGfx/DirectX presets may conflict".to_string(),
         },
         ContextRule {
-            aliases: strings(&["cleo+"]),
+            aliases: string_list(&["cleo+"]),
             hint: "Requires CLEO and CLEO+ runtime".to_string(),
         },
         ContextRule {
-            aliases: strings(&["save"]),
+            aliases: string_list(&["save"]),
             hint: "Savegame package; should target user documents, not game root".to_string(),
         },
         ContextRule {
-            aliases: strings(&["gta_sa.exe"]),
+            aliases: string_list(&["gta_sa.exe"]),
             hint: "Executable replacement requires explicit bootstrap approval".to_string(),
         },
     ];

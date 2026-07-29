@@ -1,4 +1,4 @@
-use crate::prelude::*;
+﻿use crate::prelude::*;
 
 /// User annotations for a single library mod (MO2's categories / color / notes):
 /// freeform, separate from the mod's own `mod.json`, so they are the manager
@@ -34,7 +34,7 @@ struct ModMetaFile
 }
 
 /// Read all per-mod annotations, or an empty map when none are saved / the file
-/// is unreadable — annotations are optional and must never break loading.
+/// is unreadable â€” annotations are optional and must never break loading.
 pub(crate) fn read_mod_meta(state_root: &Path) -> BTreeMap<String, ModMeta>
 {
     let Ok(text) = read_capped(&mod_meta_path(state_root), MAX_CONTROL_FILE_BYTES) else {

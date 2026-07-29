@@ -1,18 +1,18 @@
-    use super::{MIN_PLAN_NOTE_COUNT, REVIEW_CONFIDENCE_ASSERTION, is_streaming_nodes, readme_has_injectable_data};
+﻿    use super::{MIN_PLAN_NOTE_COUNT, REVIEW_CONFIDENCE_ASSERTION, is_streaming_nodes, has_readme_injectable_table};
     use crate::prelude::*;
     use zip::write::SimpleFileOptions;
 
     #[test]
-    fn readme_with_data_rows_is_flagged_but_prose_is_not()
+    fn readme_with_table_rows_is_flagged_but_prose_is_not()
     {
         // A handling.cfg-style row has many numeric fields.
-        let data = "INFERNUS 1000.0 5000.0 2.0 0.0 0.3 -0.1 75 0.8 0.9 27.0 200.0";
-        assert!(readme_has_injectable_data(data));
+        let handling_row = "INFERNUS 1000.0 5000.0 2.0 0.0 0.3 -0.1 75 0.8 0.9 27.0 200.0";
+        assert!(has_readme_injectable_table(handling_row));
         // Ordinary prose (and a couple of version numbers) is not flagged.
         let prose = "Install v1.2 into your game. Requires CLEO 4.3. Enjoy!";
-        assert!(!readme_has_injectable_data(prose));
+        assert!(!has_readme_injectable_table(prose));
         // Comment lines are ignored.
-        assert!(!readme_has_injectable_data("; 1 2 3 4 5 6 7 8 9 10"));
+        assert!(!has_readme_injectable_table("; 1 2 3 4 5 6 7 8 9 10"));
     }
 
     #[test]
@@ -25,7 +25,7 @@
     }
 
     #[test]
-    fn readme_data_injection_becomes_a_package_risk()
+    fn readme_table_injection_becomes_a_package_risk()
     {
         let root = test_root("readme_injection_risk");
         let package = root.join("carpack.zip");
@@ -49,7 +49,7 @@
             "risks: {:?}",
             report.risks
         );
-        remove_dir_if_exists(&root).expect("the test fixture is created before this assertion reads it");
+        remove_directory_if_exists(&root).expect("the test fixture is created before this assertion reads it");
     }
 
     #[test]
@@ -98,7 +98,7 @@
         assert_eq!(plan.operations[0].source_root, "files/CLEO");
         assert_eq!(plan.operations[0].target_root, root.join("CLEO"));
         assert_eq!(plan.operations[0].notes, vec!["declared by manifest"]);
-        remove_dir_if_exists(&root).expect("the test fixture is created before this assertion reads it");
+        remove_directory_if_exists(&root).expect("the test fixture is created before this assertion reads it");
     }
 
     #[test]
@@ -111,7 +111,7 @@
         let err = analyze_package_error(&package, &root).to_string();
 
         assert!(err.contains("must contain wrap.json"));
-        remove_dir_if_exists(&root).expect("the test fixture is created before this assertion reads it");
+        remove_directory_if_exists(&root).expect("the test fixture is created before this assertion reads it");
     }
 
     #[test]
@@ -139,7 +139,7 @@
 
         assert!(err.contains("install_roots[0].source"));
         assert!(err.contains("relative package path"));
-        remove_dir_if_exists(&root).expect("the test fixture is created before this assertion reads it");
+        remove_directory_if_exists(&root).expect("the test fixture is created before this assertion reads it");
     }
 
     #[test]
@@ -167,7 +167,7 @@
 
         assert!(err.contains("source does not exist"));
         assert!(err.contains("files/CLEO"));
-        remove_dir_if_exists(&root).expect("the test fixture is created before this assertion reads it");
+        remove_directory_if_exists(&root).expect("the test fixture is created before this assertion reads it");
     }
 
     #[test]
@@ -216,7 +216,7 @@
         assert_eq!(plan.operations[0].source_root, "CLEO");
         assert_eq!(plan.operations[0].target_root, root.join("CLEO"));
         assert!(plan.operations[0].notes[0].contains("readme evidence"));
-        remove_dir_if_exists(&root).expect("the test fixture is created before this assertion reads it");
+        remove_directory_if_exists(&root).expect("the test fixture is created before this assertion reads it");
     }
 
     #[test]
@@ -256,7 +256,7 @@
                 .iter()
                 .any(|note| note.contains("readme evidence"))
         );
-        remove_dir_if_exists(&root).expect("the test fixture is created before this assertion reads it");
+        remove_directory_if_exists(&root).expect("the test fixture is created before this assertion reads it");
     }
 
     #[test]
@@ -303,7 +303,7 @@
         assert_eq!(plan.operations[0].source_root, "scripts");
         assert_eq!(plan.operations[0].target_root, root.join("CLEO"));
         assert!(plan.operations[0].notes.len() >= MIN_PLAN_NOTE_COUNT);
-        remove_dir_if_exists(&root).expect("the test fixture is created before this assertion reads it");
+        remove_directory_if_exists(&root).expect("the test fixture is created before this assertion reads it");
     }
 
     #[test]
@@ -343,5 +343,5 @@
         assert_eq!(plan.operations.len(), 1);
         assert_eq!(plan.operations[0].source_root, "plugin");
         assert_eq!(plan.operations[0].target_root, root);
-        remove_dir_if_exists(&root).expect("the test fixture is created before this assertion reads it");
+        remove_directory_if_exists(&root).expect("the test fixture is created before this assertion reads it");
     }

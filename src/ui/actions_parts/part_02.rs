@@ -1,9 +1,9 @@
-
+﻿
 impl SanAndreasModUi
 {
     /// Validate then persist an edited install root. Returns whether it was saved
     /// so the caller can keep an invalid edit open for correction.
-    pub(super) fn save_mod_install_root(
+    pub(super) fn should_save_mod_install_root(
         &mut self,
         config_path: &Path,
         root_index: usize,
@@ -28,16 +28,16 @@ impl SanAndreasModUi
 /// containment rule the installer enforces. `kind` comes from a fixed dropdown,
 /// so it needs no check here.
 #[derive(Default)]
-struct ModInfoFilesAndReadmes
+struct ModDetailsFilesAndReadmes
 {
     files: Vec<String>,
     readmes: Vec<(String, String)>,
 }
 
-fn mod_info_files_and_readmes(root: &Path) -> ModInfoFilesAndReadmes
+fn mod_details_files_and_readmes(root: &Path) -> ModDetailsFilesAndReadmes
 {
     let Ok(paths) = collect_files_recursive(root) else {
-        return ModInfoFilesAndReadmes {
+        return ModDetailsFilesAndReadmes {
             files: Vec::new(),
             readmes: Vec::new(),
         };
@@ -50,15 +50,15 @@ fn mod_info_files_and_readmes(root: &Path) -> ModInfoFilesAndReadmes
             continue;
         };
         let relative = relative.to_string_lossy().replace('\\', "/");
-        push_mod_info_readme(path, &relative, &mut readmes);
+        push_mod_details_readme(path, &relative, &mut readmes);
         files.push(relative);
     }
-    return ModInfoFilesAndReadmes { files, readmes };
+    return ModDetailsFilesAndReadmes { files, readmes };
 }
 
-fn push_mod_info_readme(path: &Path, relative: &str, readmes: &mut Vec<(String, String)>)
+fn push_mod_details_readme(path: &Path, relative: &str, readmes: &mut Vec<(String, String)>)
 {
-    if readmes.len() >= MAX_MOD_INFO_READMES
+    if readmes.len() >= MAX_MOD_DETAILS_READMES
     {
         // literal: allow UI tuning threshold is local to this control
         return;
@@ -121,7 +121,7 @@ impl SanAndreasModUi
             self.selected_run_target = 0;
             return;
         };
-        match launch_external_tool(&PathBuf::from(&tool.path), &tool.arg_list())
+        match launch_external_tool_from_arguments(&PathBuf::from(&tool.path), &tool.arg_list())
         {
             Ok(_child) => {
                 // The tool runs detached; we neither wait on nor clean up after it.
@@ -256,7 +256,7 @@ impl SanAndreasModUi
         self.active_run = Some(active);
         self.game_child = Some(child);
         self.last_error = None;
-        self.status = format!("playing profile; cleanup record {}", journal.display());
+        self.status = format!("playing profile; cleanup record_log_message_from_arguments {}", journal.display());
         if let Err(err) = self.reload_state()
         {
             self.record_error(err);
@@ -268,16 +268,16 @@ impl SanAndreasModUi
 {
     pub(super) fn cleanup_pending_run(&mut self)
     {
-        let Some(record) = self.selected_pending_run() else {
-            self.status = "no cleanup record selected".to_string();
+        let Some(record_log_message_from_arguments) = self.selected_pending_run() else {
+            self.status = "no cleanup record_log_message_from_arguments selected".to_string();
             return;
         };
-        if self.pending_run_is_running(&record)
+        if self.is_pending_run_running(&record_log_message_from_arguments)
         {
             self.status = "game is still running; cleanup is blocked".to_string();
             return;
         }
-        let journal = record.journal.clone();
+        let journal = record_log_message_from_arguments.journal.clone();
         let cleanup_result = self.cleanup_journal(&journal);
         self.set_action_result(
             "cleaned temporary files",
@@ -293,14 +293,14 @@ impl SanAndreasModUi
 
 impl SanAndreasModUi
 {
-    pub(super) fn cleanup_pending_run_record(&mut self, record: PendingRunRecord)
+    pub(super) fn cleanup_pending_run_record(&mut self, record_log_message_from_arguments: PendingRunRecord)
     {
-        if self.pending_run_is_running(&record)
+        if self.is_pending_run_running(&record_log_message_from_arguments)
         {
             self.status = "game is still running; cleanup is blocked".to_string();
             return;
         }
-        let journal = record.journal.clone();
+        let journal = record_log_message_from_arguments.journal.clone();
         let cleanup_result = self.cleanup_journal(&journal);
         self.set_action_result(
             "cleaned temporary files",
@@ -326,7 +326,7 @@ impl SanAndreasModUi
         let stale_runs = self
             .pending_runs
             .iter()
-            .filter(|record| record.status == PendingRunStatus::Stale)
+            .filter(|record_log_message_from_arguments| record_log_message_from_arguments.status == PendingRunStatus::Stale)
             .cloned()
             .collect::<Vec<_>>();
         if stale_runs.is_empty()
@@ -338,9 +338,9 @@ impl SanAndreasModUi
         let game_root = self.game_root();
         let mut cleaned = 0;
         let mut first_error = None;
-        for record in stale_runs
+        for record_log_message_from_arguments in stale_runs
         {
-            let result = cleanup_journal_for_game_root(&game_root, &record.journal);
+            let result = cleanup_journal_for_game_root(&game_root, &record_log_message_from_arguments.journal);
             match result
             {
                 Ok(()) => cleaned += 1,
@@ -357,13 +357,3 @@ impl SanAndreasModUi
         };
     }
 }
-
-
-
-
-
-
-
-
-
-

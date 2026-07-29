@@ -1,4 +1,4 @@
-    use super::{EXPECTED_GROUP_ENTRY_COUNT, EXPECTED_HANDLING_FILE_COUNT, EXPECTED_LOG_ERROR_COUNT, MODLOADER_BUILTIN_DEFAULT_PRIORITY, MODLOADER_PRIORITY_PAIR_COUNT, MODLOADER_PRIORITY_TRIPLE_COUNT, MODLOADER_TEST_DEFAULT_PRIORITY, MODLOADER_TEST_HIGH_PRIORITY, MODLOADER_TEST_LIMIT, MODLOADER_TEST_LOW_PRIORITY, MODLOADER_TEST_MID_PRIORITY, MODLOADER_TEST_EXTENDED_LIMIT, ModLoaderManagedProfileRender, asi_view, build_content_index, cleo_view, group_entries, is_mergeable_data_file, modloader_conflicts, modloader_folder_from_target, modloader_virtual_asset, modloader_active_profile, modloader_managed_profile_name, modloader_priority_limit, parse_modloader_log, parse_modloader_priorities, per_mod_flags, render_modloader_managed_profile, render_modloader_priority_ini, spread_priority};
+﻿    use super::{EXPECTED_GROUP_ENTRY_COUNT, EXPECTED_HANDLING_FILE_COUNT, EXPECTED_LOG_ERROR_COUNT, MODLOADER_BUILTIN_DEFAULT_PRIORITY, MODLOADER_PRIORITY_PAIR_COUNT, MODLOADER_PRIORITY_TRIPLE_COUNT, MODLOADER_TEST_DEFAULT_PRIORITY, MODLOADER_TEST_HIGH_PRIORITY, MODLOADER_TEST_LIMIT, MODLOADER_TEST_LOW_PRIORITY, MODLOADER_TEST_MID_PRIORITY, MODLOADER_TEST_EXTENDED_LIMIT, ModLoaderManagedProfileRender, asi_view, build_content_index, cleo_view, group_entries, is_mergeable_game_resource_file, modloader_conflicts, modloader_folder_from_target, modloader_virtual_asset, modloader_active_profile, modloader_managed_profile_name, modloader_priority_limit, parse_modloader_log, parse_modloader_priorities, per_mod_flags, render_modloader_managed_profile, render_modloader_priority_ini, spread_priority};
     use crate::prelude::*;
 
     struct TestInstallRoot<'a>
@@ -8,7 +8,7 @@
         kind: &'a str,
     }
 
-    fn root(root: TestInstallRoot<'_>) -> ModInstallRootJson
+    fn install_root_fixture(root: TestInstallRoot<'_>) -> ModInstallRootJson
     {
         let source = root.source;
         let target = root.target;
@@ -39,12 +39,12 @@
             IndexedMod {
                 id: "early".to_string(),
                 source_root: early.clone(),
-                roots: vec![root(TestInstallRoot { source: "payload", target: "data", kind: "direct" })],
+                roots: vec![install_root_fixture(TestInstallRoot { source: "payload", target: "data", kind: "direct" })],
             },
             IndexedMod {
                 id: "late".to_string(),
                 source_root: late.clone(),
-                roots: vec![root(TestInstallRoot { source: "payload", target: "data", kind: "direct" })],
+                roots: vec![install_root_fixture(TestInstallRoot { source: "payload", target: "data", kind: "direct" })],
             },
         ];
 
@@ -78,12 +78,12 @@
             IndexedMod {
                 id: "early".to_string(),
                 source_root: early.clone(),
-                roots: vec![root(TestInstallRoot { source: "p", target: "data", kind: "direct" })],
+                roots: vec![install_root_fixture(TestInstallRoot { source: "p", target: "data", kind: "direct" })],
             },
             IndexedMod {
                 id: "late".to_string(),
                 source_root: late.clone(),
-                roots: vec![root(TestInstallRoot { source: "p", target: "data", kind: "direct" })],
+                roots: vec![install_root_fixture(TestInstallRoot { source: "p", target: "data", kind: "direct" })],
             },
         ];
         let index = build_content_index(&mods);
@@ -111,7 +111,7 @@
         ));
         let a = base.join("a");
         let b = base.join("b");
-        // Two mods both ship the same CLEO save file — normally a conflict.
+        // Two mods both ship the same CLEO save file â€” normally a conflict.
         write_file(&a.join("s").join("slot1.sav"), "a");
         write_file(&b.join("s").join("slot1.sav"), "b");
 
@@ -119,12 +119,12 @@
             IndexedMod {
                 id: "a".to_string(),
                 source_root: a.clone(),
-                roots: vec![root(TestInstallRoot { source: "s", target: "CLEO/cleo_saves", kind: "cleo_saves" })],
+                roots: vec![install_root_fixture(TestInstallRoot { source: "s", target: "CLEO/cleo_saves", kind: "cleo_saves" })],
             },
             IndexedMod {
                 id: "b".to_string(),
                 source_root: b.clone(),
-                roots: vec![root(TestInstallRoot { source: "s", target: "CLEO/cleo_saves", kind: "cleo_saves" })],
+                roots: vec![install_root_fixture(TestInstallRoot { source: "s", target: "CLEO/cleo_saves", kind: "cleo_saves" })],
             },
         ];
 
@@ -144,10 +144,10 @@
     #[test]
     fn cleo_view_pairs_scripts_with_their_companions()
     {
-        let script = entry("cleo/speedo.cs");
-        let ini = entry("cleo/speedo.ini");
-        let fxt = entry("cleo/speedo.fxt");
-        let orphan = entry("cleo/shared_data.dat");
+        let script = content_entry_fixture("cleo/speedo.cs");
+        let ini = content_entry_fixture("cleo/speedo.ini");
+        let fxt = content_entry_fixture("cleo/speedo.fxt");
+        let orphan = content_entry_fixture("cleo/shared_data.dat");
         let refs = vec![&script, &ini, &fxt, &orphan];
 
         let view = cleo_view(&refs);
@@ -157,7 +157,7 @@
         let companions: Vec<&str> = view.scripts[0]
             .companions
             .iter()
-            .map(|c| c.target.as_str())
+            .map(|companion| companion.target.as_str())
             .collect();
         assert_eq!(companions, vec!["cleo/speedo.fxt", "cleo/speedo.ini"]);
         assert_eq!(view.loose.len(), 1);
@@ -167,9 +167,9 @@
     #[test]
     fn cleo_view_separates_plugins_from_scripts()
     {
-        let script = entry("cleo/mod.cs");
-        let compat = entry("cleo/legacy.cs4");
-        let plugin = entry("cleo/cleo_plugins/SA.IniFiles.cleo");
+        let script = content_entry_fixture("cleo/mod.cs");
+        let compat = content_entry_fixture("cleo/legacy.cs4");
+        let plugin = content_entry_fixture("cleo/cleo_plugins/SA.IniFiles.cleo");
         let refs = vec![&script, &compat, &plugin];
 
         let view = cleo_view(&refs);
@@ -178,17 +178,17 @@
         let scripts: Vec<&str> = view
             .scripts
             .iter()
-            .map(|s| s.script.target.as_str())
+            .map(|script| script.script.target.as_str())
             .collect();
         assert_eq!(scripts, vec!["cleo/legacy.cs4", "cleo/mod.cs"]);
     }
 
     #[test]
-    fn asi_view_separates_plugins_from_loader_dlls()
+    fn asi_view_separates_plugins_from_loader_libraries()
     {
-        let plugin = entry("scripts/CLEO.asi");
-        let loader = entry("dinput8.dll");
-        let config = entry("scripts/CLEO.ini");
+        let plugin = content_entry_fixture("scripts/CLEO.asi");
+        let loader = content_entry_fixture("dinput8.dll");
+        let config = content_entry_fixture("scripts/CLEO.ini");
         let refs = vec![&plugin, &loader, &config];
 
         let view = asi_view(&refs);
@@ -279,10 +279,10 @@ HD_Roads=30   ; inline comment
             id: "mod".to_string(),
             source_root: m.clone(),
             roots: vec![
-                root(TestInstallRoot { source: "cleo", target: "cleo", kind: "cleo" }),
-                root(TestInstallRoot { source: "asi", target: ".", kind: "asi" }),
-                root(TestInstallRoot { source: "ml", target: "modloader/mymod", kind: "modloader" }),
-                root(TestInstallRoot { source: "direct", target: ".", kind: "direct" }),
+                install_root_fixture(TestInstallRoot { source: "cleo", target: "cleo", kind: "cleo" }),
+                install_root_fixture(TestInstallRoot { source: "asi", target: ".", kind: "asi" }),
+                install_root_fixture(TestInstallRoot { source: "ml", target: "modloader/mymod", kind: "modloader" }),
+                install_root_fixture(TestInstallRoot { source: "direct", target: ".", kind: "direct" }),
             ],
         }];
 
@@ -331,10 +331,10 @@ HD_Roads=30   ; inline comment
     #[test]
     fn modloader_conflicts_detected_across_sandbox_folders_with_priority_winner()
     {
-        // Two vehicle mods each replace infernus.dff in their own folder — no
+        // Two vehicle mods each replace infernus.dff in their own folder â€” no
         // literal target collision, but a real ModLoader runtime conflict.
-        let a = ml_entry("modloader/ModA/infernus.dff");
-        let b = ml_entry("modloader/ModB/gta3.img/infernus.dff");
+        let a = modloader_entry("modloader/ModA/infernus.dff");
+        let b = modloader_entry("modloader/ModB/gta3.img/infernus.dff");
         let refs = vec![&a, &b];
 
         let mut priorities = ModLoaderPriorities {
@@ -357,7 +357,7 @@ HD_Roads=30   ; inline comment
         assert!(!conflict.ambiguous);
     }
 
-    fn ml_entry(target: &str) -> ContentEntry
+    fn modloader_entry(target: &str) -> ContentEntry
     {
         return ContentEntry {
             target: target.to_string(),
@@ -375,7 +375,7 @@ HD_Roads=30   ; inline comment
         fs::write(path, contents).expect("the test fixture is created before this assertion reads it"); // error-type: allow included only from cfg(test) harness code
     }
 
-    fn entry(target: &str) -> ContentEntry
+    fn content_entry_fixture(target: &str) -> ContentEntry
     {
         return ContentEntry {
             target: target.to_string(),
@@ -383,5 +383,3 @@ HD_Roads=30   ; inline comment
             providers: vec!["m".to_string()],
         };
     }
-
-

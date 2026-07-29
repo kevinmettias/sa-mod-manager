@@ -1,4 +1,4 @@
-use crate::prelude::*;
+﻿use crate::prelude::*;
 use eframe::egui;
 
 use super::preferences::UiPreferences;
@@ -63,7 +63,7 @@ pub(super) enum ModStatusFilter
 
 /// The active tab of the per-mod info window (MO2's Mod Info dialog).
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
-pub(super) enum ModInfoTab
+pub(super) enum ModDetailsTab
 {
     #[default]
     Files,
@@ -77,10 +77,10 @@ pub(super) enum ModInfoTab
 /// A per-mod detail view (MO2's Mod Info dialog): the file list and any readme
 /// text are gathered once when the window opens; conflicts and install roots are
 /// read live from the content index / config each frame.
-pub(super) struct ModInfoView
+pub(super) struct ModDetailsView
 {
     pub(super) id: String,
-    pub(super) tab: ModInfoTab,
+    pub(super) tab: ModDetailsTab,
     /// Relative file paths under the mod's library source root.
     pub(super) files: Vec<String>,
     /// `(relative path, contents)` for readme-like files found in the mod.
@@ -166,7 +166,7 @@ pub(super) struct SanAndreasModUi
     pub(super) filters: UiFilters,
     /// User annotations (categories / color / note) keyed by mod id.
     pub(super) mod_meta: BTreeMap<String, ModMeta>,
-    /// Per-profile ModLoader priority overrides (folder → priority; 0 = disabled
+    /// Per-profile ModLoader priority overrides (folder â†’ priority; 0 = disabled
     /// in ModLoader), applied to modloader.ini on demand.
     pub(super) modloader_overrides: BTreeMap<String, i32>,
     /// Load-order separators (labeled group dividers) for the selected profile.
@@ -183,7 +183,7 @@ pub(super) struct SanAndreasModUi
     pub(super) new_tool_path: String,
     pub(super) new_tool_args: String,
     /// The per-mod info window, when open (MO2's Mod Info dialog).
-    pub(super) mod_info: Option<ModInfoView>,
+    pub(super) mod_info: Option<ModDetailsView>,
     window_size: [f32; 2], // literal: allow UI tuning threshold is local to this control
     last_pref_save: Instant,
     prefs_signature: String,
@@ -223,8 +223,8 @@ pub(super) enum TaskResult
 }
 
 /// The in-memory context of the run currently launched by this manager session.
-/// Held so that when the game process exits we can record a full outcome (exit
-/// code, duration, launch args) — detail that only exists while we own the child
+/// Held so that when the game process exits we can record_log_message_from_arguments a full outcome (exit
+/// code, duration, launch args) â€” detail that only exists while we own the child
 /// handle and is lost across a manager restart.
 pub(super) struct ActiveRun
 {
@@ -346,10 +346,3 @@ impl fmt::Display for PendingRunStatus
         };
     }
 }
-
-
-
-
-
-
-

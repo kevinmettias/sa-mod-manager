@@ -1,9 +1,9 @@
-use crate::planning::{readme_copy_install_root, ReadmeCopyInstallRoot};
+﻿use crate::planning::{readme_copy_install_root, ReadmeCopyInstallRoot};
 use crate::prelude::*;
 const MILLISECONDS_PER_SECOND: u64 = 1000;
 const README_ACCEPT_MAX_BYTES: u64 = 64 * 1024;
 const RUN_OUTCOME_JOURNAL_MAX_BYTES: u64 = 64 * 1024 * 1024;
-const MAX_MOD_INFO_READMES: usize = 12;
+const MAX_MOD_DETAILS_READMES: usize = 12;
 #[cfg(test)]
 const TEST_PID: u32 = 1234;
 #[cfg(test)]
@@ -14,7 +14,7 @@ use crate::workspace::{ProfileCopyRequest, ProfileModSelection, ProfileRenameReq
 use eframe::egui;
 
 use super::san_andreas_mod_ui::{
-    ActiveRun, ConfirmAction, ModInfoTab, ModInfoView, PendingConfirm, PendingRunRecord, PendingRunStatus,
+    ActiveRun, ConfirmAction, ModDetailsTab, ModDetailsView, PendingConfirm, PendingRunRecord, PendingRunStatus,
     ReadmeProposal, ReadmeProposalState, SanAndreasModUi, TaskResult, export_telemetry_summary,
 };
 
@@ -173,7 +173,7 @@ impl SanAndreasModUi
     /// Open the per-mod info window (MO2's Mod Info dialog). Gathers the mod's
     /// file list and any readme text once, up front; conflicts and roots are read
     /// live while the window is shown.
-    pub(super) fn open_mod_info(&mut self, mod_id: &str)
+    pub(super) fn open_mod_details(&mut self, mod_id: &str)
     {
         let Some(item) = self
             .state
@@ -200,8 +200,8 @@ impl SanAndreasModUi
             });
         let files_and_readmes = source_root
             .as_deref()
-            .map(mod_info_files_and_readmes)
-            .unwrap_or_else(ModInfoFilesAndReadmes::default);
+            .map(mod_details_files_and_readmes)
+            .unwrap_or_else(ModDetailsFilesAndReadmes::default);
         let files = files_and_readmes.files;
         let readmes = files_and_readmes.readmes;
         let note_edit = self
@@ -209,9 +209,9 @@ impl SanAndreasModUi
             .get(mod_id)
             .map(|meta| meta.note.clone())
             .unwrap_or_default();
-        self.mod_info = Some(ModInfoView {
+        self.mod_info = Some(ModDetailsView {
             id: mod_id.to_string(),
-            tab: ModInfoTab::Files,
+            tab: ModDetailsTab::Files,
             files,
             readmes,
             source_root,
@@ -227,7 +227,7 @@ impl SanAndreasModUi
         self.persist_mod_meta();
     }
 
-    /// Add the category if absent, remove it if present, then persist.
+    /// Add the category if absent, remove_profile_fixture it if present, then persist.
     pub(super) fn toggle_mod_category(&mut self, toggle: ModCategoryToggle<'_>)
     {
         let mod_id = toggle.mod_id;
@@ -427,7 +427,7 @@ impl SanAndreasModUi
             index.conflict_count()
         );
         // Files in the game folder's mod areas that no enabled mod provides
-        // (MO2's "overwrite") — computed from the index's owned target paths.
+        // (MO2's "overwrite") â€” computed from the index's owned target paths.
         let owned: BTreeSet<String> = index
             .entries
             .iter()
@@ -475,15 +475,3 @@ impl SanAndreasModUi
         });
     }
 }
-
-
-
-
-
-
-
-
-
-
-
-

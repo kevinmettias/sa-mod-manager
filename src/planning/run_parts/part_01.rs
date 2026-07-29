@@ -1,4 +1,4 @@
-use crate::prelude::*;
+﻿use crate::prelude::*;
 
 use super::content::{
     ModLoaderManagedProfileRender, modloader_active_profile, modloader_folder_from_target,
@@ -15,11 +15,11 @@ pub(crate) fn prepare_run(game_root: &Path, profile_name: &str) -> Result<(), Ap
     let (mut launch_args, launch_env) = profile_launch_settings(game_root, profile_name)?;
     let journal_path = materialize_profile_for_run(game_root, profile_name)?;
     // Activate the manager-owned ModLoader profile written during materialize so
-    // ModLoader applies this profile's per-folder priority natively for the run —
+    // ModLoader applies this profile's per-folder priority natively for the run â€”
     // unless the user's own launch args already choose a ModLoader mode. `-nomods`,
     // `-mod`, and `-modprof` are mutually exclusive (nomods > modprof > mod), so a
     // second `-modprof` would be dead; respect the explicit choice instead.
-    if !launch_args_select_modloader_mode(&launch_args)
+    if !should_launch_args_select_modloader_mode(&launch_args)
     {
         if let Some(managed) = modloader_run_profile(game_root, profile_name)
         {
@@ -28,7 +28,7 @@ pub(crate) fn prepare_run(game_root: &Path, profile_name: &str) -> Result<(), Ap
         }
     }
     let started_unix = unix_now();
-    let status_result = launch_game_and_wait(game_root, &launch_args, &launch_env);
+    let status_result = launch_game_and_wait_from_arguments(game_root, &launch_args, &launch_env);
     // Record how the launch actually went before rolling the run back, so a
     // failed launch is distinguishable from a real play session in telemetry.
     let outcome_context = RunOutcomeContext {
@@ -53,7 +53,7 @@ struct RunOutcomeContext<'a>
     launch_args: &'a [String],
     started_unix: u64,
 }
-fn launch_game_and_wait(
+fn launch_game_and_wait_from_arguments(
     game_root: &Path,
     args: &[String],
     env: &BTreeMap<String, String>,
@@ -107,7 +107,7 @@ fn record_run_outcome(
     // Telemetry is best-effort: a failed write must not fail the run itself.
     if let Err(err) = write_run_outcome(&state_directory(context.game_root), &outcome)
     {
-        log_warn!("could not record run outcome: {err}");
+        log_warn!("could not record_log_message_from_arguments run outcome: {err}");
     }
 }
 
@@ -154,7 +154,7 @@ pub(crate) fn materialize_profile_for_run(
     }
 
     // Reflect the profile's load order into ModLoader's own per-folder priority,
-    // so the order the user set actually governs which mod wins at runtime — for
+    // so the order the user set actually governs which mod wins at runtime â€” for
     // sandboxed modloader mods, copy order into distinct folders decides nothing.
     // Journaled like any other write, so an ephemeral run's rollback restores the
     // prior modloader.ini.
@@ -187,10 +187,10 @@ fn read_enabled_profile(game_root: &Path, profile_name: &str) -> Result<ProfileJ
         .join(format!("{profile_name}.json"));
     let mut profile = read_profile_json(&profile_path)?;
     profile.mods.retain(|entry| entry.enabled);
-    profile.mods.sort_by(|a, b| {
-        a.load_order
-            .cmp(&b.load_order)
-            .then_with(|| a.id.cmp(&b.id))
+    profile.mods.sort_by(|left, right| {
+        left.load_order
+            .cmp(&right.load_order)
+            .then_with(|| left.id.cmp(&right.id))
     });
     validate_profile_mods(&profile)?;
     return Ok(profile);
@@ -360,7 +360,7 @@ fn enabled_install_roots(
             root.target = target;
         }
     }
-    roots.sort_by(|a, b| a.source.cmp(&b.source));
+    roots.sort_by(|left, right| left.source.cmp(&right.source));
     return roots;
 }
 
@@ -454,8 +454,8 @@ fn rollback_failed_materialization(
 }
 
 /// Express the profile's load order as a native ModLoader profile in
-/// `modloader/modloader.ini`, so ModLoader's own per-folder priority — the thing
-/// that actually decides which sandboxed mod wins a shared asset — matches the
+/// `modloader/modloader.ini`, so ModLoader's own per-folder priority â€” the thing
+/// that actually decides which sandboxed mod wins a shared asset â€” matches the
 /// order the user set. Written into a manager-owned `SAMM_<profile>` profile
 /// (inheriting the user's `Default`) and activated per launch with `-modprof`, so
 /// the user's own ModLoader config is never disturbed. A no-op when the profile
@@ -467,4 +467,3 @@ struct ModLoaderPriorityRunContext<'a>
     game_root: &'a Path,
     backup_root: &'a Path,
 }
-

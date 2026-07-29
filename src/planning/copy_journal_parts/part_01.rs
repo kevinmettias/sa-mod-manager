@@ -234,7 +234,7 @@ pub(super) fn apply_generated_file_with_journal(
 /// mirroring [`copy_and_hash`] but for in-memory bytes rather than a source file.
 fn write_and_hash(content: &[u8], dest: &Path) -> Result<String, AppError>
 {
-    let temp = temp_sibling(dest);
+    let temp = temporary_sibling(dest);
     let write_result = (|| -> Result<u64, AppError> {
         let mut output =
             fs::File::create(&temp).with_context(|| format!("create {}", temp.display()))?;
@@ -257,7 +257,7 @@ fn write_and_hash(content: &[u8], dest: &Path) -> Result<String, AppError>
         Err(err) => {
             if let Err(cleanup_err) = fs::remove_file(&temp)
             {
-                log_warn!("could not remove failed temp file {}: {cleanup_err}", temp.display());
+                log_warn!("could not remove_profile_fixture failed temp file {}: {cleanup_err}", temp.display());
             }
             return Err(err);
         }
@@ -266,7 +266,7 @@ fn write_and_hash(content: &[u8], dest: &Path) -> Result<String, AppError>
     {
         if let Err(cleanup_err) = fs::remove_file(&temp)
         {
-            log_warn!("could not remove unrenamed temp file {}: {cleanup_err}", temp.display());
+            log_warn!("could not remove_profile_fixture unrenamed temp file {}: {cleanup_err}", temp.display());
         }
         return Err(
             AppError::from(err).context(format!("replace {} with generated file", dest.display()))
@@ -288,7 +288,7 @@ fn apply_copy_file(file: &Path, context: CopyFileContext<'_, '_>) -> Result<(), 
         context.backup_root,
         context.journal,
     )?;
-    // Force the backup/new record to durable storage *before* the destructive
+    // Force the backup/new record_log_message_from_arguments to durable storage *before* the destructive
     // copy below, so a crash can never leave an overwritten game file with no
     // recoverable journal entry.
     sync_shared_journal(context.journal)?;
@@ -341,13 +341,13 @@ fn journal_destination_state(
 /// derived from `dest` cannot collide across concurrent workers.
 fn copy_and_hash(source: &Path, dest: &Path) -> Result<String, AppError>
 {
-    let temp = temp_sibling(dest);
-    let hash = match stream_copy_to_temp(source, &temp) {
+    let temp = temporary_sibling(dest);
+    let hash = match stream_copy_to_temporary_file(source, &temp) {
         Ok(hash) => hash,
         Err(err) => {
             if let Err(cleanup_err) = fs::remove_file(&temp)
             {
-                log_warn!("could not remove failed temp file {}: {cleanup_err}", temp.display());
+                log_warn!("could not remove_profile_fixture failed temp file {}: {cleanup_err}", temp.display());
             }
             return Err(err);
         }
@@ -359,7 +359,7 @@ fn copy_and_hash(source: &Path, dest: &Path) -> Result<String, AppError>
     {
         if let Err(cleanup_err) = fs::remove_file(&temp)
         {
-            log_warn!("could not remove unrenamed temp file {}: {cleanup_err}", temp.display());
+            log_warn!("could not remove_profile_fixture unrenamed temp file {}: {cleanup_err}", temp.display());
         }
         return Err(
             AppError::from(err).context(format!("replace {} with staged copy", dest.display()))
@@ -368,7 +368,7 @@ fn copy_and_hash(source: &Path, dest: &Path) -> Result<String, AppError>
     return Ok(format!("fnv64:{hash:016x}"));
 }
 
-fn stream_copy_to_temp(source: &Path, temp: &Path) -> Result<u64, AppError>
+fn stream_copy_to_temporary_file(source: &Path, temp: &Path) -> Result<u64, AppError>
 {
     let mut input = fs::File::open(source).with_context(|| format!("open {}", source.display()))?;
     let mut output =
@@ -403,7 +403,7 @@ fn stream_copy_to_temp(source: &Path, temp: &Path) -> Result<u64, AppError>
 
 /// A staging path alongside `dest` (same directory, hence same filesystem, so
 /// the follow-up rename stays atomic).
-fn temp_sibling(dest: &Path) -> PathBuf
+fn temporary_sibling(dest: &Path) -> PathBuf
 {
     let mut name = dest.as_os_str().to_os_string();
     name.push(".sa-tmp");
@@ -465,6 +465,3 @@ fn write_copy_line(
     .with_context(|| format!("write copy journal entry for {}", dest.display()))?;
     return Ok(());
 }
-
-
-

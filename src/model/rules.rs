@@ -1,4 +1,4 @@
-mod candidate_detection;
+﻿mod candidate_detection;
 mod candidate_metadata;
 mod component;
 mod component_rule;

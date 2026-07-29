@@ -1,4 +1,4 @@
-    use super::{OTHER_TEST_PID, TEST_PENDING_PID, TEST_PID, forget_pending_run, load_pending_run_records, pending_run_matches_current_session, process_is_running, readme_proposal_from_instruction, readme_copy_install_root, remember_pending_run, validate_install_root};
+﻿    use super::{OTHER_TEST_PID, TEST_PENDING_PID, TEST_PID, forget_pending_run, load_pending_run_records, is_pending_run_match_for_current_session, is_child_program_running, readme_proposal_from_instruction, readme_copy_install_root, remember_pending_run, validate_install_root};
     use crate::prelude::*;
     use crate::ui::actions::{PendingRunRecord, PendingRunStatus, ReadmeCopyInstallRoot, ReadmeProposalState};
     use crate::ui::san_andreas_mod_ui::SanAndreasModUi;
@@ -33,7 +33,7 @@
 
         forget_pending_run(&game_root, &journal).expect("the test fixture is created before this assertion reads it");
         assert!(load_pending_run_records(&game_root).expect("the test fixture is created before this assertion reads it").is_empty());
-        remove_dir_if_exists(&game_root).expect("the test fixture is created before this assertion reads it");
+        remove_directory_if_exists(&game_root).expect("the test fixture is created before this assertion reads it");
     }
 
     #[test]
@@ -66,7 +66,7 @@
 
         assert!(!materialized.exists());
         assert!(load_pending_run_records(&game_root).expect("the test fixture is created before this assertion reads it").is_empty());
-        remove_dir_if_exists(&game_root).expect("the test fixture is created before this assertion reads it");
+        remove_directory_if_exists(&game_root).expect("the test fixture is created before this assertion reads it");
     }
 
     #[test]
@@ -98,7 +98,7 @@
         assert!(!materialized.exists());
         assert!(load_pending_run_records(&game_root).expect("the test fixture is created before this assertion reads it").is_empty());
         assert!(ui.status.contains("auto-cleaned 1"));
-        remove_dir_if_exists(&game_root).expect("the test fixture is created before this assertion reads it");
+        remove_directory_if_exists(&game_root).expect("the test fixture is created before this assertion reads it");
     }
 
     #[test]
@@ -162,25 +162,25 @@
             detail: String::new(),
         };
 
-        assert!(pending_run_matches_current_session(
+        assert!(is_pending_run_match_for_current_session(
             &current,
             Some(TEST_PENDING_PID)
         ));
-        assert!(!pending_run_matches_current_session(
+        assert!(!is_pending_run_match_for_current_session(
             &external,
             Some(TEST_PENDING_PID)
         ));
-        assert!(!pending_run_matches_current_session(
+        assert!(!is_pending_run_match_for_current_session(
             &stale,
             Some(TEST_PENDING_PID)
         ));
-        assert!(!pending_run_matches_current_session(&current, None));
+        assert!(!is_pending_run_match_for_current_session(&current, None));
     }
 
     #[test]
     fn zero_pid_is_not_running()
     {
-        assert!(!process_is_running(0));
+        assert!(!is_child_program_running(0));
     }
 
     #[test]
@@ -233,7 +233,7 @@
             std::process::id(),
             unix_now()
         ));
-        remove_dir_if_exists(&root).expect("the test fixture is created before this assertion reads it"); // error-type: allow included only from cfg(test) harness code
+        remove_directory_if_exists(&root).expect("the test fixture is created before this assertion reads it"); // error-type: allow included only from cfg(test) harness code
         fs::create_dir_all(&root).expect("the test fixture is created before this assertion reads it"); // error-type: allow included only from cfg(test) harness code
         return root;
     }
@@ -243,7 +243,7 @@
         return crate::ui::preferences::UiPreferences::default();
     }
 
-    fn remove_dir_if_exists(path: &Path) -> Result<(), AppError>
+    fn remove_directory_if_exists(path: &Path) -> Result<(), AppError>
     {
         if path.exists()
         {
@@ -251,5 +251,3 @@
         }
         return Ok(());
     }
-
-

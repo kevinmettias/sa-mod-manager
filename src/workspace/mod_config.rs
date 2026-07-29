@@ -1,4 +1,4 @@
-use crate::prelude::*;
+﻿use crate::prelude::*;
 
 pub(crate) fn write_mod_config_json(
     report: &PackageReport,
@@ -233,7 +233,7 @@ pub(crate) fn append_mod_config_install_root(
         })?;
     if roots
         .iter()
-        .any(|existing| install_root_matches(existing, root))
+        .any(|existing| is_install_root_match(existing, root))
     {
         return Ok(false);
     }
@@ -246,7 +246,7 @@ pub(crate) fn append_mod_config_install_root(
     return Ok(true);
 }
 
-fn install_root_matches(existing: &serde_json::Value, root: &ModInstallRootJson) -> bool
+fn is_install_root_match(existing: &serde_json::Value, root: &ModInstallRootJson) -> bool
 {
     let field = |key: &str| existing.get(key).and_then(serde_json::Value::as_str);
     return field("source") == Some(root.source.as_str())
@@ -306,7 +306,7 @@ mod tests
         let text = fs::read_to_string(&config_path)
             .expect("the test fixture is created before this assertion reads it");
         assert!(text.contains("keep me"));
-        remove_dir_if_exists(&root)
+        remove_directory_if_exists(&root)
             .expect("the test fixture is created before this assertion reads it");
     }
 
@@ -369,7 +369,7 @@ mod tests
         let reparsed = read_mod_config_json(&config_path)
             .expect("the test fixture is created before this assertion reads it");
         assert_eq!(reparsed.install_roots.len(), 2); // literal: allow test fixture value is the specimen under judgment
-        remove_dir_if_exists(&root)
+        remove_directory_if_exists(&root)
             .expect("the test fixture is created before this assertion reads it");
     }
 
@@ -380,14 +380,14 @@ mod tests
             std::process::id(),
             unix_now()
         ));
-        remove_dir_if_exists(&root)
+        remove_directory_if_exists(&root)
             .expect("the test fixture is created before this assertion reads it");
         fs::create_dir_all(&root)
             .expect("the test fixture is created before this assertion reads it");
         return root;
     }
 
-    fn remove_dir_if_exists(path: &Path) -> Result<(), AppError>
+    fn remove_directory_if_exists(path: &Path) -> Result<(), AppError>
     {
         if path.exists()
         {

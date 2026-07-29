@@ -1,4 +1,4 @@
-
+﻿
 impl SanAndreasModUi
 {
     /// The left filters column (MO2's Categories/filters pane): narrows the mod
@@ -161,7 +161,7 @@ impl SanAndreasModUi
             Some((false, errors, warnings)) => ui
                 .selectable_label(
                     false,
-                    egui::RichText::new(format!("ModLoader: {errors} err · {warnings} warn"))
+                    egui::RichText::new(format!("ModLoader: {errors} err Â· {warnings} warn"))
                         .color(warn),
                 )
                 .on_hover_text("Open the ModLoader viewer")
@@ -200,7 +200,7 @@ impl SanAndreasModUi
             self.tab = UiTab::Content;
         }
 
-        // Overwrite (unmanaged game-folder files) — only meaningful after a scan.
+        // Overwrite (unmanaged game-folder files) â€” only meaningful after a scan.
         if self.content.index.is_some()
         {
             let unmanaged = self.overwrite_files.len();
@@ -212,7 +212,7 @@ impl SanAndreasModUi
                     false,
                     egui::RichText::new(format!("Unmanaged: {unmanaged} files")).color(warn),
                 )
-                .on_hover_text("Game-folder files no enabled mod owns — see the Play tab")
+                .on_hover_text("Game-folder files no enabled mod owns â€” see the Play tab")
                 .clicked()
             {
                 self.tab = UiTab::Run;
@@ -220,7 +220,7 @@ impl SanAndreasModUi
         }
     }
 
-    /// The centre pane — the always-visible mod list (load order) with its profile
+    /// The centre pane â€” the always-visible mod list (load order) with its profile
     /// settings and per-profile root overrides. This is the heart of the window.
     pub(super) fn mods_center_panel(&mut self, ui: &mut egui::Ui)
     {
@@ -228,7 +228,7 @@ impl SanAndreasModUi
         let enabled = entries.iter().filter(|entry| entry.enabled).count();
         ui.add_space(UI_SMALL_GAP);
         ui.horizontal(|ui| {
-            ui.heading(format!("Mods — {}", self.selected_profile));
+            ui.heading(format!("Mods â€” {}", self.selected_profile));
             ui.label(format!("{enabled}/{} enabled", entries.len()));
         });
         egui::CollapsingHeader::new("Profile settings")
@@ -251,8 +251,8 @@ impl SanAndreasModUi
         }
         ui.horizontal(|ui| {
             if ui
-                .button("＋ Separator")
-                .on_hover_text("Add a labeled group divider at the top; move it with ▲/▼")
+                .button("ï¼‹ Separator")
+                .on_hover_text("Add a labeled group divider at the top; move it with â–²/â–¼")
                 .clicked()
             {
                 self.add_separator(0);
@@ -310,7 +310,7 @@ impl SanAndreasModUi
             if let Some(label) = busy_label
             {
                 ui.add(egui::Spinner::new());
-                ui.strong(format!("{label}…"));
+                ui.strong(format!("{label}â€¦"));
                 ui.separator();
             }
             ui.strong(readiness_label(self));
@@ -352,7 +352,7 @@ impl SanAndreasModUi
             {
                 ui.separator();
                 let warn = ui.visuals().warn_fg_color;
-                ui.colored_label(warn, format!("⚠ {pending} to clean"));
+                ui.colored_label(warn, format!("âš  {pending} to clean"));
             }
             // Post-scan reality checks: what ModLoader logged last run and CLEO
             // health. Only shown when there is something to flag.
@@ -364,7 +364,7 @@ impl SanAndreasModUi
                     let warn = ui.visuals().warn_fg_color;
                     ui.colored_label(warn, format!("ML {} err", log.errors.len()))
                         .on_hover_text(
-                            "ModLoader reported errors last run — see the ModLoader viewer",
+                            "ModLoader reported errors last run â€” see the ModLoader viewer",
                         );
                 }
             }
@@ -378,7 +378,7 @@ impl SanAndreasModUi
                     ui.separator();
                     let warn = ui.visuals().warn_fg_color;
                     ui.colored_label(warn, format!("CLEO {issues}"))
-                        .on_hover_text("CLEO health issues — see the CLEO viewer");
+                        .on_hover_text("CLEO health issues â€” see the CLEO viewer");
                 }
             }
 
@@ -404,7 +404,7 @@ impl SanAndreasModUi
                 {
                     self.last_error = None;
                 }
-                ui.colored_label(color, "⚠");
+                ui.colored_label(color, "âš ");
                 ui.colored_label(color, message);
             });
         });
@@ -459,6 +459,3 @@ impl SanAndreasModUi
         }
     }
 }
-
-
-

@@ -266,7 +266,7 @@ fn content_modloader_log_summary(
     let version = log
         .version
         .as_deref()
-        .map(|v| format!("Mod Loader {v}"))
+        .map(|version| format!("Mod Loader {version}"))
         .unwrap_or_else(|| "Mod Loader".to_string());
     if log.is_clean()
     {
@@ -301,10 +301,3 @@ fn content_modloader_log_summary(
         });
     ui.add_space(UI_SMALL_GAP);
 }
-
-
-
-
-
-
-

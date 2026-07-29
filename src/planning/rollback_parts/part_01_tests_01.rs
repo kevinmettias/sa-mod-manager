@@ -1,4 +1,4 @@
-    use super::{file_hash, rollback_journal};
+﻿    use super::{file_hash, rollback_journal};
     use crate::prelude::*;
 
     #[test]
@@ -29,7 +29,7 @@
         rollback_journal(&journal, &game_root).expect("the test fixture is created before this assertion reads it");
 
         assert_eq!(fs::read_to_string(&dest).expect("the test fixture is created before this assertion reads it"), "vanilla");
-        remove_dir_if_exists(&game_root).expect("the test fixture is created before this assertion reads it");
+        remove_directory_if_exists(&game_root).expect("the test fixture is created before this assertion reads it");
     }
 
     #[test]
@@ -59,7 +59,7 @@
 
         assert!(!dest.exists());
         assert!(!game_root.join("modloader").join("test_mod").exists());
-        remove_dir_if_exists(&game_root).expect("the test fixture is created before this assertion reads it");
+        remove_directory_if_exists(&game_root).expect("the test fixture is created before this assertion reads it");
     }
 
     #[test]
@@ -97,7 +97,7 @@
 
         assert!(err.contains("missing backup"));
         assert_eq!(fs::read_to_string(&dest).expect("the test fixture is created before this assertion reads it"), "modded");
-        remove_dir_if_exists(&game_root).expect("the test fixture is created before this assertion reads it");
+        remove_directory_if_exists(&game_root).expect("the test fixture is created before this assertion reads it");
     }
 
     #[test]
@@ -144,7 +144,7 @@
 
         assert!(err.contains("rollback conflict"));
         assert_eq!(fs::read_to_string(&dest).expect("the test fixture is created before this assertion reads it"), "changed by later mod");
-        remove_dir_if_exists(&game_root).expect("the test fixture is created before this assertion reads it");
+        remove_directory_if_exists(&game_root).expect("the test fixture is created before this assertion reads it");
     }
 
     #[test]
@@ -207,7 +207,7 @@
 
         assert!(!dest.exists());
         assert!(!game_root.join("modloader").join("test_mod").exists());
-        remove_dir_if_exists(&game_root).expect("the test fixture is created before this assertion reads it");
+        remove_directory_if_exists(&game_root).expect("the test fixture is created before this assertion reads it");
     }
 
     #[test]
@@ -238,7 +238,7 @@
         assert!(err.contains("backup"), "{err}");
         // Nothing was mutated: the destructive restore never ran.
         assert_eq!(fs::read_to_string(&dest).expect("the test fixture is created before this assertion reads it"), "modded");
-        remove_dir_if_exists(&game_root).expect("the test fixture is created before this assertion reads it");
+        remove_directory_if_exists(&game_root).expect("the test fixture is created before this assertion reads it");
     }
 
     fn backup_line(dest: &Path, backup: &Path) -> String
@@ -293,14 +293,14 @@
             std::process::id(),
             unix_now()
         ));
-        remove_dir_if_exists(&root).expect("the test fixture is created before this assertion reads it"); // error-type: allow included only from cfg(test) harness code
+        remove_directory_if_exists(&root).expect("the test fixture is created before this assertion reads it"); // error-type: allow included only from cfg(test) harness code
         fs::create_dir_all(&root).expect("the test fixture is created before this assertion reads it"); // error-type: allow included only from cfg(test) harness code
         fs::create_dir_all(root.join(".sa-mod-manager").join("journals")).expect("the test fixture is created before this assertion reads it"); // error-type: allow included only from cfg(test) harness code
         fs::create_dir_all(root.join(".sa-mod-manager").join("backups")).expect("the test fixture is created before this assertion reads it"); // error-type: allow included only from cfg(test) harness code
         return root;
     }
 
-    fn remove_dir_if_exists(path: &Path) -> Result<(), AppError>
+    fn remove_directory_if_exists(path: &Path) -> Result<(), AppError>
     {
         if path.exists()
         {
@@ -308,4 +308,3 @@
         }
         return Ok(());
     }
-

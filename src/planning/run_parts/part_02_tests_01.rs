@@ -1,4 +1,4 @@
-    use super::{extract_ignore_files, launch_args_select_modloader_mode, materialize_profile_for_run, modloader_run_profile};
+﻿    use super::{extract_ignore_files, should_launch_args_select_modloader_mode, materialize_profile_for_run, modloader_run_profile};
     use crate::prelude::*;
 
     #[test]
@@ -8,16 +8,16 @@
         for arg in ["-nomods", "-NoMods", "-mod", "-modprof"]
         {
             assert!(
-                launch_args_select_modloader_mode(&[arg.to_string()]),
+                should_launch_args_select_modloader_mode(&[arg.to_string()]),
                 "{arg}"
             );
         }
         // Unrelated args leave us free to add -modprof.
-        assert!(!launch_args_select_modloader_mode(&[
+        assert!(!should_launch_args_select_modloader_mode(&[
             "-nointro".to_string(),
             "-windowed".to_string()
         ]));
-        assert!(!launch_args_select_modloader_mode(&[]));
+        assert!(!should_launch_args_select_modloader_mode(&[]));
     }
 
     #[test]
@@ -29,7 +29,7 @@
             serde_json::json!(["*.dff", "  to_ignore/x.txd  ", "", 42]), // literal: allow test fixture value is the specimen under judgment
         );
         let files = extract_ignore_files(&extra);
-        // Strings are trimmed and kept; blanks and non-strings dropped.
+        // Strings are trimmed and kept; blanks and non-string_list dropped.
         assert_eq!(
             files,
             vec!["*.dff".to_string(), "to_ignore/x.txd".to_string()]
@@ -91,7 +91,7 @@
                 .join("first.txt")
                 .exists()
         );
-        remove_dir_if_exists(&game_root).expect("the test fixture is created before this assertion reads it");
+        remove_directory_if_exists(&game_root).expect("the test fixture is created before this assertion reads it");
     }
 
     #[test]
@@ -184,7 +184,7 @@
         let late_idx = journal_text.find("profile_mod=late|200").expect("the test fixture is created before this assertion reads it");
         assert!(early_idx < late_idx);
         assert!(!journal_text.contains("profile_mod=disabled"));
-        remove_dir_if_exists(&game_root).expect("the test fixture is created before this assertion reads it");
+        remove_directory_if_exists(&game_root).expect("the test fixture is created before this assertion reads it");
     }
 
     #[test]
@@ -238,7 +238,7 @@
                 .exists(),
             "root disabled by profile override should not materialize"
         );
-        remove_dir_if_exists(&game_root).expect("the test fixture is created before this assertion reads it");
+        remove_directory_if_exists(&game_root).expect("the test fixture is created before this assertion reads it");
     }
 
     #[test]
@@ -301,7 +301,7 @@
                 .exists(),
             "root should not materialize at the mod's default target"
         );
-        remove_dir_if_exists(&game_root).expect("the test fixture is created before this assertion reads it");
+        remove_directory_if_exists(&game_root).expect("the test fixture is created before this assertion reads it");
     }
 
     #[test]
@@ -340,7 +340,7 @@
 
         assert!(err.contains("duplicate enabled mod id"));
         assert!(!game_root.join("modloader").join("dup").exists());
-        remove_dir_if_exists(&game_root).expect("the test fixture is created before this assertion reads it");
+        remove_directory_if_exists(&game_root).expect("the test fixture is created before this assertion reads it");
     }
 
     #[test]
@@ -363,6 +363,5 @@
             .to_string();
 
         assert!(err.contains("references missing mod config"));
-        remove_dir_if_exists(&game_root).expect("the test fixture is created before this assertion reads it");
+        remove_directory_if_exists(&game_root).expect("the test fixture is created before this assertion reads it");
     }
-

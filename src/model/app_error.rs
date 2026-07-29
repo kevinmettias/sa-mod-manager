@@ -89,24 +89,24 @@ impl From<io::Error> for AppError
 /// Attach operation context to a fallible result, chaining the original error
 /// as the source. Works for any error convertible into [`AppError`], including
 /// `io::Error` and `AppError` itself.
-pub(crate) trait ErrorContext<T>
+pub(crate) trait ErrorContext<Output>
 {
     /// Add an eagerly-built context message. Prefer [`ErrorContext::with_context`]
     /// on hot paths so the message is only formatted when an error occurs.
-    fn context(self, message: impl Into<String>) -> Result<T, AppError>;
+    fn context(self, message: impl Into<String>) -> Result<Output, AppError>;
 
     /// Add a context message that is only built when the result is an error.
-    fn with_context<F, S>(self, message: F) -> Result<T, AppError>
+    fn with_context<F, S>(self, message: F) -> Result<Output, AppError>
     where
         F: FnOnce() -> S,
         S: Into<String>,;
 }
 
-impl<T, E> ErrorContext<T> for Result<T, E>
+impl<Output, Failure> ErrorContext<Output> for Result<Output, Failure>
 where
-    E: Into<AppError>,
+    Failure: Into<AppError>,
 {
-    fn with_context<F, S>(self, message: F) -> Result<T, AppError>
+    fn with_context<F, S>(self, message: F) -> Result<Output, AppError>
     where
         F: FnOnce() -> S,
         S: Into<String>,
@@ -114,7 +114,7 @@ where
         return self.map_err(|err| err.into().context(message()));
     }
 
-    fn context(self, message: impl Into<String>) -> Result<T, AppError>
+    fn context(self, message: impl Into<String>) -> Result<Output, AppError>
     {
         return self.map_err(|err| err.into().context(message));
     }
@@ -169,4 +169,3 @@ mod tests
         assert_ne!(tool.kind(), AppErrorKind::Usage);
     }
 }
-

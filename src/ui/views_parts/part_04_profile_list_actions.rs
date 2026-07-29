@@ -2,7 +2,7 @@
 {
     activation: Option<(String, bool)>,
     reorder: Option<Vec<String>>,
-    remove: Option<String>,
+    remove_profile_fixture: Option<String>,
     focus: Option<(String, bool)>,
     details: Option<String>,
     separator_edit: Option<(String, String)>,
@@ -30,7 +30,7 @@ impl SanAndreasModUi
         {
             self.reorder_profile_mods(ordered_ids);
         }
-        if let Some(mod_id) = actions.remove
+        if let Some(mod_id) = actions.remove_profile_fixture
         {
             self.request_remove_mod(&mod_id);
         }
@@ -45,7 +45,7 @@ impl SanAndreasModUi
         }
         if let Some(mod_id) = actions.details
         {
-            self.open_mod_info(&mod_id);
+            self.open_mod_details(&mod_id);
         }
         self.separator_edit = actions.separator_edit;
         if let Some(id) = actions.separator_start_edit

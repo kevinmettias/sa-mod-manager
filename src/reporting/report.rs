@@ -1,4 +1,4 @@
-use crate::prelude::*;
+﻿use crate::prelude::*;
 
 const MAX_README_DOCUMENTS_PRINTED: usize = 6;
 const MAX_README_EXCERPT_LINES: usize = 6;
@@ -23,8 +23,8 @@ fn print_report_header(report: &PackageReport)
 
 fn print_report_sections(report: &PackageReport)
 {
-    let components = report.components.iter();
-    print_set("components", components);
+    let component_paths = report.component_paths.iter();
+    print_set("component_paths", component_paths);
     print_vec("readmes", &report.readmes);
     print_readme_documents(&report.readme_documents);
     print_readme_instructions(&report.readme_instructions);
@@ -36,10 +36,10 @@ fn print_report_sections(report: &PackageReport)
     print_set("risks", risks);
 }
 
-fn print_set<'a, T, I>(label: &str, values: I)
+fn print_set<'a, Value, Values>(label: &str, values: Values)
 where
-    T: fmt::Display + 'a,
-    I: Iterator<Item = &'a T>,
+    Value: fmt::Display + 'a,
+    Values: Iterator<Item = &'a Value>,
 {
     let values: Vec<String> = values.map(ToString::to_string).collect();
     println!("{label}:");
@@ -211,15 +211,15 @@ fn print_report_candidate(candidate: &InstallCandidate)
         candidate.file_count,
         human_bytes(candidate.total_bytes)
     );
-    if !candidate.components.is_empty()
+    if !candidate.component_paths.is_empty()
     {
         let items = candidate
-            .components
+            .component_paths
             .iter()
             .map(ToString::to_string)
             .collect::<Vec<_>>()
             .join(", ");
-        println!("    components: {items}");
+        println!("    component_paths: {items}");
     }
     for note in &candidate.notes
     {

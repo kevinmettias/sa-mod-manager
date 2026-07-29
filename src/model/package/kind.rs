@@ -1,4 +1,4 @@
-use crate::prelude::*;
+﻿use crate::prelude::*;
 
 #[derive(Clone, Copy)]
 pub(crate) enum Kind

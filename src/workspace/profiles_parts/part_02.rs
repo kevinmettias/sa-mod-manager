@@ -1,4 +1,4 @@
-
+﻿
 pub(crate) struct ProfileRenameRequest<'a>
 {
     pub(crate) old_name: &'a str,
@@ -79,7 +79,7 @@ mod tests
             ("B".to_string(), "2".to_string()),
             ("C".to_string(), "3".to_string()),
         ]);
-        let merged = resolve_launch_env(profile_env, &default_env);
+        let merged = resolve_launch_environment(profile_env, &default_env);
         assert_eq!(merged.get("A").map(String::as_str), Some("1"));
         assert_eq!(merged.get("B").map(String::as_str), Some("2"));
         assert_eq!(merged.get("C").map(String::as_str), Some("3"));
@@ -95,7 +95,7 @@ mod tests
         create_profile(&game_root, "racing").expect("the test fixture is created before this assertion reads it");
         set_active_profile(&game_root, "racing").expect("the test fixture is created before this assertion reads it");
         assert_eq!(read_active_profile(&game_root), "racing");
-        remove(&game_root);
+        remove_profile_fixture(&game_root);
     }
 
     #[test]
@@ -107,7 +107,7 @@ mod tests
             .unwrap_err()
             .to_string();
         assert!(err.contains("profile json not found"));
-        remove(&game_root);
+        remove_profile_fixture(&game_root);
     }
 
     #[test]
@@ -130,7 +130,7 @@ mod tests
 
         assert!(delete_profile(&game_root, "default").is_err());
         assert!(rename_profile(&game_root, ProfileRenameRequest { old_name: "default", new_name: "x" }).is_err());
-        remove(&game_root);
+        remove_profile_fixture(&game_root);
     }
 
     #[test]
@@ -143,7 +143,7 @@ mod tests
 
         delete_profile(&game_root, "temp").expect("the test fixture is created before this assertion reads it");
         assert_eq!(read_active_profile(&game_root), "default");
-        remove(&game_root);
+        remove_profile_fixture(&game_root);
     }
 
     #[test]
@@ -168,7 +168,7 @@ mod tests
         copy_profile(&game_root, ProfileCopyRequest { source_name: "windowed", dest_name: "windowed_copy" }).expect("the test fixture is created before this assertion reads it");
         let (copied, _) = profile_launch_settings(&game_root, "windowed_copy").expect("the test fixture is created before this assertion reads it");
         assert_eq!(copied, expected);
-        remove(&game_root);
+        remove_profile_fixture(&game_root);
     }
 
     fn write_minimal_mod_config(game_root: &Path, id: &str) -> PathBuf
@@ -252,7 +252,7 @@ mod tests
             read.game_root_override,
             Some(PathBuf::from("Z:/Custom Install"))
         );
-        remove(&game_root);
+        remove_profile_fixture(&game_root);
     }
 
     #[test]
@@ -282,7 +282,7 @@ mod tests
         let over = read.mods[0].root_overrides.get("CLEO").expect("the test fixture is created before this assertion reads it");
         assert_eq!(over.enabled, Some(false));
         assert_eq!(over.target, None);
-        remove(&game_root);
+        remove_profile_fixture(&game_root);
     }
 
     fn test_root(name: &str) -> PathBuf
@@ -292,12 +292,12 @@ mod tests
             std::process::id(),
             unix_now()
         ));
-        remove(&root);
+        remove_profile_fixture(&root);
         fs::create_dir_all(&root).expect("the test fixture is created before this assertion reads it");
         return root;
     }
 
-    fn remove(path: &Path)
+    fn remove_profile_fixture(path: &Path)
     {
         if path.exists()
         {
@@ -305,6 +305,3 @@ mod tests
         }
     }
 }
-
-
-

@@ -1,4 +1,4 @@
-
+﻿
 /// Returns `true` when the user clicked "Add to config" for this proposal.
 enum ReadmeImportState
 {
@@ -14,7 +14,7 @@ impl ReadmeImportState
     }
 }
 
-fn readme_proposal_panel(ui: &mut egui::Ui, proposal: &ReadmeProposal, import_state: ReadmeImportState) -> bool
+fn should_show_readme_proposal_panel(ui: &mut egui::Ui, proposal: &ReadmeProposal, import_state: ReadmeImportState) -> bool
 {
     let mut accepted = false;
     let evidence = format!(
@@ -22,13 +22,13 @@ fn readme_proposal_panel(ui: &mut egui::Ui, proposal: &ReadmeProposal, import_st
         proposal.source_readme, proposal.line_number, proposal.evidence
     );
     ui.group(|ui| {
-        // Header: title, confidence, state — and the action button, so a proposal
+        // Header: title, confidence, state â€” and the action button, so a proposal
         // is one compact row plus its evidence, not a five-line stack.
         ui.horizontal(|ui| {
             ui.strong(readme_proposal_title(proposal));
             ui.weak(format!("{:.0}%", proposal.confidence * PERCENT_SCALE));
             ui.weak(proposal.review_state.to_string());
-            if readme_proposal_is_actionable(proposal)
+            if is_readme_proposal_actionable(proposal)
             {
                 accepted = ui
                     .add_enabled(import_state.is_imported(), egui::Button::new("Add to config"))
@@ -39,7 +39,7 @@ fn readme_proposal_panel(ui: &mut egui::Ui, proposal: &ReadmeProposal, import_st
                     .clicked();
             }
         });
-        ui.label(format!("→ {}", proposal.proposed_install));
+        ui.label(format!("â†’ {}", proposal.proposed_install));
         let clipped_evidence = clip_text(&evidence, README_EVIDENCE_CLIP);
         ui.small(clipped_evidence).on_hover_text(format!(
             "{evidence}\nNormalized: {}",
@@ -64,8 +64,8 @@ fn readme_proposal_title(proposal: &ReadmeProposal) -> String
 }
 
 /// Only a `copy` proposal with a concrete source and target maps to an install
-/// root; relationship hints (requires/conflict/…) are informational only.
-fn readme_proposal_is_actionable(proposal: &ReadmeProposal) -> bool
+/// root; relationship hints (requires/conflict/â€¦) are informational only.
+fn is_readme_proposal_actionable(proposal: &ReadmeProposal) -> bool
 {
     return proposal.action == "copy" && proposal.source.is_some() && proposal.target.is_some();
 }
@@ -81,7 +81,7 @@ impl SanAndreasModUi
         ui.heading("ModLoader Priority");
         ui.label(
             "Order and compare ModLoader mods for this profile. Higher priority wins file \
-             conflicts; priority 0 disables the mod in ModLoader — its files stay installed and it \
+             conflicts; priority 0 disables the mod in ModLoader â€” its files stay installed and it \
              still shows in the in-game Mod Configuration menu. These override the load-order \
              defaults and are applied automatically when you Play through the manager. Use Apply to \
              also write them into your active ModLoader profile for playing outside the manager.",
@@ -123,7 +123,7 @@ impl SanAndreasModUi
             })
             .collect();
         // Highest priority (runtime winner) first, then by name.
-        rows.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+        rows.sort_by(|left, right| right.1.cmp(&left.1).then_with(|| left.0.cmp(&right.0)));
 
         let mut set_priority: Option<(String, i32)> = None;
         let mut apply = false;
@@ -158,7 +158,7 @@ impl SanAndreasModUi
                     if ui
                         .checkbox(&mut enabled, "")
                         .on_hover_text(
-                            "Enabled in ModLoader — uncheck to set priority 0 (disabled, but still \
+                            "Enabled in ModLoader â€” uncheck to set priority 0 (disabled, but still \
                              installed and shown in the in-game menu)",
                         )
                         .changed()
@@ -272,25 +272,25 @@ impl SanAndreasModUi
                     ui.label("Status");
                     ui.label("PID");
                     ui.label("Detail");
-                    ui.label("Cleanup record");
+                    ui.label("Cleanup record_log_message_from_arguments");
                     ui.label("");
                     ui.end_row();
-                    for record in pending_runs
+                    for record_log_message_from_arguments in pending_runs
                     {
-                        ui.monospace(record.status.to_string());
-                        let pid = record
+                        ui.monospace(record_log_message_from_arguments.status.to_string());
+                        let pid = record_log_message_from_arguments
                             .pid
                             .map(|pid| pid.to_string())
                             .unwrap_or_else(|| "unknown".to_string());
                         ui.monospace(pid);
-                        ui.label(&record.detail);
-                        ui.monospace(record.journal.display().to_string());
+                        ui.label(&record_log_message_from_arguments.detail);
+                        ui.monospace(record_log_message_from_arguments.journal.display().to_string());
                         if ui
                             .button("Clean")
                             .on_hover_text("Delete this run's materialized files (asks first)")
                             .clicked()
                         {
-                            self.request_cleanup_record(record);
+                            self.request_cleanup_record(record_log_message_from_arguments);
                         }
                         ui.end_row();
                     }
@@ -361,7 +361,7 @@ impl SanAndreasModUi
                         egui::TextEdit::singleline(&mut self.new_tool_path)
                             .hint_text("full path to a .exe"),
                     );
-                    if ui.button("Browse…").clicked()
+                    if ui.button("Browseâ€¦").clicked()
                     {
                         self.browse_tool_path();
                     }
@@ -374,7 +374,7 @@ impl SanAndreasModUi
     }
 
     /// MO2's "overwrite": game-folder files under mod areas that no enabled mod
-    /// provides — installed by hand or left by a tool. Computed on the last
+    /// provides â€” installed by hand or left by a tool. Computed on the last
     /// content scan; the manager never touches these, so they persist across runs.
     fn overwrite_panel(&mut self, ui: &mut egui::Ui)
     {
@@ -387,14 +387,14 @@ impl SanAndreasModUi
         if self.overwrite_files.is_empty()
         {
             ui.label(
-                "No unmanaged files under modloader/ or cleo/ — everything there is provided by an \
+                "No unmanaged files under modloader/ or cleo/ â€” everything there is provided by an \
                  enabled mod or is loader infrastructure.",
             );
             return;
         }
         ui.label(format!(
             "{} file(s) under modloader/ or cleo/ that no enabled mod in this profile provides. \
-             Installed manually or left by a tool — the manager does not touch them.",
+             Installed manually or left by a tool â€” the manager does not touch them.",
             self.overwrite_files.len()
         ));
         egui::ScrollArea::vertical()
@@ -419,9 +419,3 @@ impl SanAndreasModUi
             });
     }
 }
-
-
-
-
-
-

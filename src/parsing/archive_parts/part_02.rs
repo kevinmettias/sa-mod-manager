@@ -88,7 +88,7 @@ fn too_many_entries_error(package: &Path) -> AppError
 
 fn archive_backend(package: &Path) -> ArchiveBackend
 {
-    return if native_zip_supported(package)
+    return if is_native_zip_supported(package)
     {
         ArchiveBackend::NativeZip
     }
@@ -105,7 +105,7 @@ enum ArchiveBackend
     SevenZip,
 }
 
-fn native_zip_supported(package: &Path) -> bool
+fn is_native_zip_supported(package: &Path) -> bool
 {
     return package_extension(package)
         .map(|ext| ext == "zip" || ext == "wrap")
@@ -423,5 +423,3 @@ mod tests
 {
     include!("part_02_tests_01.rs");
 }
-
-

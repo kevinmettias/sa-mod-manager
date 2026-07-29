@@ -1,4 +1,4 @@
-use crate::prelude::*;
+﻿use crate::prelude::*;
 
 pub(crate) struct Report
 {
@@ -11,7 +11,7 @@ pub(crate) struct Report
     pub(crate) readme_instructions: Vec<ReadmeInstruction>,
     pub(crate) readme_insights: Vec<ReadmeInsight>,
     pub(crate) manifest_roots: Vec<ManifestInstallRoot>,
-    pub(crate) components: BTreeSet<Component>,
+    pub(crate) component_paths: BTreeSet<Component>,
     pub(crate) install_candidates: Vec<InstallCandidate>,
     pub(crate) option_groups: Vec<String>,
     pub(crate) context_hints: BTreeSet<String>,

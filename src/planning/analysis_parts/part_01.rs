@@ -1,4 +1,4 @@
-macro_rules! readme_insight {
+﻿macro_rules! readme_insight {
     ($kind:expr, $title:expr, $detail:expr, $meta:expr $(,)?) => {
         build_readme_insight(
             $kind,
@@ -48,7 +48,7 @@ fn list_folder_entries(root: &Path) -> Result<Vec<PackageEntry>, AppError>
 {
     let mut entries = Vec::new();
     list_folder_entries_inner(root, root, &mut entries)?;
-    entries.sort_by(|a, b| a.path.cmp(&b.path));
+    entries.sort_by(|left, right| left.path.cmp(&right.path));
     return Ok(entries);
 }
 
@@ -57,7 +57,7 @@ fn list_folder_entries(root: &Path) -> Result<Vec<PackageEntry>, AppError>
 /// hostile, and building the entry vector unbounded would let it dictate memory.
 const MAX_LISTED_ENTRIES: usize = 500_000;
 const README_SAMPLE_LIMIT: usize = 12;
-const INJECTABLE_DATA_MIN_NUMBERS: usize = 8;
+const INJECTABLE_TABLE_MIN_NUMBERS: usize = 8;
 const LANGUAGE_PACK_MIN_HITS: usize = 2;
 const LANGUAGE_PACK_BASE_CONFIDENCE: f32 = 0.62;
 const LANGUAGE_PACK_HIT_CONFIDENCE: f32 = 0.06;
@@ -95,7 +95,7 @@ fn list_archive_entries(package: &Path) -> Result<Vec<PackageEntry>, AppError>
     let mut fields = ArchiveEntryFields::default();
 
     // Parse the `7z l -slt` output as it streams, so we never buffer the whole
-    // listing (which is O(entries)) — only one line plus the entry list we build,
+    // listing (which is O(entries)) â€” only one line plus the entry list we build,
     // and that list is bounded by MAX_LISTED_ENTRIES.
     stream_archive_listing(package, |line| {
         parse_archive_listing_line(line, &mut fields, &mut entries);
@@ -111,7 +111,7 @@ fn list_archive_entries(package: &Path) -> Result<Vec<PackageEntry>, AppError>
 
     fields.flush_into(&mut entries);
 
-    entries.sort_by(|a, b| a.path.cmp(&b.path));
+    entries.sort_by(|left, right| left.path.cmp(&right.path));
     return Ok(entries);
 }
 
@@ -215,7 +215,7 @@ fn empty_package_report(
         readme_instructions: Vec::new(),
         readme_insights: Vec::new(),
         manifest_roots: Vec::new(),
-        components: BTreeSet::new(),
+        component_paths: BTreeSet::new(),
         install_candidates: Vec::new(),
         option_groups: Vec::new(),
         context_hints: BTreeSet::new(),
@@ -234,9 +234,9 @@ fn collect_readme_documents(report: &mut PackageReport) -> Result<(), AppError>
         {
             add_readme_context_hints(&text, &mut report.context_hints);
             // ModLoader's std.data claims `.txt` and scans readmes for pasteable
-            // data lines (handling/weapon/carcols/…), so a readme full of data can
+            // data lines (handling/weapon/carcols/â€¦), so a readme full of data can
             // silently inject it once the mod is under `modloader/`. Flag it.
-            if readme_has_injectable_data(&text)
+            if has_readme_injectable_table(&text)
             {
                 injectable.push(readme.clone());
             }
@@ -250,7 +250,7 @@ fn collect_readme_documents(report: &mut PackageReport) -> Result<(), AppError>
     {
         report.risks.insert(format!(
             "readme `{readme}` contains data-table lines; ModLoader's std.data scans .txt files \
-             and may inject them as game data — review before installing as ModLoader content"
+             and may inject them as game data â€” review before installing as ModLoader content"
         ));
     }
     report.readme_documents = documents;
@@ -261,7 +261,7 @@ fn collect_readme_documents(report: &mut PackageReport) -> Result<(), AppError>
 /// kind ModLoader's std.data pastes from `.txt`). Conservative: a non-comment line
 /// with many numeric fields is the signature of handling.cfg / weapon.dat rows and
 /// almost never appears in prose, keeping false positives low.
-fn readme_has_injectable_data(text: &str) -> bool
+fn has_readme_injectable_table(text: &str) -> bool
 {
     return text.lines().any(|raw| {
         let line = raw.trim();
@@ -273,13 +273,13 @@ fn readme_has_injectable_data(text: &str) -> bool
             return false;
         }
         let numeric = line
-            .split(|c: char| c.is_whitespace() || c == ',')
+            .split(|character: char| character.is_whitespace() || character == ',')
             .filter(|token| {
                 let t = token.trim();
                 !t.is_empty() && t.parse::<f64>().is_ok()
             })
             .count();
-        numeric >= INJECTABLE_DATA_MIN_NUMBERS
+        numeric >= INJECTABLE_TABLE_MIN_NUMBERS
     });
 }
 
@@ -460,8 +460,3 @@ fn add_override_insights(report: &PackageReport, insights: &mut Vec<ReadmeInsigh
         insights.push(insight);
     }
 }
-
-
-
-
-

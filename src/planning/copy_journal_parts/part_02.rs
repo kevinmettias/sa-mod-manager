@@ -1,4 +1,4 @@
-
+﻿
 /// Durably flush the shared journal (under its lock).
 fn sync_shared_journal(journal: &SharedJournal) -> Result<(), AppError>
 {
@@ -64,22 +64,22 @@ mod tests
         fs::create_dir_all(&root).expect("the test fixture is created before this assertion reads it");
         let path = root.join("big.img");
         // Larger than HASH_BUFFER_BYTES so hashing spans several read chunks.
-        let data: Vec<u8> = (0..(HASH_BUFFER_BYTES * 3 + 123)) // literal: allow test fixture value is the specimen under judgment
-            .map(|i| (i % 251) as u8) // literal: allow test fixture value is the specimen under judgment
+        let payload_bytes: Vec<u8> = (0..(HASH_BUFFER_BYTES * 3 + 123)) // literal: allow test fixture value is the specimen under judgment
+            .map(|index| (index % 251) as u8) // literal: allow test fixture value is the specimen under judgment
             .collect();
-        fs::write(&path, &data).expect("the test fixture is created before this assertion reads it");
+        fs::write(&path, &payload_bytes).expect("the test fixture is created before this assertion reads it");
 
-        assert_eq!(file_hash(&path).expect("the test fixture is created before this assertion reads it"), reference_fnv64(&data));
+        assert_eq!(file_hash(&path).expect("the test fixture is created before this assertion reads it"), reference_fowler_noll_vo_hash(&payload_bytes));
 
         // An empty file hashes to the FNV offset basis, unchanged by streaming.
         let empty = root.join("empty.bin");
         fs::write(&empty, b"").expect("the test fixture is created before this assertion reads it");
-        assert_eq!(file_hash(&empty).expect("the test fixture is created before this assertion reads it"), reference_fnv64(b""));
+        assert_eq!(file_hash(&empty).expect("the test fixture is created before this assertion reads it"), reference_fowler_noll_vo_hash(b""));
 
         fs::remove_dir_all(&root).expect("the test fixture is created before this assertion reads it");
     }
 
-    fn reference_fnv64(bytes: &[u8]) -> String
+    fn reference_fowler_noll_vo_hash(bytes: &[u8]) -> String
     {
         let mut hash = 0xcbf29ce484222325u64; // literal: allow test fixture value is the specimen under judgment
         for &byte in bytes
@@ -174,8 +174,8 @@ mod tests
         let source = root.join("source");
         fs::create_dir_all(source.join("nested")).expect("the test fixture is created before this assertion reads it");
         fs::create_dir_all(&game_root).expect("the test fixture is created before this assertion reads it");
-        fs::write(source.join("a.txt"), "a").expect("the test fixture is created before this assertion reads it");
-        fs::write(source.join("nested/b.txt"), "b").expect("the test fixture is created before this assertion reads it");
+        fs::write(source.join("left.txt"), "a").expect("the test fixture is created before this assertion reads it");
+        fs::write(source.join("nested/right.txt"), "b").expect("the test fixture is created before this assertion reads it");
         let files = collect_files_recursive(&source).expect("the test fixture is created before this assertion reads it");
 
         // A target under the game root is created and validated.

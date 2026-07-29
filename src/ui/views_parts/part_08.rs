@@ -1,37 +1,37 @@
-
+﻿
 impl SanAndreasModUi
 {
     /// The per-mod info window (MO2's Mod Info dialog): Files / Conflicts / Install
     /// roots / Readme for one mod. Shown as a floating, closable window.
-    pub(super) fn mod_info_window(&mut self, ctx: &egui::Context)
+    pub(super) fn mod_details_window(&mut self, ctx: &egui::Context)
     {
-        let Some(info) = &self.mod_info else {
+        let Some(details) = &self.mod_info else {
             return;
         };
-        let id = info.id.clone();
-        let mut tab = info.tab;
+        let id = details.id.clone();
+        let mut tab = details.tab;
         let mut open = true;
         egui::Window::new(format!("Mod: {id}"))
-            .id(egui::Id::new("mod_info_window"))
+            .id(egui::Id::new("mod_details_window"))
             .open(&mut open)
             .resizable(true)
             .default_size([MOD_CONFIG_PANEL_HEIGHT, MOD_CONFIG_PANEL_WIDTH])
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
-                    ui.selectable_value(&mut tab, ModInfoTab::Files, "Files");
-                    ui.selectable_value(&mut tab, ModInfoTab::Conflicts, "Conflicts");
-                    ui.selectable_value(&mut tab, ModInfoTab::Roots, "Install roots");
-                    ui.selectable_value(&mut tab, ModInfoTab::Readme, "Readme");
-                    ui.selectable_value(&mut tab, ModInfoTab::Notes, "Notes");
+                    ui.selectable_value(&mut tab, ModDetailsTab::Files, "Files");
+                    ui.selectable_value(&mut tab, ModDetailsTab::Conflicts, "Conflicts");
+                    ui.selectable_value(&mut tab, ModDetailsTab::Roots, "Install roots");
+                    ui.selectable_value(&mut tab, ModDetailsTab::Readme, "Readme");
+                    ui.selectable_value(&mut tab, ModDetailsTab::Notes, "Notes");
                 });
                 ui.separator();
                 match tab
                 {
-                    ModInfoTab::Files => self.mod_info_files_tab(ui),
-                    ModInfoTab::Conflicts => self.mod_info_conflicts_tab(ui, &id),
-                    ModInfoTab::Roots => self.mod_info_roots_tab(ui, &id),
-                    ModInfoTab::Readme => self.mod_info_readme_tab(ui),
-                    ModInfoTab::Notes => self.mod_info_notes_tab(ui, &id),
+                    ModDetailsTab::Files => self.mod_details_files_tab(ui),
+                    ModDetailsTab::Conflicts => self.mod_details_conflicts_tab(ui, &id),
+                    ModDetailsTab::Roots => self.mod_details_roots_tab(ui, &id),
+                    ModDetailsTab::Readme => self.mod_details_readme_tab(ui),
+                    ModDetailsTab::Notes => self.mod_details_notes_tab(ui, &id),
                 }
             });
         if let Some(info) = self.mod_info.as_mut()
@@ -44,39 +44,39 @@ impl SanAndreasModUi
         }
     }
 
-    fn mod_info_files_tab(&mut self, ui: &mut egui::Ui)
+    fn mod_details_files_tab(&mut self, ui: &mut egui::Ui)
     {
-        let Some(info) = &self.mod_info else {
+        let Some(details) = &self.mod_info else {
             return;
         };
-        match &info.source_root
+        match &details.source_root
         {
             Some(root) => {
                 ui.weak(format!("Library: {}", root.display()));
             }
             None => {
-                ui.weak("Not extracted to the library — file list unavailable.");
+                ui.weak("Not extracted to the library â€” file list unavailable.");
             }
         }
-        ui.label(format!("{} files", info.files.len()));
+        ui.label(format!("{} files", details.files.len()));
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
             .show(ui, |ui| {
-                for file in info.files.iter().take(MAX_LOG_PREVIEW_BYTES)
+                for file in details.files.iter().take(MAX_LOG_PREVIEW_BYTES)
                 {
                     ui.monospace(file);
                 }
-                if info.files.len() > MAX_LOG_PREVIEW_BYTES
+                if details.files.len() > MAX_LOG_PREVIEW_BYTES
                 {
                     ui.weak(format!(
                         "{} more not shown",
-                        info.files.len() - MAX_LOG_PREVIEW_BYTES
+                        details.files.len() - MAX_LOG_PREVIEW_BYTES
                     ));
                 }
             });
     }
 
-    fn mod_info_conflicts_tab(&mut self, ui: &mut egui::Ui, id: &str)
+    fn mod_details_conflicts_tab(&mut self, ui: &mut egui::Ui, id: &str)
     {
         let Some(index) = &self.content.index else {
             ui.label("Run Analyze content (left panel) to compute conflicts.");
@@ -85,7 +85,7 @@ impl SanAndreasModUi
         let conflicts: Vec<&ContentEntry> = index
             .entries
             .iter()
-            .filter(|entry| entry.is_conflict() && entry.providers.iter().any(|p| p == id))
+            .filter(|entry| entry.is_conflict() && entry.providers.iter().any(|provider| provider == id))
             .collect();
         if conflicts.is_empty()
         {
@@ -129,7 +129,7 @@ impl SanAndreasModUi
             });
     }
 
-    fn mod_info_roots_tab(&mut self, ui: &mut egui::Ui, id: &str)
+    fn mod_details_roots_tab(&mut self, ui: &mut egui::Ui, id: &str)
     {
         let Some(item) = self.state.mods.iter().find(|item| item.config.id == id) else {
             ui.label("Mod not found in the library.");
@@ -167,12 +167,12 @@ impl SanAndreasModUi
             });
     }
 
-    fn mod_info_readme_tab(&mut self, ui: &mut egui::Ui)
+    fn mod_details_readme_tab(&mut self, ui: &mut egui::Ui)
     {
-        let Some(info) = &self.mod_info else {
+        let Some(details) = &self.mod_info else {
             return;
         };
-        if info.readmes.is_empty()
+        if details.readmes.is_empty()
         {
             ui.label("No readme files found in this mod.");
             return;
@@ -180,11 +180,11 @@ impl SanAndreasModUi
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
             .show(ui, |ui| {
-                for (name, text) in &info.readmes
+                for (name, text) in &details.readmes
                 {
                     egui::CollapsingHeader::new(name)
                         .id_salt(name)
-                        .default_open(info.readmes.len() == 1)
+                        .default_open(details.readmes.len() == 1)
                         .show(ui, |ui| {
                             ui.monospace(text);
                         });
@@ -196,7 +196,7 @@ impl SanAndreasModUi
     /// All mutations are deferred until after the widgets render, so `self.mod_meta`
     /// / `self.mod_info` are never borrowed while a setter (which takes `&mut self`)
     /// runs.
-    fn mod_info_notes_tab(&mut self, ui: &mut egui::Ui, id: &str)
+    fn mod_details_notes_tab(&mut self, ui: &mut egui::Ui, id: &str)
     {
         let meta = self.mod_meta.get(id).cloned().unwrap_or_default();
         let mut set_color: Option<Option<String>> = None;
@@ -210,7 +210,7 @@ impl SanAndreasModUi
             for (name, color) in MOD_COLORS
             {
                 let selected = meta.color.as_deref() == Some(name);
-                let label = if selected { "●" } else { "  " };
+                let label = if selected { "â—" } else { "  " };
                 if ui
                     .add(egui::Button::new(label).fill(color).min_size(swatch_size))
                     .on_hover_text(name)
@@ -230,7 +230,7 @@ impl SanAndreasModUi
             for category in &meta.categories
             {
                 if ui
-                    .button(format!("{category} ✕"))
+                    .button(format!("{category} âœ•"))
                     .on_hover_text("Remove this category")
                     .clicked()
                 {
@@ -324,14 +324,14 @@ impl SanAndreasModUi
                 self.clear_readme_review();
             }
             if ui
-                .button("File…")
+                .button("Fileâ€¦")
                 .on_hover_text("Pick a .zip / .wrap / .7z / .rar package")
                 .clicked()
             {
                 self.browse_package_file();
             }
             if ui
-                .button("Folder…")
+                .button("Folderâ€¦")
                 .on_hover_text("Pick an already-extracted mod folder")
                 .clicked()
             {
@@ -427,7 +427,7 @@ impl SanAndreasModUi
                     } else {
                         ReadmeImportState::NotImported
                     };
-                    if readme_proposal_panel(ui, proposal, import_state)
+                    if should_show_readme_proposal_panel(ui, proposal, import_state)
                     {
                         accepted = Some(proposal.clone());
                     }
@@ -440,8 +440,3 @@ impl SanAndreasModUi
         }
     }
 }
-
-
-
-
-

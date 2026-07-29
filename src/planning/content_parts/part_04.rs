@@ -1,7 +1,7 @@
-
+﻿
 // --- CLEO viewer ----------------------------------------------------------
 
-/// A CLEO script (.cs/.cs4/.cleo …) paired with the companion files that ship
+/// A CLEO script (.cs/.cs4/.cleo â€¦) paired with the companion files that ship
 /// alongside it (its `.ini`, `.fxt`, data files sharing the same name), so the
 /// viewer can present a script as the unit a modder actually installs.
 pub(crate) struct CleoScript<'a>
@@ -41,20 +41,20 @@ pub(crate) fn cleo_view<'a>(entries: &[&'a ContentEntry]) -> CleoView<'a>
         }
         else
         {
-            let key = dir_and_stem(&entry.target);
+            let key = directory_and_stem(&entry.target);
             companions_by_key
                 .entry((key.dir.to_string(), key.stem.to_string()))
                 .or_default()
                 .push(entry);
         }
     }
-    plugins.sort_by(|a, b| a.target.cmp(&b.target));
-    scripts.sort_by(|a, b| a.target.cmp(&b.target));
+    plugins.sort_by(|left, right| left.target.cmp(&right.target));
+    scripts.sort_by(|left, right| left.target.cmp(&right.target));
 
     let script_keys: BTreeSet<(String, String)> = scripts
         .iter()
         .map(|script| {
-            let key = dir_and_stem(&script.target);
+            let key = directory_and_stem(&script.target);
             (key.dir.to_string(), key.stem.to_string())
         })
         .collect();
@@ -62,12 +62,12 @@ pub(crate) fn cleo_view<'a>(entries: &[&'a ContentEntry]) -> CleoView<'a>
     let script_rows = scripts
         .iter()
         .map(|&script| {
-            let key = dir_and_stem(&script.target);
+            let key = directory_and_stem(&script.target);
             let mut companions = companions_by_key
                 .get(&(key.dir.to_string(), key.stem.to_string()))
                 .cloned()
                 .unwrap_or_default();
-            companions.sort_by(|a, b| a.target.cmp(&b.target));
+            companions.sort_by(|left, right| left.target.cmp(&right.target));
             CleoScript { script, companions }
         })
         .collect();
@@ -104,7 +104,7 @@ struct CleoTargetKey<'a>
     stem: &'a str,
 }
 
-fn dir_and_stem(target: &str) -> CleoTargetKey<'_>
+fn directory_and_stem(target: &str) -> CleoTargetKey<'_>
 {
     let (dir, name) = match target.rfind('/') {
         Some(index) => (&target[..index], &target[index + 1..]),
@@ -151,7 +151,7 @@ pub(crate) fn asi_view<'a>(entries: &[&'a ContentEntry]) -> AsiView<'a>
     }
     for bucket in [&mut plugins, &mut loaders, &mut other]
     {
-        bucket.sort_by(|a, b| a.target.cmp(&b.target));
+        bucket.sort_by(|left, right| left.target.cmp(&right.target));
     }
     return AsiView {
         plugins,
@@ -189,5 +189,3 @@ mod tests
     include!("part_04_tests_02.rs");
     include!("part_04_tests_03.rs");
 }
-
-

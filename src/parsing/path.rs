@@ -1,4 +1,4 @@
-use crate::prelude::*;
+﻿use crate::prelude::*;
 
 pub(crate) fn path_from_package_root(source_root: &str) -> Result<PathBuf, AppError>
 {

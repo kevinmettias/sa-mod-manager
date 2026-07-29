@@ -1,4 +1,4 @@
-    use super::{export_telemetry_summary, load_telemetry_summary};
+﻿    use super::{export_telemetry_summary, load_telemetry_summary};
     use crate::prelude::*;
     use crate::ui::preferences::UiPreferences;
     use crate::ui::san_andreas_mod_ui::resolve_initial_game_root;
@@ -90,7 +90,7 @@
         assert!(export_text.contains("\"mods\""));
         assert!(export_text.contains("\"events\""));
         assert!(export_text.contains("test_mod"));
-        remove_dir_if_exists(&game_root).expect("the test fixture is created before this assertion reads it");
+        remove_directory_if_exists(&game_root).expect("the test fixture is created before this assertion reads it");
     }
 
     #[test]
@@ -130,7 +130,7 @@
                 |event| event.kind == "launch failed" && event.detail.contains("never started")
             )
         );
-        remove_dir_if_exists(&game_root).expect("the test fixture is created before this assertion reads it");
+        remove_directory_if_exists(&game_root).expect("the test fixture is created before this assertion reads it");
     }
 
     #[test]
@@ -172,7 +172,7 @@
             "detail was: {}",
             run_event.detail
         );
-        remove_dir_if_exists(&game_root).expect("the test fixture is created before this assertion reads it");
+        remove_directory_if_exists(&game_root).expect("the test fixture is created before this assertion reads it");
     }
 
     fn test_root(name: &str) -> PathBuf
@@ -182,12 +182,12 @@
             std::process::id(),
             unix_now()
         ));
-        remove_dir_if_exists(&root).expect("the test fixture is created before this assertion reads it"); // error-type: allow included only from cfg(test) harness code
+        remove_directory_if_exists(&root).expect("the test fixture is created before this assertion reads it"); // error-type: allow included only from cfg(test) harness code
         fs::create_dir_all(&root).expect("the test fixture is created before this assertion reads it"); // error-type: allow included only from cfg(test) harness code
         return root;
     }
 
-    fn remove_dir_if_exists(path: &Path) -> Result<(), AppError>
+    fn remove_directory_if_exists(path: &Path) -> Result<(), AppError>
     {
         if path.exists()
         {
@@ -195,4 +195,3 @@
         }
         return Ok(());
     }
-

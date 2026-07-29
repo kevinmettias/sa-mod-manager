@@ -1,4 +1,4 @@
-//! Reading CLEO's own runtime files — `cleo.log` and `.cleo_config.ini` — so the
+﻿//! Reading CLEO's own runtime files â€” `cleo.log` and `.cleo_config.ini` â€” so the
 //! manager can surface what CLEO actually did and how it is configured, rather
 //! than only inferring statically.
 
@@ -55,7 +55,7 @@ pub(crate) fn plugin_blacklist(config_text: Option<&str>) -> BTreeSet<String>
 /// Extract the GXT keys a `.fxt` file defines. Each non-comment line is
 /// `KEY value`; the key is the first whitespace-delimited token. Lines starting
 /// with `#` or `//` are comments (matching CLEO's `CTextManager` parser).
-pub(crate) fn parse_fxt_keys(text: &str) -> Vec<String>
+pub(crate) fn parse_text_keys(text: &str) -> Vec<String>
 {
     let mut keys = Vec::new();
     for raw in text.lines()
@@ -228,7 +228,7 @@ fn annotate_config_key(key: &str) -> Option<&'static str>
         "PluginBlacklist" => Some("legacy CLEO4 plugins CLEO refuses to load"),
         "DebugMode" => Some("global script debug mode (0 off / 1 on)"),
         "MainScmLegacyMode" => Some("main.scm compat mode (0 off / 3 CLEO3 / 4 CLEO4)"),
-        "StrictValidation" => Some("opcode argument validation (0 = .cs4 behavior)"),
+        "StrictValidation" => Some("opcode_bytes argument validation (0 = .cs4 behavior)"),
         "LogDirectory" => Some("where cleo.log / cleo_script.log are written"),
         "DebugUtils.ScriptLog.Enabled" => {
             Some("per-script execution log (0 never / 1 on crash / 2 always)")
@@ -289,7 +289,7 @@ mod tests
     }
 
     #[test]
-    fn fxt_keys_skip_comments_and_blanks()
+    fn text_keys_skip_comments_and_blanks()
     {
         let fxt = "\
 # a comment
@@ -298,7 +298,7 @@ HELLO Hello there
 
 SPEED  Your speed is ~1~
 ";
-        assert_eq!(parse_fxt_keys(fxt), vec!["HELLO", "SPEED"]);
+        assert_eq!(parse_text_keys(fxt), vec!["HELLO", "SPEED"]);
     }
 
     #[test]
@@ -314,7 +314,7 @@ UnknownKey = 42
 StrictValidation = 0";
         let config = parse_cleo_config(ini);
         assert_eq!(config.key_count, 4); // literal: allow test fixture value is the specimen under judgment
-        let keys: Vec<&str> = config.highlights.iter().map(|h| h.key.as_str()).collect();
+        let keys: Vec<&str> = config.highlights.iter().map(|highlight| highlight.key.as_str()).collect();
         assert_eq!(
             keys,
             vec!["PluginBlacklist", "DebugMode", "StrictValidation"]

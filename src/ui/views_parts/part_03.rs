@@ -1,4 +1,4 @@
-
+﻿
 impl SanAndreasModUi
 {
     /// Show a hint while files hover and consume any dropped onto the window.
@@ -79,7 +79,7 @@ fn clip_text(text: &str, max: usize) -> String
     return if text.chars().count() > max
     {
         let mut clipped: String = text.chars().take(max.saturating_sub(1)).collect();
-        clipped.push('…');
+        clipped.push_str("...");
         clipped
     }
     else
@@ -88,14 +88,14 @@ fn clip_text(text: &str, max: usize) -> String
     };
 }
 
-/// A compact install-status list for the left panel: one ✓/✗ line per detected
+/// A compact install-status list for the left panel: one âœ“/âœ— line per detected
 /// component (executable, ModLoader, CLEO, ASI), hovering shows the full path.
 /// Fits the narrow column, unlike the wide `infrastructure_grid`.
 fn game_setup_summary(ui: &mut egui::Ui, infrastructure: &[super::state::InfrastructureItem])
 {
     if infrastructure.is_empty()
     {
-        ui.weak("Set the game folder to detect components.");
+        ui.weak("Set the game folder to detect component_paths.");
         return;
     }
     let present_color = egui::Color32::from_rgb(
@@ -107,9 +107,9 @@ fn game_setup_summary(ui: &mut egui::Ui, infrastructure: &[super::state::Infrast
     for item in infrastructure
     {
         let (mark, color) = if item.present {
-            ("✓", present_color)
+            ("âœ“", present_color)
         } else {
-            ("✗", missing_color)
+            ("âœ—", missing_color)
         };
         ui.horizontal(|ui| {
             ui.colored_label(color, mark);
@@ -131,7 +131,7 @@ fn recommended_action(ui_state: &SanAndreasModUi) -> RecommendedAction
             secondary: Some(("Review cleanup", UiTab::Run)),
         };
     }
-    if !game_executable_present(ui_state)
+    if !is_game_executable_present(ui_state)
     {
         return RecommendedAction {
             detail: "The game executable was not detected in the configured folder.",
@@ -152,7 +152,7 @@ fn recommended_action(ui_state: &SanAndreasModUi) -> RecommendedAction
     if enabled_profile_count(ui_state) == 0
     {
         return RecommendedAction {
-            detail: "The selected profile has no enabled mods yet — tick them in the centre list.",
+            detail: "The selected profile has no enabled mods yet â€” tick them in the centre list.",
             primary_label: "Open library",
             primary_tab: Some(UiTab::Mods),
             secondary: None,
@@ -198,7 +198,7 @@ impl SanAndreasModUi
     {
         ui.heading("Workflow");
         // Game setup lives in the always-visible left panel, so it is not repeated
-        // here — the workflow starts from importing mods.
+        // here â€” the workflow starts from importing mods.
         egui::Grid::new("home_workflow")
             .striped(true)
             .min_col_width(WORKFLOW_GRID_MIN_COL_WIDTH)
@@ -260,10 +260,10 @@ fn has_cleanable_pending_run(ui_state: &SanAndreasModUi) -> bool
     return ui_state
         .pending_runs
         .iter()
-        .any(|record| record.status != PendingRunStatus::Running);
+        .any(|record_log_message_from_arguments| record_log_message_from_arguments.status != PendingRunStatus::Running);
 }
 
-fn game_executable_present(ui_state: &SanAndreasModUi) -> bool
+fn is_game_executable_present(ui_state: &SanAndreasModUi) -> bool
 {
     return ui_state.state.infrastructure.iter().any(|item| {
         item.present && (item.label == "Steam executable" || item.label == "Classic executable")
@@ -362,7 +362,7 @@ fn count_pending_status(ui_state: &SanAndreasModUi, status: PendingRunStatus) ->
     return ui_state
         .pending_runs
         .iter()
-        .filter(|record| record.status == status)
+        .filter(|record_log_message_from_arguments| record_log_message_from_arguments.status == status)
         .count();
 }
 
@@ -455,7 +455,3 @@ impl SanAndreasModUi
         });
     }
 }
-
-
-
-

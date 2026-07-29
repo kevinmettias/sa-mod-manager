@@ -1,4 +1,4 @@
-use crate::prelude::*;
+﻿use crate::prelude::*;
 
 pub(crate) fn escape_value(value: &str) -> String
 {

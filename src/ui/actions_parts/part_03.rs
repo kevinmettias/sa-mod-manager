@@ -1,4 +1,4 @@
-use crate::workspace::ProfileRootEnabledState;
+﻿use crate::workspace::ProfileRootEnabledState;
 pub(super) struct ProfileRootToggle<'a>
 {
     pub(super) mod_id: &'a str,
@@ -23,7 +23,7 @@ impl SanAndreasModUi
             self.pending_journal = self
                 .pending_runs
                 .first()
-                .map(|record| record.journal.clone());
+                .map(|record_log_message_from_arguments| record_log_message_from_arguments.journal.clone());
         }
         if !self.pending_runs.is_empty() && !self.recovery_focus_applied
         {
@@ -115,7 +115,7 @@ impl SanAndreasModUi
         };
         if let Err(err) = write_run_outcome(&state_directory(&self.game_root()), &outcome)
         {
-            log_warn!("could not record run outcome: {err}");
+            log_warn!("could not record_log_message_from_arguments run outcome: {err}");
         }
     }
 
@@ -128,45 +128,45 @@ impl SanAndreasModUi
     {
         if let Some(journal) = &self.pending_journal
         {
-            if let Some(record) = self
+            if let Some(record_log_message_from_arguments) = self
                 .pending_runs
                 .iter()
-                .find(|record| &record.journal == journal)
+                .find(|record_log_message_from_arguments| &record_log_message_from_arguments.journal == journal)
             {
-                return Some(record.clone());
+                return Some(record_log_message_from_arguments.clone());
             }
             return Some(PendingRunRecord {
                 journal: journal.clone(),
                 pid: None,
                 status: PendingRunStatus::Unknown,
-                detail: "selected cleanup record is not tracked".to_string(),
+                detail: "selected cleanup record_log_message_from_arguments is not tracked".to_string(),
             });
         }
         return self.pending_runs.first().cloned();
     }
 
-    fn pending_run_is_running(&mut self, record: &PendingRunRecord) -> bool
+    fn is_pending_run_running(&mut self, record_log_message_from_arguments: &PendingRunRecord) -> bool
     {
         self.poll_game_child();
         if self.game_child.is_some()
         {
             return true;
         }
-        return record.status == PendingRunStatus::Running
-            || record.pid.map(process_is_running).unwrap_or(false);
+        return record_log_message_from_arguments.status == PendingRunStatus::Running
+            || record_log_message_from_arguments.pid.map(is_child_program_running).unwrap_or(false);
     }
 
     fn has_unsafe_pending_runs_for_launch(&self) -> bool
     {
         return self.pending_runs
             .iter()
-            .any(|record| !self.pending_run_is_current_session_running(record));
+            .any(|record_log_message_from_arguments| !self.is_pending_run_current_session_running(record_log_message_from_arguments));
     }
 
-    fn pending_run_is_current_session_running(&self, record: &PendingRunRecord) -> bool
+    fn is_pending_run_current_session_running(&self, record_log_message_from_arguments: &PendingRunRecord) -> bool
     {
-        return pending_run_matches_current_session(
-            record,
+        return is_pending_run_match_for_current_session(
+            record_log_message_from_arguments,
             self.game_child.as_ref().map(|child| child.id()),
         );
     }
@@ -191,7 +191,7 @@ impl SanAndreasModUi
     {
         return self.pending_runs
             .iter()
-            .filter(|record| record.status == status)
+            .filter(|record_log_message_from_arguments| record_log_message_from_arguments.status == status)
             .count();
     }
 
@@ -201,7 +201,7 @@ impl SanAndreasModUi
         let stale_runs = self
             .pending_runs
             .iter()
-            .filter(|record| record.status == PendingRunStatus::Stale)
+            .filter(|record_log_message_from_arguments| record_log_message_from_arguments.status == PendingRunStatus::Stale)
             .cloned()
             .collect::<Vec<_>>();
         if stale_runs.is_empty()
@@ -212,9 +212,9 @@ impl SanAndreasModUi
         let game_root = self.game_root();
         let mut cleaned = 0;
         let mut first_error = None;
-        for record in stale_runs
+        for record_log_message_from_arguments in stale_runs
         {
-            match cleanup_journal_for_game_root(&game_root, &record.journal)
+            match cleanup_journal_for_game_root(&game_root, &record_log_message_from_arguments.journal)
             {
                 Ok(()) => cleaned += 1,
                 Err(err) => {
@@ -440,9 +440,9 @@ impl SanAndreasModUi
         self.request_confirm(PendingConfirm { title: "Clean temporary files".to_string(), message: "Roll back the selected run and delete its materialized files from the game folder?".to_string(), confirm_label: "Clean".to_string(), action: ConfirmAction::CleanSelectedRun });
     }
 
-    pub(super) fn request_cleanup_record(&mut self, record: PendingRunRecord)
+    pub(super) fn request_cleanup_record(&mut self, record_log_message_from_arguments: PendingRunRecord)
     {
-        self.request_confirm(PendingConfirm { title: "Clean temporary files".to_string(), message: "Roll back this run and delete its materialized files from the game folder?".to_string(), confirm_label: "Clean".to_string(), action: ConfirmAction::CleanRunRecord(record) });
+        self.request_confirm(PendingConfirm { title: "Clean temporary files".to_string(), message: "Roll back this run and delete its materialized files from the game folder?".to_string(), confirm_label: "Clean".to_string(), action: ConfirmAction::CleanRunRecord(record_log_message_from_arguments) });
     }
 
     pub(super) fn request_cleanup_finished(&mut self)
@@ -450,18 +450,3 @@ impl SanAndreasModUi
         self.request_confirm(PendingConfirm { title: "Clean finished runs".to_string(), message: "Roll back every finished run and delete its materialized files from the game folder?".to_string(), confirm_label: "Clean finished".to_string(), action: ConfirmAction::CleanFinishedRuns });
     }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

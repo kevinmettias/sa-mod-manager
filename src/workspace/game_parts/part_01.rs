@@ -1,6 +1,6 @@
 ﻿use super::cleo_deps::{analyze_script, load_opcode_db};
 use super::cleo_diagnostics::{
-    parse_cleo_config, parse_cleo_log, parse_fxt_keys, plugin_blacklist,
+    parse_cleo_config, parse_cleo_log, parse_text_keys, plugin_blacklist,
 };
 use super::game_version::detect_game_version;
 use crate::prelude::*;
@@ -108,7 +108,7 @@ impl fmt::Display for CleoRuntime
 
 fn print_game_script_inventory(game_root: &Path) -> Result<(), AppError>
 {
-    let asi_files = list_matching(game_root, |path| extension_eq(path, "asi"))?;
+    let asi_files = list_matching(game_root, |path| has_extension_equal_to(path, "asi"))?;
     let cleo_scripts = collect_cleo_scripts(game_root);
     let cleo_plugins = collect_cleo_plugins(game_root);
 
@@ -122,7 +122,7 @@ fn print_game_script_inventory(game_root: &Path) -> Result<(), AppError>
     print_cleo_saves(game_root);
     print_cleo_bundled_plugin_checklist(game_root, &cleo_plugins);
     print_cleo_content_validation(&cleo_scripts, &cleo_plugins);
-    print_fxt_key_conflicts(game_root);
+    print_text_key_conflicts(game_root);
     print_cleo_script_dependencies(game_root, &cleo_scripts, &cleo_plugins);
     print_cleo_config(game_root);
     print_cleo_log_diagnostics(game_root);
@@ -145,8 +145,8 @@ fn print_cleo_subfolder_scripts(game_root: &Path)
         .filter(|path| {
             CLEO_SCRIPT_EXTENSIONS
                 .iter()
-                .any(|ext| extension_eq(path, ext))
-                && script_is_in_stray_subfolder(&cleo_dir, path)
+                .any(|ext| has_extension_equal_to(path, ext))
+                && is_script_in_stray_subfolder(&cleo_dir, path)
         })
         .collect();
     if stray.is_empty()
@@ -165,7 +165,7 @@ fn print_cleo_subfolder_scripts(game_root: &Path)
 
 /// True when `path` is a `.cs*` file below `cleo_dir` whose first path segment
 /// under CLEO is a real (non-module, non-config) subfolder.
-fn script_is_in_stray_subfolder(cleo_dir: &Path, path: &Path) -> bool
+fn is_script_in_stray_subfolder(cleo_dir: &Path, path: &Path) -> bool
 {
     let Ok(relative) = path.strip_prefix(cleo_dir) else {
         return false;
@@ -186,7 +186,7 @@ fn script_is_in_stray_subfolder(cleo_dir: &Path, path: &Path) -> bool
 
 /// A GXT text key defined by more than one `.fxt` file (last loaded wins).
 #[derive(Clone)]
-pub(crate) struct FxtKeyConflict
+pub(crate) struct TextKeyConflict
 {
     pub(crate) key: String,
     pub(crate) files: Vec<String>,
@@ -208,7 +208,7 @@ pub(crate) struct CleoScriptIssue
 pub(crate) struct CleoDiagnostics
 {
     pub(crate) blacklisted_plugins: Vec<String>,
-    pub(crate) fxt_conflicts: Vec<FxtKeyConflict>,
+    pub(crate) fxt_conflicts: Vec<TextKeyConflict>,
     pub(crate) script_issues: Vec<CleoScriptIssue>,
 }
 
@@ -245,9 +245,9 @@ fn print_cleo_blacklisted_plugins(game_root: &Path, cleo_plugins: &[PathBuf])
 /// Detect GXT text keys defined by more than one `.fxt` file in `cleo_text/`.
 /// Because duplicate keys resolve last-loaded-wins, two mods defining the same
 /// key is a real (file-name-invisible) conflict.
-fn print_fxt_key_conflicts(game_root: &Path)
+fn print_text_key_conflicts(game_root: &Path)
 {
-    let conflicts = collect_fxt_conflicts(game_root);
+    let conflicts = collect_text_key_conflicts(game_root);
     if conflicts.is_empty()
     {
         return;
@@ -295,7 +295,7 @@ pub(crate) fn detect_cleo_runtime(game_root: &Path) -> CleoRuntime
     {
         return CleoRuntime::Absent;
     }
-    // CLEO5-only markers: the config file, the renamed plugin folder, the opcode DB.
+    // CLEO5-only markers: the config file, the renamed plugin folder, the opcode_bytes DB.
     let has_cleo5_config = cleo_dir.join(".cleo_config.ini").exists();
     let has_cleo5_plugin_folder = cleo_dir.join("cleo_plugins").is_dir();
     let has_cleo5_opcode_db = cleo_dir.join(".config").join("sa.json").exists();
@@ -319,17 +319,17 @@ pub(crate) fn collect_cleo_diagnostics(game_root: &Path) -> CleoDiagnostics
     let plugins = collect_cleo_plugins(game_root);
     let blacklisted_plugins = blacklisted_plugin_paths(game_root, &plugins)
         .iter()
-        .filter_map(|path| path.file_name().and_then(|n| n.to_str()).map(String::from))
+        .filter_map(|path| path.file_name().and_then(|name| name.to_str()).map(String::from))
         .collect();
     return CleoDiagnostics {
         blacklisted_plugins,
-        fxt_conflicts: collect_fxt_conflicts(game_root),
+        fxt_conflicts: collect_text_key_conflicts(game_root),
         script_issues: collect_script_issues(game_root),
     };
 }
 
 /// Per-script issues (missing bundled plugins, elevated capabilities), keyed off
-/// the installed `sa.json` opcode DB. Empty when not CLEO5 or the DB is absent.
+/// the installed `sa.json` opcode_bytes DB. Empty when not CLEO5 or the DB is absent.
 fn collect_script_issues(game_root: &Path) -> Vec<CleoScriptIssue>
 {
     if detect_cleo_runtime(game_root) != CleoRuntime::Cleo5
@@ -416,10 +416,10 @@ fn blacklisted_plugin_paths(game_root: &Path, cleo_plugins: &[PathBuf]) -> Vec<P
 }
 
 /// GXT keys defined by more than one `.fxt` file in `cleo_text/`.
-fn collect_fxt_conflicts(game_root: &Path) -> Vec<FxtKeyConflict>
+fn collect_text_key_conflicts(game_root: &Path) -> Vec<TextKeyConflict>
 {
     let text_dir = game_root.join("CLEO").join("cleo_text");
-    let files = list_matching(&text_dir, |path| extension_eq(path, "fxt")).unwrap_or_default();
+    let files = list_matching(&text_dir, |path| has_extension_equal_to(path, "fxt")).unwrap_or_default();
     let mut by_key: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for file in &files
     {
@@ -431,7 +431,7 @@ fn collect_fxt_conflicts(game_root: &Path) -> Vec<FxtKeyConflict>
             .and_then(|name| name.to_str())
             .unwrap_or("<fxt>")
             .to_string();
-        for key in parse_fxt_keys(&text)
+        for key in parse_text_keys(&text)
         {
             let providers = by_key.entry(key).or_default();
             if providers.last() != Some(&name)
@@ -443,9 +443,6 @@ fn collect_fxt_conflicts(game_root: &Path) -> Vec<FxtKeyConflict>
     return by_key
         .into_iter()
         .filter(|(_, files)| files.len() > 1)
-        .map(|(key, files)| FxtKeyConflict { key, files })
+        .map(|(key, files)| TextKeyConflict { key, files })
         .collect();
 }
-
-
-

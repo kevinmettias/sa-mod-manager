@@ -1,6 +1,6 @@
 ﻿use crate::prelude::*;
 
-pub(crate) fn launch_game_executable(
+pub(crate) fn launch_game_executable_from_arguments(
     game_root: &Path,
     args: &[String],
     env: &BTreeMap<String, String>,
@@ -23,7 +23,7 @@ pub(crate) fn launch_game_executable(
 /// Launch a user-configured external tool (MO2's "executables"): spawn it from
 /// its own directory so relative resources resolve, and detach â€” unlike the
 /// game, tools are not materialized, watched, or cleaned up.
-pub(crate) fn launch_external_tool(
+pub(crate) fn launch_external_tool_from_arguments(
     path: &Path,
     args: &[String],
 ) -> Result<std::process::Child, AppError>
@@ -79,13 +79,13 @@ pub(crate) fn game_executable_path(game_root: &Path) -> Option<PathBuf>
 /// Used to tell an install that is genuinely still running from one whose
 /// process died mid-transaction (leaving an interrupted install to recover).
 /// Non-Windows targets conservatively report `false`.
-pub(crate) fn process_is_running(pid: u32) -> bool
+pub(crate) fn is_child_program_running(pid: u32) -> bool
 {
     if pid == 0
     {
         return false;
     }
-    return process_start_ticks(pid).is_some();
+    return program_start_ticks(pid).is_some();
 }
 
 /// A Windows creation-time fingerprint for `pid`, used to tell a live process
@@ -95,7 +95,7 @@ pub(crate) fn process_is_running(pid: u32) -> bool
 /// query) and always `None` off Windows. This replaces spawning `tasklist`:
 /// `OpenProcess` is cheaper, needs no output parsing, and cannot be fooled by a
 /// PID's digits appearing in another column of a text table.
-pub(crate) fn process_start_ticks(pid: u32) -> Option<u64>
+pub(crate) fn program_start_ticks(pid: u32) -> Option<u64>
 {
     if pid == 0
     {
@@ -103,7 +103,7 @@ pub(crate) fn process_start_ticks(pid: u32) -> Option<u64>
     }
     #[cfg(windows)]
     {
-        winproc::process_start_ticks(pid)
+        winproc::program_start_ticks(pid)
     }
     #[cfg(not(windows))]
     return {
@@ -113,11 +113,11 @@ pub(crate) fn process_start_ticks(pid: u32) -> Option<u64>
 
 /// Creation-time fingerprint of the current process, recorded in the install
 /// lock so a later PID reuse can be detected on recovery. `None` off Windows.
-pub(crate) fn current_process_start_ticks() -> Option<u64>
+pub(crate) fn current_program_start_ticks() -> Option<u64>
 {
     #[cfg(windows)]
     {
-        winproc::current_process_start_ticks()
+        winproc::current_program_start_ticks()
     }
     #[cfg(not(windows))]
     return {
@@ -153,17 +153,19 @@ mod winproc
 
     // Enough access to read process timing; grantable for our own install
     // processes without elevated rights (unlike PROCESS_QUERY_INFORMATION).
-    const PROCESS_QUERY_LIMITED_INFORMATION: Dword = Dword(0x1000);
+    const PROGRAM_QUERY_LIMITED_INFORMATION: Dword = Dword(0x1000);
 
     unsafe extern "system" {
-        fn OpenProcess(desired_access: Dword, inherit_handle: Bool, process_id: Dword) -> Handle;
+        #[link_name = "OpenProcess"]
+        fn open_program_handle(desired_access: Dword, inherit_handle: Bool, process_id: Dword) -> Handle;
         fn CloseHandle(object: Handle) -> Bool;
-        fn GetCurrentProcess() -> Handle;
+        #[link_name = "GetCurrentProcess"]
+        fn current_program_handle() -> Handle;
         fn GetModuleHandleA(module_name: *const u8) -> Handle;
         fn GetProcAddress(module: Handle, proc_name: *const u8) -> *const c_void;
     }
 
-    type GetProcessTimesFn = unsafe extern "system" fn(
+    type GetProgramTimesFn = unsafe extern "system" fn(
         Handle,
         *mut Filetime,
         *mut Filetime,
@@ -171,10 +173,10 @@ mod winproc
         *mut Filetime,
     ) -> Bool;
 
-    pub(super) fn process_start_ticks(pid: u32) -> Option<u64>
+    pub(super) fn program_start_ticks(pid: u32) -> Option<u64>
     {
         // SAFETY: FFI call taking a plain PID; returns a null handle on failure.
-        let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, Bool(0), Dword(pid)) };
+        let handle = unsafe { open_program_handle(PROGRAM_QUERY_LIMITED_INFORMATION, Bool(0), Dword(pid)) };
         if handle.is_null()
         {
             return None;
@@ -185,15 +187,15 @@ mod winproc
         return ticks;
     }
 
-    pub(super) fn current_process_start_ticks() -> Option<u64>
+    pub(super) fn current_program_start_ticks() -> Option<u64>
     {
         // `GetCurrentProcess` returns a pseudo-handle that must NOT be closed.
         // SAFETY: the pseudo-handle is always valid for the current process.
-        let handle = unsafe { GetCurrentProcess() };
+        let handle = unsafe { current_program_handle() };
         return creation_ticks(handle);
     }
 
-    fn get_process_times_fn() -> Option<GetProcessTimesFn>
+    fn get_program_times_fn() -> Option<GetProgramTimesFn>
     {
         // SAFETY: kernel32 is loaded in every normal Windows process; the symbol name is NUL-terminated.
         let module = unsafe { GetModuleHandleA(b"kernel32.dll\0".as_ptr()) };
@@ -207,13 +209,13 @@ mod winproc
         {
             return None;
         }
-        // SAFETY: kernel32!GetProcessTimes has the exact ABI represented by GetProcessTimesFn.
-        return Some(unsafe { std::mem::transmute::<*const c_void, GetProcessTimesFn>(proc) });
+        // SAFETY: kernel32!GetProcessTimes has the exact ABI represented by GetProgramTimesFn.
+        return Some(unsafe { std::mem::transmute::<*const c_void, GetProgramTimesFn>(proc) });
     }
 
     fn creation_ticks(handle: Handle) -> Option<u64>
     {
-        let get_process_times = get_process_times_fn()?;
+        let get_program_times = get_program_times_fn()?;
         let mut creation = Filetime::default();
         let mut exit = Filetime::default();
         let mut kernel = Filetime::default();
@@ -222,7 +224,7 @@ mod winproc
         // every out-pointer references distinct stack storage we own.
         let ok = unsafe {
             // unsafe: allow FFI call uses a valid process handle and distinct out-pointers
-            get_process_times(handle, &mut creation, &mut exit, &mut kernel, &mut user)
+            get_program_times(handle, &mut creation, &mut exit, &mut kernel, &mut user)
         };
         if ok == Bool(0)
         {
@@ -244,7 +246,7 @@ mod tests
     #[test]
     fn ensure_gta_install_rejects_directory_without_executable()
     {
-        let root = temp_root("ensure_gta_missing");
+        let root = temporary_root("ensure_gta_missing");
         let err = ensure_gta_install(&root).unwrap_err().to_string();
         assert!(err.contains("does not look like a GTA San Andreas install"));
         fs::remove_dir_all(&root)
@@ -256,7 +258,7 @@ mod tests
     {
         for exe in ["gta_sa.exe", "gta-sa.exe"]
         {
-            let root = temp_root(&format!("ensure_gta_{exe}"));
+            let root = temporary_root(&format!("ensure_gta_{exe}"));
             fs::write(root.join(exe), b"")
                 .expect("the test fixture is created before this assertion reads it");
             assert!(ensure_gta_install(&root).is_ok());
@@ -265,7 +267,7 @@ mod tests
         }
     }
 
-    fn temp_root(name: &str) -> PathBuf
+    fn temporary_root(name: &str) -> PathBuf
     {
         let root = env::temp_dir().join(format!(
             "sa-mod-manager-{name}-{}-{}",
@@ -282,4 +284,3 @@ mod tests
         return root;
     }
 }
-

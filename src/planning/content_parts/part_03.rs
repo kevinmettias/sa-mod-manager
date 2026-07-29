@@ -41,15 +41,15 @@ pub(crate) fn modloader_conflicts(
             .collect();
         // Highest priority wins; ties fall back to folder name so the display is
         // stable even where ModLoader's own tie-break is unspecified.
-        contenders.sort_by(|a, b| {
-            b.priority
-                .cmp(&a.priority)
-                .then_with(|| a.folder.cmp(&b.folder))
+        contenders.sort_by(|left, right| {
+            right.priority
+                .cmp(&left.priority)
+                .then_with(|| left.folder.cmp(&right.folder))
         });
         let ambiguous = contenders
             .get(1)
             .is_some_and(|second| second.priority == contenders[0].priority);
-        let mergeable = is_mergeable_data_file(&asset);
+        let mergeable = is_mergeable_game_resource_file(&asset);
         conflicts.push(ModLoaderConflict {
             asset,
             contenders,
@@ -72,7 +72,7 @@ const MODLOADER_DEFAULT_PRIORITY_LIMIT: i32 = 100;
 /// as a mod â€” so we never write priority/ignore entries for those.
 pub(crate) fn modloader_folder_from_target(target: &str) -> Option<String>
 {
-    let mut segments = target.split('/').filter(|s| !s.is_empty());
+    let mut segments = target.split('/').filter(|segment| !segment.is_empty());
     let mut found_root = false;
     for segment in segments.by_ref()
     {
@@ -202,7 +202,7 @@ pub(crate) fn render_modloader_priority_ini(
             continue;
         }
         if in_target
-            && replace_rendered_priority_line(trimmed, &mut pending, &mut out, &mut changed)
+            && has_replaced_rendered_priority_line(trimmed, &mut pending, &mut out, &mut changed)
         {
             continue;
         }
@@ -216,7 +216,7 @@ pub(crate) fn render_modloader_priority_ini(
     }
     else if !wrote_section && !pending.is_empty()
     {
-        if out.last().map(|l| !l.trim().is_empty()).unwrap_or(false)
+        if out.last().map(|line| !line.trim().is_empty()).unwrap_or(false)
         {
             out.push(String::new());
         }
@@ -276,7 +276,7 @@ fn flush_pending(
     }
 }
 /// Append each still-pending folder as a `Folder = priority` line.
-fn replace_rendered_priority_line(
+fn has_replaced_rendered_priority_line(
     trimmed: &str,
     pending: &mut BTreeMap<String, (String, i32)>,
     out: &mut Vec<String>,
@@ -443,7 +443,7 @@ fn set_profile_list_section(edit: ProfileListSectionEdit<'_>) -> RenderedProfile
     }
     if !entries.is_empty()
     {
-        if out.last().map(|l| !l.trim().is_empty()).unwrap_or(false)
+        if out.last().map(|line| !line.trim().is_empty()).unwrap_or(false)
         {
             out.push(String::new());
         }
@@ -481,7 +481,7 @@ fn ini_value_in_section(lookup: IniLookup<'_>) -> Option<String>
     for raw in ini.lines()
     {
         let line = raw.split(';').next().unwrap_or("").trim();
-        if let Some(header) = line.strip_prefix('[').and_then(|s| s.strip_suffix(']'))
+        if let Some(header) = line.strip_prefix('[').and_then(|section_text| section_text.strip_suffix(']'))
         {
             in_section = header.trim().eq_ignore_ascii_case(section);
             continue;
