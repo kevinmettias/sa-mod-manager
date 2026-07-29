@@ -13,7 +13,8 @@ pub(super) use ui_tab::UiTab;
 pub(super) fn load_ui_state(
     game_root: &Path,
     selected_profile_name: &str,
-) -> Result<UiState, AppError> {
+) -> Result<UiState, AppError>
+{
     ensure_state(game_root)?;
     let profiles = list_profile_names(game_root)?;
     let profile_name = if profiles.iter().any(|name| name == selected_profile_name) {
@@ -26,23 +27,27 @@ pub(super) fn load_ui_state(
     let selected_ids = selected_profile_ids(selected_profile_ref);
     let mods = list_mod_configs(game_root, &selected_ids)?;
     let infrastructure = inspect_infrastructure(game_root);
-    Ok(UiState {
+    return Ok(UiState {
         profiles,
         selected_profile,
         mods,
         infrastructure,
-    })
+    });
 }
 
-fn list_profile_names(game_root: &Path) -> Result<Vec<String>, AppError> {
+fn list_profile_names(game_root: &Path) -> Result<Vec<String>, AppError>
+{
     let profiles_root = state_directory(game_root).join("profiles");
     let mut names = Vec::new();
-    if !profiles_root.exists() {
+    if !profiles_root.exists()
+    {
         return Ok(names);
     }
-    for entry in fs::read_dir(profiles_root)? {
+    for entry in fs::read_dir(profiles_root)?
+    {
         let path = entry?.path();
-        if extension_eq(&path, "json") {
+        if extension_eq(&path, "json")
+        {
             let name = path
                 .file_stem()
                 .and_then(OsStr::to_str)
@@ -52,32 +57,39 @@ fn list_profile_names(game_root: &Path) -> Result<Vec<String>, AppError> {
         }
     }
     names.sort();
-    Ok(names)
+    return Ok(names);
 }
 
-fn selected_profile_ids(profile: Option<&ProfileJson>) -> BTreeSet<String> {
+fn selected_profile_ids(profile: Option<&ProfileJson>) -> BTreeSet<String>
+{
     let mut ids = BTreeSet::new();
-    if let Some(profile) = profile {
-        for entry in &profile.mods {
+    if let Some(profile) = profile
+    {
+        for entry in &profile.mods
+        {
             let entry_id = entry.id.clone();
             ids.insert(entry_id);
         }
     }
-    ids
+    return ids;
 }
 
 fn list_mod_configs(
     game_root: &Path,
     selected_ids: &BTreeSet<String>,
-) -> Result<Vec<ModConfigItem>, AppError> {
+) -> Result<Vec<ModConfigItem>, AppError>
+{
     let mods_root = state_directory(game_root).join("mods");
     let mut items = Vec::new();
-    if !mods_root.exists() {
+    if !mods_root.exists()
+    {
         return Ok(items);
     }
-    for entry in fs::read_dir(mods_root)? {
+    for entry in fs::read_dir(mods_root)?
+    {
         let path = entry?.path().join("mod.json");
-        if !path.exists() {
+        if !path.exists()
+        {
             continue;
         }
         let config = read_mod_config_json(&path)?;
@@ -89,10 +101,11 @@ fn list_mod_configs(
         });
     }
     items.sort_by(|a, b| a.config.id.cmp(&b.config.id));
-    Ok(items)
+    return Ok(items);
 }
 
-fn inspect_infrastructure(game_root: &Path) -> Vec<InfrastructureItem> {
+fn inspect_infrastructure(game_root: &Path) -> Vec<InfrastructureItem>
+{
     let builtin = [
         ("Steam executable", "gta-sa.exe"),
         ("Classic executable", "gta_sa.exe"),
@@ -104,22 +117,46 @@ fn inspect_infrastructure(game_root: &Path) -> Vec<InfrastructureItem> {
     ];
     let mut items: Vec<InfrastructureItem> = builtin
         .into_iter()
-        .map(|(label, relative)| infrastructure_item(game_root, label, relative))
+        .map(|(label, relative)| {
+            infrastructure_item(
+                game_root,
+                InfrastructureItemCheck {
+                    label: label,
+                    relative: relative,
+                },
+            )
+        })
         .collect();
     // Config-declared checks (e.g. an alternate ASI loader like dinput8.dll) are
     // appended so the status panel can recognize non-default setups.
-    for (label, relative) in crate::settings::extra_infrastructure_checks() {
-        let item = infrastructure_item(game_root, label, relative);
+    for (label, relative) in crate::settings::extra_infrastructure_checks()
+    {
+        let item = infrastructure_item(
+            game_root,
+            InfrastructureItemCheck {
+                label: label,
+                relative: relative,
+            },
+        );
         items.push(item);
     }
-    items
+    return items;
 }
 
-fn infrastructure_item(game_root: &Path, label: &str, relative: &str) -> InfrastructureItem {
+struct InfrastructureItemCheck<'a>
+{
+    label: &'a str,
+    relative: &'a str,
+}
+
+fn infrastructure_item(game_root: &Path, check: InfrastructureItemCheck<'_>) -> InfrastructureItem
+{
+    let label = check.label;
+    let relative = check.relative;
     let path = game_root.join(relative);
-    InfrastructureItem {
+    return InfrastructureItem {
         label: label.to_string(),
         present: path.exists(),
         path,
-    }
+    };
 }

@@ -1,6 +1,7 @@
 use crate::prelude::*;
 
-pub(crate) struct BuildContext<'a> {
+pub(crate) struct BuildContext<'a>
+{
     pub(crate) report: &'a PackageReport,
     pub(crate) options: &'a CommandOptions,
     pub(crate) package_id: &'a str,

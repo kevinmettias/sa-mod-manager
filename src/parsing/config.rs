@@ -4,7 +4,8 @@ use crate::prelude::*;
 /// a higher version is rejected rather than silently misinterpreted.
 const CURRENT_PROFILE_VERSION: u32 = 1;
 
-pub(crate) fn read_profile_json(path: &Path) -> Result<ProfileJson, AppError> {
+pub(crate) fn read_profile_json(path: &Path) -> Result<ProfileJson, AppError>
+{
     let text = read_capped(path, MAX_CONTROL_FILE_BYTES)?;
     let raw: ProfileJsonFile = serde_json::from_str(&text).map_err(|err| {
         AppError::Usage(format!("invalid profile json {}: {err}", path.display()))
@@ -35,18 +36,19 @@ pub(crate) fn read_profile_json(path: &Path) -> Result<ProfileJson, AppError> {
         .collect();
     let launch_args = raw.launch_args.unwrap_or_default();
     let launch_env = raw.launch_env.unwrap_or_default();
-    Ok(ProfileJson {
+    return Ok(ProfileJson {
         name,
         mods,
         launch_args,
         launch_env,
         extra: raw.extra,
         game_root_override,
-    })
+    });
 }
 
 #[derive(Deserialize)]
-struct ProfileJsonFile {
+struct ProfileJsonFile
+{
     version: Option<u32>,
     name: Option<String>,
     game_root: Option<String>,
@@ -61,7 +63,8 @@ struct ProfileJsonFile {
 }
 
 #[derive(Deserialize)]
-struct ProfileModEntryFile {
+struct ProfileModEntryFile
+{
     id: Option<String>,
     enabled: Option<bool>,
     load_order: Option<i32>,
@@ -73,7 +76,8 @@ struct ProfileModEntryFile {
 /// the richer object form, so older profiles keep working.
 #[derive(Deserialize)]
 #[serde(untagged)]
-enum RootOverrideFile {
+enum RootOverrideFile
+{
     Enabled(bool),
     Full {
         enabled: Option<bool>,
@@ -81,32 +85,27 @@ enum RootOverrideFile {
     },
 }
 
-fn root_override_from_file(raw: RootOverrideFile) -> ProfileRootOverride {
-    match raw {
-        RootOverrideFile::Enabled(enabled) => ProfileRootOverride {
-            enabled: Some(enabled),
-            target: None,
-        },
-        RootOverrideFile::Full { enabled, target } => ProfileRootOverride { enabled, target },
-    }
-}
-
-fn profile_name_from_path(path: &Path) -> String {
-    path.file_stem()
+fn profile_name_from_path(path: &Path) -> String
+{
+    return path
+        .file_stem()
         .and_then(OsStr::to_str)
         .unwrap_or("default")
-        .to_string()
+        .to_string();
 }
 
-fn game_root_from_profile_path(path: &Path) -> PathBuf {
-    path.parent()
+fn game_root_from_profile_path(path: &Path) -> PathBuf
+{
+    return path
+        .parent()
         .and_then(Path::parent)
         .and_then(Path::parent)
         .map(Path::to_path_buf)
-        .unwrap_or_else(crate::settings::default_game_root)
+        .unwrap_or_else(crate::settings::default_game_root);
 }
 
-fn profile_mod_entry_from_json(entry: ProfileModEntryFile, game_root: &Path) -> ProfileModEntry {
+fn profile_mod_entry_from_json(entry: ProfileModEntryFile, game_root: &Path) -> ProfileModEntry
+{
     let id = entry.id.unwrap_or_else(|| "unnamed".to_string());
     let enabled = entry.enabled.unwrap_or(true);
     let load_order = entry.load_order.unwrap_or(100); // literal: allow domain threshold is documented by the surrounding code
@@ -119,21 +118,34 @@ fn profile_mod_entry_from_json(entry: ProfileModEntryFile, game_root: &Path) -> 
         .into_iter()
         .map(|(source, raw)| (source, root_override_from_file(raw)))
         .collect();
-    ProfileModEntry {
+    return ProfileModEntry {
         id,
         enabled,
         load_order,
         config,
         root_overrides,
-    }
+    };
 }
 
-fn default_mod_config_path(game_root: &Path, id: &str) -> PathBuf {
+fn default_mod_config_path(game_root: &Path, id: &str) -> PathBuf
+{
     let state_root = state_directory(game_root);
-    state_root.join("mods").join(id).join("mod.json")
+    return state_root.join("mods").join(id).join("mod.json");
 }
 
-pub(crate) fn read_mod_config_json(path: &Path) -> Result<ModConfigJson, AppError> {
+fn root_override_from_file(raw: RootOverrideFile) -> ProfileRootOverride
+{
+    return match raw {
+        RootOverrideFile::Enabled(enabled) => ProfileRootOverride {
+            enabled: Some(enabled),
+            target: None,
+        },
+        RootOverrideFile::Full { enabled, target } => ProfileRootOverride { enabled, target },
+    };
+}
+
+pub(crate) fn read_mod_config_json(path: &Path) -> Result<ModConfigJson, AppError>
+{
     let text = read_capped(path, MAX_CONTROL_FILE_BYTES)?;
     let raw: ModConfigJsonFile = serde_json::from_str(&text)
         .map_err(|err| AppError::Usage(format!("invalid mod json {}: {err}", path.display())))?;
@@ -148,17 +160,18 @@ pub(crate) fn read_mod_config_json(path: &Path) -> Result<ModConfigJson, AppErro
         .into_iter()
         .map(mod_install_root_from_json)
         .collect();
-    Ok(ModConfigJson {
+    return Ok(ModConfigJson {
         id,
         package,
         source_root,
         enabled,
         install_roots,
-    })
+    });
 }
 
 #[derive(Deserialize)]
-struct ModConfigJsonFile {
+struct ModConfigJsonFile
+{
     id: Option<String>,
     package: Option<PathBuf>,
     source_root: Option<PathBuf>,
@@ -168,7 +181,8 @@ struct ModConfigJsonFile {
 }
 
 #[derive(Deserialize)]
-struct ModInstallRootJsonFile {
+struct ModInstallRootJsonFile
+{
     source: Option<String>,
     target: Option<String>,
     kind: Option<String>,
@@ -176,68 +190,74 @@ struct ModInstallRootJsonFile {
     optional: Option<bool>,
 }
 
-fn mod_id_from_path(path: &Path) -> String {
-    path.parent()
+fn mod_id_from_path(path: &Path) -> String
+{
+    return path
+        .parent()
         .and_then(Path::file_name)
         .and_then(OsStr::to_str)
         .unwrap_or("mod")
-        .to_string()
+        .to_string();
 }
 
-fn mod_install_root_from_json(object: ModInstallRootJsonFile) -> ModInstallRootJson {
+fn mod_install_root_from_json(object: ModInstallRootJsonFile) -> ModInstallRootJson
+{
     let source = object.source.unwrap_or_else(|| ".".to_string());
     let target = object.target.unwrap_or_else(|| ".".to_string());
     let kind = object.kind.unwrap_or_else(|| "modloader".to_string());
     let enabled = object.enabled.unwrap_or(true);
     let optional = object.optional.unwrap_or(false);
-    ModInstallRootJson {
+    return ModInstallRootJson {
         source,
         target,
         kind,
         enabled,
         optional,
-    }
+    };
 }
 
 #[cfg(test)]
-mod tests {
+mod tests
+{
     use super::*;
 
-    fn temp_profile(name: &str, contents: &str) -> PathBuf {
-        let root = env::temp_dir().join(format!(
-            "sa-mod-manager-cfg-{name}-{}-{}",
-            std::process::id(),
-            unix_now()
-        ));
-        let path = root
-            .join(".sa-mod-manager")
-            .join("profiles")
-            .join(format!("{name}.json"));
-        fs::create_dir_all(path.parent().unwrap()).unwrap();
-        fs::write(&path, contents).unwrap();
-        path
+    struct TempProfile<'a>
+    {
+        name: &'a str,
+        contents: &'a str,
     }
 
     #[test]
-    fn rejects_profile_with_future_format_version() {
-        let path = temp_profile(
-            "future",
-            "{\"version\": 99, \"name\": \"future\", \"mods\": []}",
-        );
+    fn rejects_profile_with_future_format_version()
+    {
+        let path = temp_profile(TempProfile {
+            name: "future",
+            contents: "{\"version\": 99, \"name\": \"future\", \"mods\": []}",
+        });
         let err = read_profile_json(&path).unwrap_err().to_string();
         assert!(err.contains("newer than this manager supports"), "{err}");
-        fs::remove_dir_all(path.parent().unwrap().parent().unwrap().parent().unwrap()).unwrap();
+        fs::remove_dir_all(
+            path.parent()
+                .expect("the test fixture is created before this assertion reads it")
+                .parent()
+                .expect("the test fixture is created before this assertion reads it")
+                .parent()
+                .expect("the test fixture is created before this assertion reads it"),
+        )
+        .expect("the test fixture is created before this assertion reads it");
     }
 
     #[test]
-    fn honors_explicit_game_root_and_preserves_unknown_fields() {
+    fn honors_explicit_game_root_and_preserves_unknown_fields()
+    {
         // An explicit game_root overrides the location-derived one, and a mod
         // entry with no config path resolves under it.
-        let path = temp_profile(
-            "portable",
-            "{\"name\": \"portable\", \"game_root\": \"Z:/Custom Install\", \"custom_note\": \"keep me\", \"mods\": [{\"id\": \"cleo\"}]}",
-        );
-        let profile = read_profile_json(&path).unwrap();
+        let path = temp_profile(TempProfile {
+            name: "portable",
+            contents: "{\"name\": \"portable\", \"game_root\": \"Z:/Custom Install\", \"custom_note\": \"keep me\", \"mods\": [{\"id\": \"cleo\"}]}",
+        });
+        let profile = read_profile_json(&path)
+            .expect("the test fixture is created before this assertion reads it");
         // The mod config resolves under the explicit game root (the `Z:/…` prefix
         // is preserved verbatim in the joined path root).
         assert!(
@@ -256,6 +276,37 @@ mod tests {
                 .and_then(serde_json::Value::as_str),
             Some("keep me")
         );
-        fs::remove_dir_all(path.parent().unwrap().parent().unwrap().parent().unwrap()).unwrap();
+        fs::remove_dir_all(
+            path.parent()
+                .expect("the test fixture is created before this assertion reads it")
+                .parent()
+                .expect("the test fixture is created before this assertion reads it")
+                .parent()
+                .expect("the test fixture is created before this assertion reads it"),
+        )
+        .expect("the test fixture is created before this assertion reads it");
+    }
+
+    fn temp_profile(profile: TempProfile<'_>) -> PathBuf
+    {
+        let name = profile.name;
+        let contents = profile.contents;
+        let root = env::temp_dir().join(format!(
+            "sa-mod-manager-cfg-{name}-{}-{}",
+            std::process::id(),
+            unix_now()
+        ));
+        let path = root
+            .join(".sa-mod-manager")
+            .join("profiles")
+            .join(format!("{name}.json"));
+        fs::create_dir_all(
+            path.parent()
+                .expect("the test fixture is created before this assertion reads it"),
+        )
+        .expect("the test fixture is created before this assertion reads it");
+        fs::write(&path, contents)
+            .expect("the test fixture is created before this assertion reads it");
+        return path;
     }
 }

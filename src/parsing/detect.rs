@@ -1,9 +1,11 @@
-use crate::prelude::*;
+﻿use crate::prelude::*;
 
-pub(crate) fn detect_install_candidate(path: &str, size: u64) -> Option<InstallCandidate> {
+pub(crate) fn detect_install_candidate(path: &str, size: u64) -> Option<InstallCandidate>
+{
     let lower = path.to_ascii_lowercase();
     let parts: Vec<&str> = lower.split('/').filter(|p| !p.is_empty()).collect();
-    if parts.is_empty() {
+    if parts.is_empty()
+    {
         return None;
     }
 
@@ -15,54 +17,68 @@ pub(crate) fn detect_install_candidate(path: &str, size: u64) -> Option<InstallC
         original_parts: &original_parts,
         size,
     };
-    detect_modloader_candidate(&detection)
-        .or_else(|| detect_cleo_plugin_candidate(path, &lower, &parts, size))
-        .or_else(|| detect_cleo_modules_candidate(path, &parts, size))
-        .or_else(|| detect_cleo_saves_candidate(path, &parts, size))
-        .or_else(|| detect_cleo_text_candidate(path, &lower, &parts, size))
-        .or_else(|| detect_cleo_candidate(path, &lower, &parts, size))
-        .or_else(|| detect_asi_candidate(path, &lower, size))
-        .or_else(|| detect_plugin_config_candidate(path, &lower, size))
-        .or_else(|| detect_game_directory_candidate(path, &parts, size))
-        .or_else(|| detect_img_candidate(path, &lower, size))
-        .or_else(|| detect_script_candidate(path, &lower, size))
+    return detect_modloader_candidate(&detection)
+        .or_else(|| detect_cleo_plugin_candidate(&detection))
+        .or_else(|| detect_cleo_modules_candidate(&detection))
+        .or_else(|| detect_cleo_saves_candidate(&detection))
+        .or_else(|| detect_cleo_text_candidate(&detection))
+        .or_else(|| detect_cleo_candidate(&detection))
+        .or_else(|| detect_asi_candidate(&detection))
+        .or_else(|| detect_plugin_config_candidate(&detection))
+        .or_else(|| detect_game_directory_candidate(&detection))
+        .or_else(|| detect_img_candidate(&detection))
+        .or_else(|| detect_script_candidate(&detection));
 }
 
-fn detect_modloader_candidate(detection: &CandidateDetection) -> Option<InstallCandidate> {
-    if detection.parts[0] == "modloader" {
+fn detect_modloader_candidate(detection: &CandidateDetection) -> Option<InstallCandidate>
+{
+    if detection.parts[0] == "modloader"
+    {
         return Some(modloader_content_candidate(detection));
     }
-    if detection.lower.ends_with(".asi") && detection.lower.contains("modloader") {
+    if detection.lower.ends_with(".asi") && detection.lower.contains("modloader")
+    {
         return Some(modloader_runtime_candidate(detection));
     }
-    None
+    return None;
 }
 
-fn modloader_content_candidate(detection: &CandidateDetection) -> InstallCandidate {
+fn modloader_content_candidate(detection: &CandidateDetection) -> InstallCandidate
+{
     let mut components = BTreeSet::new();
     components.insert(Component::ModLoaderContent);
     let notes = BTreeSet::new();
     let source_root = modloader_content_source_root(detection);
     let metadata = CandidateMetadata { components, notes };
-    install_candidate_from_detection(&source_root, "modloader content", detection.size, metadata)
+    return install_candidate_from_detection(
+        DetectedInstallTarget {
+            source_root: &source_root,
+            target: "modloader content",
+        },
+        detection.size,
+        metadata,
+    );
 }
 
-fn modloader_content_source_root(detection: &CandidateDetection) -> String {
-    if detection.original_parts.len() > 1 {
+fn modloader_content_source_root(detection: &CandidateDetection) -> String
+{
+    if detection.original_parts.len() > 1
+    {
         return format!(
             "{}/{}",
             detection.original_parts[0], detection.original_parts[1]
         );
     }
-    detection
+    return detection
         .original_parts
         .first()
         .copied()
         .unwrap_or(detection.path)
-        .to_string()
+        .to_string();
 }
 
-fn modloader_runtime_candidate(detection: &CandidateDetection) -> InstallCandidate {
+fn modloader_runtime_candidate(detection: &CandidateDetection) -> InstallCandidate
+{
     let mut components = BTreeSet::new();
     components.insert(Component::ModLoader);
     let notes = BTreeSet::new();
@@ -72,41 +88,52 @@ fn modloader_runtime_candidate(detection: &CandidateDetection) -> InstallCandida
         .copied()
         .unwrap_or(detection.path);
     let metadata = CandidateMetadata { components, notes };
-    install_candidate_from_detection(source_root, "game root", detection.size, metadata)
+    return install_candidate_from_detection(
+        DetectedInstallTarget {
+            source_root,
+            target: "game root",
+        },
+        detection.size,
+        metadata,
+    );
 }
 
-fn detect_cleo_plugin_candidate(
-    path: &str,
-    lower: &str,
-    parts: &[&str],
-    size: u64,
-) -> Option<InstallCandidate> {
+fn detect_cleo_plugin_candidate(detection: &CandidateDetection) -> Option<InstallCandidate>
+{
+    let path = detection.path;
+    let lower = detection.lower;
+    let parts = detection.parts;
+    let size = detection.size;
     let mut components = BTreeSet::new();
     let mut notes = BTreeSet::new();
-    if lower.ends_with(".cleo") || parts.contains(&"cleo_plugins") {
+    if lower.ends_with(".cleo") || parts.contains(&"cleo_plugins")
+    {
         components.insert(Component::CleoPlugin);
         let note = "CLEO5 plugin module; loads from CLEO/cleo_plugins".to_string();
         notes.insert(note);
         let source_root = component_root(path);
         let metadata = CandidateMetadata { components, notes };
         return Some(install_candidate_from_detection(
-            source_root,
-            "CLEO/cleo_plugins",
+            DetectedInstallTarget {
+                source_root: source_root,
+                target: "CLEO/cleo_plugins",
+            },
             size,
             metadata,
         ));
     }
-    None
+    return None;
 }
 
-fn detect_cleo_modules_candidate(
-    path: &str,
-    parts: &[&str],
-    size: u64,
-) -> Option<InstallCandidate> {
+fn detect_cleo_modules_candidate(detection: &CandidateDetection) -> Option<InstallCandidate>
+{
+    let path = detection.path;
+    let parts = detection.parts;
+    let size = detection.size;
     let mut components = BTreeSet::new();
     let mut notes = BTreeSet::new();
-    if parts.contains(&"cleo_modules") {
+    if parts.contains(&"cleo_modules")
+    {
         components.insert(Component::CleoModules);
         let note =
             "CLEO script module; loads from CLEO/cleo_modules (the modules: path)".to_string();
@@ -114,60 +141,102 @@ fn detect_cleo_modules_candidate(
         let source_root = component_root(path);
         let metadata = CandidateMetadata { components, notes };
         return Some(install_candidate_from_detection(
-            source_root,
-            "CLEO/cleo_modules",
+            DetectedInstallTarget {
+                source_root: source_root,
+                target: "CLEO/cleo_modules",
+            },
             size,
             metadata,
         ));
     }
-    None
+    return None;
 }
 
-fn detect_cleo_saves_candidate(path: &str, parts: &[&str], size: u64) -> Option<InstallCandidate> {
+fn detect_cleo_saves_candidate(detection: &CandidateDetection) -> Option<InstallCandidate>
+{
+    let path = detection.path;
+    let parts = detection.parts;
+    let size = detection.size;
     let mut components = BTreeSet::new();
     let mut notes = BTreeSet::new();
-    if parts.contains(&"cleo_saves") {
+    if parts.contains(&"cleo_saves")
+    {
         components.insert(Component::CleoSaves);
         let note = "CLEO save data is runtime-generated user data; shipping it in a mod can overwrite the player's own saves".to_string();
         notes.insert(note);
         let source_root = component_root(path);
         let metadata = CandidateMetadata { components, notes };
         return Some(install_candidate_from_detection(
-            source_root,
-            "CLEO/cleo_saves",
+            DetectedInstallTarget {
+                source_root: source_root,
+                target: "CLEO/cleo_saves",
+            },
             size,
             metadata,
         ));
     }
-    None
+    return None;
 }
 
-fn detect_cleo_candidate(
-    path: &str,
-    lower: &str,
-    parts: &[&str],
-    size: u64,
-) -> Option<InstallCandidate> {
+fn detect_cleo_text_candidate(detection: &CandidateDetection) -> Option<InstallCandidate>
+{
+    let path = detection.path;
+    let lower = detection.lower;
+    let parts = detection.parts;
+    let size = detection.size;
     let mut components = BTreeSet::new();
     let notes = BTreeSet::new();
-    if parts[0] == "cleo" || has_cleo_script_extension(lower) {
+    if lower.ends_with(".fxt") || parts.contains(&"cleo_text")
+    {
+        components.insert(Component::CleoText);
+        let source_root = top_install_root(path);
+        let metadata = CandidateMetadata { components, notes };
+        return Some(install_candidate_from_detection(
+            DetectedInstallTarget {
+                source_root: source_root,
+                target: "CLEO/cleo_text",
+            },
+            size,
+            metadata,
+        ));
+    }
+    return None;
+}
+
+fn detect_cleo_candidate(detection: &CandidateDetection) -> Option<InstallCandidate>
+{
+    let path = detection.path;
+    let lower = detection.lower;
+    let parts = detection.parts;
+    let size = detection.size;
+    let mut components = BTreeSet::new();
+    let notes = BTreeSet::new();
+    if parts[0] == "cleo" || has_cleo_script_extension(lower)
+    {
         components.insert(Component::Cleo);
         let source_root = component_root(path);
         let metadata = CandidateMetadata { components, notes };
         return Some(install_candidate_from_detection(
-            source_root,
-            "CLEO or game root",
+            DetectedInstallTarget {
+                source_root: source_root,
+                target: "CLEO or game root",
+            },
             size,
             metadata,
         ));
     }
-    None
+    return None;
 }
 
-fn detect_asi_candidate(path: &str, lower: &str, size: u64) -> Option<InstallCandidate> {
+fn detect_asi_candidate(detection: &CandidateDetection) -> Option<InstallCandidate>
+{
+    let path = detection.path;
+    let lower = detection.lower;
+    let size = detection.size;
     let mut components = BTreeSet::new();
     let mut notes = BTreeSet::new();
-    if lower.ends_with(".asi") {
+    if lower.ends_with(".asi")
+    {
         components.insert(Component::Asi);
         // Mod Loader's std.asi loads .asi/.cleo/.dll (and CLEO scripts) straight
         // from a mod folder, so an ASI can live in the game root beside a loader,
@@ -177,158 +246,170 @@ fn detect_asi_candidate(path: &str, lower: &str, size: u64) -> Option<InstallCan
         let source_root = component_root(path);
         let metadata = CandidateMetadata { components, notes };
         return Some(install_candidate_from_detection(
-            source_root,
-            "game root or modloader/<mod>",
+            DetectedInstallTarget {
+                source_root: source_root,
+                target: "game root or modloader/<mod>",
+            },
             size,
             metadata,
         ));
     }
-    None
+    return None;
 }
 
-fn detect_plugin_config_candidate(path: &str, lower: &str, size: u64) -> Option<InstallCandidate> {
+fn detect_plugin_config_candidate(detection: &CandidateDetection) -> Option<InstallCandidate>
+{
+    let path = detection.path;
+    let lower = detection.lower;
+    let size = detection.size;
     let mut components = BTreeSet::new();
     let mut notes = BTreeSet::new();
-    if lower.ends_with(".ini") && looks_like_plugin_config(&lower) {
+    if lower.ends_with(".ini") && looks_like_plugin_config(&lower)
+    {
         components.insert(Component::Asi);
         let note = "Config file should stay beside its matching ASI/plugin".to_string();
         notes.insert(note);
         let source_root = component_root(path);
         let metadata = CandidateMetadata { components, notes };
         return Some(install_candidate_from_detection(
-            source_root,
-            "same target as plugin",
+            DetectedInstallTarget {
+                source_root: source_root,
+                target: "same target as plugin",
+            },
             size,
             metadata,
         ));
     }
-    None
+    return None;
 }
 
-fn looks_like_plugin_config(lower: &str) -> bool {
-    lower.contains("streaming")
+fn looks_like_plugin_config(lower: &str) -> bool
+{
+    return lower.contains("streaming")
         || lower.contains("skygfx")
         || lower.contains("mixsets")
         || lower.contains("silentpatch")
         || lower.contains("crashinfo")
         || lower.contains("limit")
-        || lower.contains("ola")
+        || lower.contains("ola");
 }
 
-fn detect_cleo_text_candidate(
-    path: &str,
-    lower: &str,
-    parts: &[&str],
-    size: u64,
-) -> Option<InstallCandidate> {
+fn detect_game_directory_candidate(detection: &CandidateDetection) -> Option<InstallCandidate>
+{
+    let path = detection.path;
+    let parts = detection.parts;
+    let size = detection.size;
     let mut components = BTreeSet::new();
     let notes = BTreeSet::new();
-    if lower.ends_with(".fxt") || parts.contains(&"cleo_text") {
-        components.insert(Component::CleoText);
-        let source_root = top_install_root(path);
-        let metadata = CandidateMetadata { components, notes };
-        return Some(install_candidate_from_detection(
-            source_root,
-            "CLEO/cleo_text",
-            size,
-            metadata,
-        ));
-    }
-    None
-}
-
-fn detect_game_directory_candidate(
-    path: &str,
-    parts: &[&str],
-    size: u64,
-) -> Option<InstallCandidate> {
-    let mut components = BTreeSet::new();
-    let notes = BTreeSet::new();
-    if has_known_game_directory(&parts) {
+    if has_known_game_directory(&parts)
+    {
         components.insert(Component::ModLoaderContent);
         let source_root = root_before_known_game_directory(path);
         let metadata = CandidateMetadata { components, notes };
         return Some(install_candidate_from_detection(
-            &source_root,
-            "modloader/<mod>",
+            DetectedInstallTarget {
+                source_root: &source_root,
+                target: "modloader/<mod>",
+            },
             size,
             metadata,
         ));
     }
-    None
+    return None;
 }
 
-fn has_known_game_directory(parts: &[&str]) -> bool {
-    parts.iter().any(|part| {
+fn has_known_game_directory(parts: &[&str]) -> bool
+{
+    return parts.iter().any(|part| {
         matches!(
             *part,
             "data" | "models" | "text" | "anim" | "audio" | "movies" | "scripts" | "txd"
         )
-    })
+    });
 }
 
-fn root_before_known_game_directory(path: &str) -> String {
+fn root_before_known_game_directory(path: &str) -> String
+{
     let parts: Vec<&str> = path.split('/').filter(|p| !p.is_empty()).collect();
-    for (idx, part) in parts.iter().enumerate() {
+    for (idx, part) in parts.iter().enumerate()
+    {
         let lower = part.to_ascii_lowercase();
         if matches!(
             lower.as_str(),
             "data" | "models" | "text" | "anim" | "audio" | "movies" | "scripts" | "txd"
-        ) {
-            if idx == 0 {
+        )
+        {
+            if idx == 0
+            {
                 return ".".to_string();
             }
             return parts[..idx].join("/");
         }
     }
-    top_install_root(path).to_string()
+    return top_install_root(path).to_string();
 }
 
-fn detect_img_candidate(path: &str, lower: &str, size: u64) -> Option<InstallCandidate> {
+fn detect_img_candidate(detection: &CandidateDetection) -> Option<InstallCandidate>
+{
+    let path = detection.path;
+    let lower = detection.lower;
+    let size = detection.size;
     let mut components = BTreeSet::new();
     let mut notes = BTreeSet::new();
-    if lower.contains("gta3.img/") || lower.ends_with(".dff") || lower.ends_with(".txd") {
+    if lower.contains("gta3.img/") || lower.ends_with(".dff") || lower.ends_with(".txd")
+    {
         components.insert(Component::ImgReplacement);
         // Mod Loader's std.stream injects loose DFF/TXD from the mod folder into
         // the correct archive automatically, so the default is the sandbox root;
         // a `gta3.img/` subfolder is only needed to pin a specific archive.
-        let note = "Loose DFF/TXD load from the Mod Loader mod folder — std.stream routes them into the right archive; no gta3.img subfolder needed".to_string();
+        let note = "Loose DFF/TXD load from the Mod Loader mod folder â€” std.stream routes them into the right archive; no gta3.img subfolder needed".to_string();
         notes.insert(note);
         let source_root = top_install_root(path);
         let metadata = CandidateMetadata { components, notes };
         return Some(install_candidate_from_detection(
-            source_root,
-            "modloader/<mod>",
+            DetectedInstallTarget {
+                source_root: source_root,
+                target: "modloader/<mod>",
+            },
             size,
             metadata,
         ));
     }
-    None
+    return None;
 }
 
-fn detect_script_candidate(path: &str, lower: &str, size: u64) -> Option<InstallCandidate> {
+fn detect_script_candidate(detection: &CandidateDetection) -> Option<InstallCandidate>
+{
+    let path = detection.path;
+    let lower = detection.lower;
+    let size = detection.size;
     let mut components = BTreeSet::new();
     let mut notes = BTreeSet::new();
-    if lower.ends_with(".scm") || lower.ends_with("script.img") {
+    if lower.ends_with(".scm") || lower.ends_with("script.img")
+    {
         components.insert(Component::ScriptData);
         let note = "Main script replacements conflict heavily with mission/story mods".to_string();
         notes.insert(note);
         let source_root = top_install_root(path);
         let metadata = CandidateMetadata { components, notes };
         return Some(install_candidate_from_detection(
-            source_root,
-            "modloader/<mod>/data/script",
+            DetectedInstallTarget {
+                source_root: source_root,
+                target: "modloader/<mod>/data/script",
+            },
             size,
             metadata,
         ));
     }
 
-    None
+    return None;
 }
 
-pub(crate) fn detect_option_group(path: &str) -> Option<String> {
+pub(crate) fn detect_option_group(path: &str) -> Option<String>
+{
     let parts: Vec<&str> = path.split('/').filter(|p| !p.is_empty()).collect();
-    for (idx, part) in parts.iter().enumerate() {
+    for (idx, part) in parts.iter().enumerate()
+    {
         let lower = part.to_ascii_lowercase();
         let is_option = lower.contains("optional")
             || lower.contains("settings")
@@ -338,119 +419,72 @@ pub(crate) fn detect_option_group(path: &str) -> Option<String> {
             || lower == "en"
             || lower == "pt";
 
-        if is_option {
+        if is_option
+        {
             let part_count = parts.len();
             let depth =
                 if lower == "optionals" || lower == "(optionals)" || lower == "en" || lower == "pt"
                 {
                     (idx + 2).min(part_count) // literal: allow domain threshold is documented by the surrounding code
-                } else {
+                }
+                else
+                {
                     (idx + 1).min(part_count)
                 };
-            if depth > 0 {
+            if depth > 0
+            {
                 let option_group = parts[..depth].join("/");
                 return Some(option_group);
             }
         }
     }
-    None
+    return None;
+}
+
+struct DetectedInstallTarget<'a>
+{
+    source_root: &'a str,
+    target: &'a str,
 }
 
 fn install_candidate_from_detection(
-    source_root: &str,
-    target: &str,
+    install_target: DetectedInstallTarget<'_>,
     size: u64,
     metadata: CandidateMetadata,
-) -> InstallCandidate {
-    InstallCandidate {
+) -> InstallCandidate
+{
+    let source_root = install_target.source_root;
+    let target = install_target.target;
+    return InstallCandidate {
         source_root: source_root.trim_matches('/').to_string(),
         target_strategy: target.to_string(),
         file_count: 1,
         total_bytes: size,
         components: metadata.components,
         notes: metadata.notes,
-    }
+    };
 }
 
-fn top_install_root(path: &str) -> &str {
-    path.split('/').find(|p| !p.is_empty()).unwrap_or(path)
+fn top_install_root(path: &str) -> &str
+{
+    return path.split('/').find(|p| !p.is_empty()).unwrap_or(path);
 }
 
-fn component_root(path: &str) -> &str {
+fn component_root(path: &str) -> &str
+{
     let trimmed = path.trim_matches('/');
-    if let Some((parent, _name)) = trimmed.rsplit_once('/') {
-        if parent.is_empty() { trimmed } else { parent }
-    } else {
-        trimmed
+    if let Some((parent, _name)) = trimmed.rsplit_once('/')
+    {
+        if parent.is_empty()
+        {
+            return trimmed;
+        }
+        return parent;
     }
+    return trimmed;
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
+include!("detect_tests_01.rs");
 
-    fn components(path: &str) -> BTreeSet<Component> {
-        detect_install_candidate(path, 100) // literal: allow test fixture value is the specimen under judgment
-            .unwrap_or_else(|| panic!("no candidate detected for {path}"))
-            .components
-    }
 
-    #[test]
-    fn cleo5_script_and_compat_scripts_route_to_cleo() {
-        for path in ["cleo/speedo.cs", "cleo/legacy.cs4", "cleo/older.cs3"] {
-            assert_eq!(
-                components(path),
-                BTreeSet::from([Component::Cleo]),
-                "{path} should be a CLEO script"
-            );
-        }
-    }
-
-    #[test]
-    fn cleo_modules_and_saves_route_to_their_own_components() {
-        let modules = components("cleo/cleo_modules/shared.txt");
-        assert!(
-            modules.contains(&Component::CleoModules),
-            "cleo_modules file should be a CLEO module, got {modules:?}"
-        );
-        assert!(!modules.contains(&Component::Cleo));
-
-        let saves = components("cleo/cleo_saves/slot1.sav");
-        assert!(
-            saves.contains(&Component::CleoSaves),
-            "cleo_saves file should be CLEO save data, got {saves:?}"
-        );
-        assert!(!saves.contains(&Component::Cleo));
-    }
-
-    #[test]
-    fn cleo_plugin_routes_to_plugin_component_not_script() {
-        // A .cleo plugin, whether loose or already under cleo_plugins/.
-        for path in ["cleo/SA.IniFiles.cleo", "cleo/cleo_plugins/SA.Audio.cleo"] {
-            let found = components(path);
-            assert!(
-                found.contains(&Component::CleoPlugin),
-                "{path} should be a CLEO plugin, got {found:?}"
-            );
-            assert!(
-                !found.contains(&Component::Cleo),
-                "{path} must not also be a plain CLEO script"
-            );
-        }
-    }
-
-    #[test]
-    fn fxt_and_cleo_text_folder_route_to_cleo_text() {
-        for path in [
-            "cleo/cleo_text/strings.fxt",
-            "cleo_text/lang.fxt",
-            "loose.fxt",
-        ] {
-            assert_eq!(
-                components(path),
-                BTreeSet::from([Component::CleoText]),
-                "{path} should be CLEO text"
-            );
-        }
-    }
-}

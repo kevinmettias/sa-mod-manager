@@ -1,6 +1,7 @@
 use crate::prelude::*;
 
-pub(crate) struct ReadmeInstruction {
+pub(crate) struct ReadmeInstruction
+{
     pub(crate) source_readme: String,
     pub(crate) line_number: usize,
     pub(crate) action: ReadmeAction,
@@ -12,7 +13,8 @@ pub(crate) struct ReadmeInstruction {
     pub(crate) confidence_reasons: Vec<String>,
 }
 
-pub(crate) struct ReadmeInsight {
+pub(crate) struct ReadmeInsight
+{
     pub(crate) kind: ReadmeInsightKind,
     pub(crate) title: String,
     pub(crate) detail: String,
@@ -23,7 +25,8 @@ pub(crate) struct ReadmeInsight {
     pub(crate) rule_id: String,
 }
 
-pub(crate) enum ReadmeInsightKind {
+pub(crate) enum ReadmeInsightKind
+{
     Recipe,
     OptionSet,
     Dependency,
@@ -35,7 +38,8 @@ pub(crate) enum ReadmeInsightKind {
     Language,
 }
 
-pub(crate) enum ReadmeAction {
+pub(crate) enum ReadmeAction
+{
     Copy,
     Requires,
     Optional,
@@ -44,22 +48,26 @@ pub(crate) enum ReadmeAction {
     DoNotInstall,
 }
 
-impl fmt::Display for ReadmeAction {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
+impl fmt::Display for ReadmeAction
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result
+    {
+        return match self {
             ReadmeAction::Copy => write!(f, "copy"),
             ReadmeAction::Requires => write!(f, "requires"),
             ReadmeAction::Optional => write!(f, "optional"),
             ReadmeAction::Conflict => write!(f, "conflict"),
             ReadmeAction::LoadAfter => write!(f, "load-after"),
             ReadmeAction::DoNotInstall => write!(f, "do-not-install"),
-        }
+        };
     }
 }
 
-impl fmt::Display for ReadmeInsightKind {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
+impl fmt::Display for ReadmeInsightKind
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result
+    {
+        return match self {
             ReadmeInsightKind::Recipe => write!(f, "recipe"),
             ReadmeInsightKind::OptionSet => write!(f, "option-set"),
             ReadmeInsightKind::Dependency => write!(f, "dependency"),
@@ -69,6 +77,6 @@ impl fmt::Display for ReadmeInsightKind {
             ReadmeInsightKind::DryRun => write!(f, "dry-run"),
             ReadmeInsightKind::Override => write!(f, "override"),
             ReadmeInsightKind::Language => write!(f, "language"),
-        }
+        };
     }
 }

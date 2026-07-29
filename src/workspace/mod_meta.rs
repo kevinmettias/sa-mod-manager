@@ -6,7 +6,8 @@ use crate::prelude::*;
 /// by mod id in `.sa-mod-manager/mod_meta.json`.
 #[derive(Serialize, Deserialize, Clone, Default)]
 #[serde(default)]
-pub(crate) struct ModMeta {
+pub(crate) struct ModMeta
+{
     /// User-assigned category names (freeform, e.g. "Vehicles", "Fixes").
     pub(crate) categories: Vec<String>,
     /// A color-label name from the manager's small preset palette, if set.
@@ -15,33 +16,33 @@ pub(crate) struct ModMeta {
     pub(crate) note: String,
 }
 
-impl ModMeta {
+impl ModMeta
+{
     /// True when there is nothing worth persisting for this mod.
-    pub(crate) fn is_empty(&self) -> bool {
-        self.categories.is_empty() && self.color.is_none() && self.note.trim().is_empty()
+    pub(crate) fn is_empty(&self) -> bool
+    {
+        return self.categories.is_empty() && self.color.is_none() && self.note.trim().is_empty();
     }
 }
 
 #[derive(Serialize, Deserialize, Default)]
 #[serde(default)]
-struct ModMetaFile {
+struct ModMetaFile
+{
     version: u32,
     mods: BTreeMap<String, ModMeta>,
 }
 
-fn mod_meta_path(state_root: &Path) -> PathBuf {
-    state_root.join("mod_meta.json")
-}
-
 /// Read all per-mod annotations, or an empty map when none are saved / the file
 /// is unreadable — annotations are optional and must never break loading.
-pub(crate) fn read_mod_meta(state_root: &Path) -> BTreeMap<String, ModMeta> {
+pub(crate) fn read_mod_meta(state_root: &Path) -> BTreeMap<String, ModMeta>
+{
     let Ok(text) = read_capped(&mod_meta_path(state_root), MAX_CONTROL_FILE_BYTES) else {
         return BTreeMap::new();
     };
-    serde_json::from_str::<ModMetaFile>(&text)
+    return serde_json::from_str::<ModMetaFile>(&text)
         .map(|file| file.mods)
-        .unwrap_or_default()
+        .unwrap_or_default();
 }
 
 /// Persist per-mod annotations, dropping entries that carry nothing so the file
@@ -49,7 +50,8 @@ pub(crate) fn read_mod_meta(state_root: &Path) -> BTreeMap<String, ModMeta> {
 pub(crate) fn write_mod_meta(
     state_root: &Path,
     meta: &BTreeMap<String, ModMeta>,
-) -> Result<(), AppError> {
+) -> Result<(), AppError>
+{
     fs::create_dir_all(state_root)
         .with_context(|| format!("create state directory {}", state_root.display()))?;
     let mods: BTreeMap<String, ModMeta> = meta
@@ -63,28 +65,22 @@ pub(crate) fn write_mod_meta(
     text.push('\n');
     let path = mod_meta_path(state_root);
     fs::write(&path, text).with_context(|| format!("write mod metadata {}", path.display()))?;
-    Ok(())
+    return Ok(());
+}
+
+fn mod_meta_path(state_root: &Path) -> PathBuf
+{
+    return state_root.join("mod_meta.json");
 }
 
 #[cfg(test)]
-mod tests {
+mod tests
+{
     use super::*;
 
-    fn state_root(name: &str) -> PathBuf {
-        let root = env::temp_dir().join(format!(
-            "sa-mod-manager-meta-{name}-{}-{}",
-            std::process::id(),
-            unix_now()
-        ));
-        if root.exists() {
-            fs::remove_dir_all(&root).unwrap();
-        }
-        fs::create_dir_all(&root).unwrap();
-        root
-    }
-
     #[test]
-    fn mod_meta_round_trips_and_drops_empty() {
+    fn mod_meta_round_trips_and_drops_empty()
+    {
         let root = state_root("round_trip");
         let mut meta = BTreeMap::new();
         meta.insert(
@@ -98,22 +94,45 @@ mod tests {
         // An all-default entry should not survive the write.
         meta.insert("empty".to_string(), ModMeta::default());
 
-        write_mod_meta(&root, &meta).unwrap();
+        write_mod_meta(&root, &meta)
+            .expect("the test fixture is created before this assertion reads it");
         let read = read_mod_meta(&root);
 
         assert_eq!(read.len(), 1);
-        let imvehft = read.get("imvehft").unwrap();
+        let imvehft = read
+            .get("imvehft")
+            .expect("the test fixture is created before this assertion reads it");
         assert_eq!(imvehft.categories, vec!["Vehicles".to_string()]);
         assert_eq!(imvehft.color.as_deref(), Some("green"));
         assert_eq!(imvehft.note, "handling tweaks");
         assert!(read.get("empty").is_none());
-        fs::remove_dir_all(&root).unwrap();
+        fs::remove_dir_all(&root)
+            .expect("the test fixture is created before this assertion reads it");
     }
 
     #[test]
-    fn missing_file_reads_as_empty() {
+    fn missing_file_reads_as_empty()
+    {
         let root = state_root("missing");
         assert!(read_mod_meta(&root).is_empty());
-        fs::remove_dir_all(&root).unwrap();
+        fs::remove_dir_all(&root)
+            .expect("the test fixture is created before this assertion reads it");
+    }
+
+    fn state_root(name: &str) -> PathBuf
+    {
+        let root = env::temp_dir().join(format!(
+            "sa-mod-manager-meta-{name}-{}-{}",
+            std::process::id(),
+            unix_now()
+        ));
+        if root.exists()
+        {
+            fs::remove_dir_all(&root)
+                .expect("the test fixture is created before this assertion reads it");
+        }
+        fs::create_dir_all(&root)
+            .expect("the test fixture is created before this assertion reads it");
+        return root;
     }
 }

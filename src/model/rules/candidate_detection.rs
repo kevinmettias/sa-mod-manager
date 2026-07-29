@@ -1,4 +1,5 @@
-pub(crate) struct CandidateDetection<'a> {
+pub(crate) struct CandidateDetection<'a>
+{
     pub(crate) path: &'a str,
     pub(crate) lower: &'a str,
     pub(crate) parts: &'a [&'a str],

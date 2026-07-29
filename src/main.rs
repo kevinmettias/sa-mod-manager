@@ -10,7 +10,8 @@ mod settings;
 mod ui;
 mod workspace;
 
-mod prelude {
+mod prelude
+{
     pub(crate) use crate::cli::usage_error;
     pub(crate) use crate::constants::{
         CLEO_SCRIPT_EXTENSIONS, builtin_component_rules, builtin_context_rules,
@@ -83,6 +84,7 @@ mod prelude {
     pub(crate) use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 }
 
-fn main() {
+fn main()
+{
     cli::main();
 }

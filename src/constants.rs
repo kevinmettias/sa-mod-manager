@@ -1,7 +1,8 @@
 use crate::prelude::*;
 
-fn strings(items: &[&str]) -> Vec<String> {
-    items.iter().map(|item| item.to_string()).collect()
+fn strings(items: &[&str]) -> Vec<String>
+{
+    return items.iter().map(|item| item.to_string()).collect();
 }
 
 /// CLEO script extensions (no leading dot), the single source of truth shared by
@@ -14,28 +15,31 @@ pub(crate) const CLEO_SCRIPT_EXTENSIONS: [&str; 3] = ["cs", "cs4", "cs3"];
 
 /// Whether a lowercased path ends in a CLEO script extension (with its dot), e.g.
 /// `speedo.cs4`. Matches only a real extension boundary, so `discs` is not a hit.
-pub(crate) fn has_cleo_script_extension(lower: &str) -> bool {
-    CLEO_SCRIPT_EXTENSIONS.iter().any(|ext| {
+pub(crate) fn has_cleo_script_extension(lower: &str) -> bool
+{
+    return CLEO_SCRIPT_EXTENSIONS.iter().any(|ext| {
         let dotted_len = ext.len() + 1;
         lower.len() >= dotted_len
             && lower.as_bytes()[lower.len() - dotted_len] == b'.'
             && lower[lower.len() - ext.len()..].eq_ignore_ascii_case(ext)
-    })
+    });
 }
 
 /// The CLEO script extensions as dotted suffixes (`.cs`, `.cs4`, …), for building
 /// classification rules that match on suffix strings.
-pub(crate) fn cleo_script_suffixes() -> Vec<String> {
-    CLEO_SCRIPT_EXTENSIONS
+pub(crate) fn cleo_script_suffixes() -> Vec<String>
+{
+    return CLEO_SCRIPT_EXTENSIONS
         .iter()
         .map(|ext| format!(".{ext}"))
-        .collect()
+        .collect();
 }
 
 /// The built-in component-classification rules. Users can add more via the
 /// config file; those are appended to these (see [`crate::settings`]).
-pub(crate) fn builtin_component_rules() -> Vec<ComponentRule> {
-    vec![
+pub(crate) fn builtin_component_rules() -> Vec<ComponentRule>
+{
+    return vec![
         ComponentRule {
             component: Component::ModLoader,
             contains: strings(&["modloader"]),
@@ -119,12 +123,13 @@ pub(crate) fn builtin_component_rules() -> Vec<ComponentRule> {
             prefixes: strings(&["audio/"]),
             suffixes: strings(&[]),
         },
-    ]
+    ];
 }
 
 /// The built-in context/compatibility hint rules. Extended by the config file.
-pub(crate) fn builtin_context_rules() -> Vec<ContextRule> {
-    vec![
+pub(crate) fn builtin_context_rules() -> Vec<ContextRule>
+{
+    return vec![
         ContextRule {
             aliases: strings(&["rosa"]),
             hint: "RoSA compatibility path likely matters".to_string(),
@@ -157,5 +162,5 @@ pub(crate) fn builtin_context_rules() -> Vec<ContextRule> {
             aliases: strings(&["gta_sa.exe"]),
             hint: "Executable replacement requires explicit bootstrap approval".to_string(),
         },
-    ]
+    ];
 }

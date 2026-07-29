@@ -11,7 +11,9 @@ mod run_outcome;
 
 pub(crate) use analysis::analyze_package;
 pub(crate) use apply::apply_install_plan;
-pub(crate) use build::{build_install_plan, readme_copy_install_root, sort_operations_for_apply};
+pub(crate) use build::{
+    ReadmeCopyInstallRoot, build_install_plan, readme_copy_install_root, sort_operations_for_apply,
+};
 pub(crate) use content::{
     ContentCategory, ContentEntry, ContentIndex, IndexedMod, ModLoaderLogSummary,
     ModLoaderPriorities, asi_view, build_content_index, cleo_view, effective_install_roots,

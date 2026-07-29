@@ -20,23 +20,28 @@ const INFRASTRUCTURE_FILES: [&str; 6] = [
 /// scanned because they do not exist in a vanilla install, so anything there that
 /// is neither owned nor loader infrastructure is genuinely unmanaged; `data/` and
 /// friends are skipped since they mix with vanilla files.
-pub(crate) fn collect_overwrite_files(game_root: &Path, owned: &BTreeSet<String>) -> Vec<String> {
+pub(crate) fn collect_overwrite_files(game_root: &Path, owned: &BTreeSet<String>) -> Vec<String>
+{
     let mut result = Vec::new();
-    for folder in ["modloader", "cleo"] {
+    for folder in ["modloader", "cleo"]
+    {
         let root = game_root.join(folder);
-        if !root.is_dir() {
+        if !root.is_dir()
+        {
             continue;
         }
         let Ok(files) = collect_files_recursive(&root) else {
             continue;
         };
-        for file in files {
+        for file in files
+        {
             let Ok(relative) = file.strip_prefix(game_root) else {
                 continue;
             };
             let relative = relative.to_string_lossy().replace('\\', "/");
             // ModLoader/CLEO keep internals in dot-folders (.data, .profiles); skip.
-            if relative.split('/').any(|segment| segment.starts_with('.')) {
+            if relative.split('/').any(|segment| segment.starts_with('.'))
+            {
                 continue;
             }
             let base = relative
@@ -44,10 +49,12 @@ pub(crate) fn collect_overwrite_files(game_root: &Path, owned: &BTreeSet<String>
                 .next()
                 .unwrap_or(&relative)
                 .to_ascii_lowercase();
-            if INFRASTRUCTURE_FILES.contains(&base.as_str()) {
+            if INFRASTRUCTURE_FILES.contains(&base.as_str())
+            {
                 continue;
             }
-            if owned.contains(&relative) {
+            if owned.contains(&relative)
+            {
                 continue;
             }
             result.push(relative);
@@ -55,22 +62,17 @@ pub(crate) fn collect_overwrite_files(game_root: &Path, owned: &BTreeSet<String>
     }
     result.sort();
     result.dedup();
-    result
+    return result;
 }
 
 #[cfg(test)]
-mod tests {
+mod tests
+{
     use super::*;
 
-    fn write_file(path: &Path, contents: &str) {
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).unwrap();
-        }
-        fs::write(path, contents).unwrap();
-    }
-
     #[test]
-    fn overwrite_lists_unmanaged_and_skips_owned_and_infra() {
+    fn overwrite_lists_unmanaged_and_skips_owned_and_infra()
+    {
         let root = env::temp_dir().join(format!(
             "sa-mod-manager-overwrite-{}-{}",
             std::process::id(),
@@ -92,6 +94,18 @@ mod tests {
 
         let result = collect_overwrite_files(&root, &owned);
         assert_eq!(result, vec!["modloader/HandInstalled/a.dff".to_string()]);
-        fs::remove_dir_all(&root).unwrap();
+        fs::remove_dir_all(&root)
+            .expect("the test fixture is created before this assertion reads it");
+    }
+
+    fn write_file(path: &Path, contents: &str)
+    {
+        if let Some(parent) = path.parent()
+        {
+            fs::create_dir_all(parent)
+                .expect("the test fixture is created before this assertion reads it");
+        }
+        fs::write(path, contents)
+            .expect("the test fixture is created before this assertion reads it");
     }
 }

@@ -1,4 +1,4 @@
-use crate::prelude::*;
+﻿use crate::prelude::*;
 
 use super::state::UiTab;
 
@@ -15,7 +15,8 @@ const WINDOW_SIZE_DIMENSIONS: usize = 2;
 /// open tab, dark-mode choice, and window size. Kept separate from the settings
 /// config so it can be rewritten freely without touching user-authored rules.
 #[derive(Serialize, Deserialize)]
-pub(super) struct UiPreferences {
+pub(super) struct UiPreferences
+{
     #[serde(default)]
     pub(super) game_root: String,
     #[serde(default)]
@@ -30,76 +31,96 @@ pub(super) struct UiPreferences {
     pub(super) height: f32,
 }
 
-fn default_dark_mode() -> bool {
-    true
+fn default_dark_mode() -> bool
+{
+    return true;
 }
 
-fn default_width() -> f32 {
-    DEFAULT_WIDTH
+fn default_width() -> f32
+{
+    return DEFAULT_WIDTH;
 }
 
-fn default_height() -> f32 {
-    DEFAULT_HEIGHT
+fn default_height() -> f32
+{
+    return DEFAULT_HEIGHT;
 }
 
-impl Default for UiPreferences {
-    fn default() -> Self {
-        Self {
+impl Default for UiPreferences
+{
+    fn default() -> Self
+    {
+        return Self {
             game_root: String::new(),
             profile: String::new(),
             tab: String::new(),
             dark_mode: default_dark_mode(),
             width: DEFAULT_WIDTH,
             height: DEFAULT_HEIGHT,
-        }
+        };
     }
 }
 
-impl UiPreferences {
+impl UiPreferences
+{
     /// Best-effort load; any missing/unreadable/corrupt file yields defaults so a
     /// broken preferences file can never block the UI from opening.
-    pub(super) fn load() -> Self {
+    pub(super) fn load() -> Self
+    {
         let Some(path) = ui_state_path() else {
             return Self::default();
         };
         let Ok(text) = read_capped(&path, MAX_CONTROL_FILE_BYTES) else {
             return Self::default();
         };
-        serde_json::from_str(&text).unwrap_or_default()
+        return serde_json::from_str(&text).unwrap_or_default();
     }
 
     /// Best-effort save; a write failure is intentionally ignored, since losing a
     /// UI preference is never worth surfacing an error over the actual work.
-    pub(super) fn save(&self) {
+    pub(super) fn save(&self)
+    {
         let Some(path) = ui_state_path() else {
             return;
         };
-        if let Some(parent) = path.parent() {
-            let _ = fs::create_dir_all(parent);
+        if let Some(parent) = path.parent()
+        {
+            if let Err(err) = fs::create_dir_all(parent)
+            {
+                log_warn!("could not create UI state directory {}: {err}", parent.display());
+                return;
+            }
         }
-        if let Ok(text) = serde_json::to_string_pretty(self) {
-            let _ = fs::write(path, format!("{text}\n"));
+        if let Ok(text) = serde_json::to_string_pretty(self)
+        {
+            if let Err(err) = fs::write(&path, format!("{text}\n"))
+            {
+                log_warn!("could not save UI preferences {}: {err}", path.display());
+            }
         }
     }
 
     /// The restored window size, clamped so a bad file cannot open an unusable
     /// window.
-    pub(super) fn window_size(&self) -> [f32; WINDOW_SIZE_DIMENSIONS] {
+    pub(super) fn window_size(&self) -> [f32; WINDOW_SIZE_DIMENSIONS]
+    {
         // literal: allow UI tuning threshold is local to this control
-        [
+        return [
             self.width.clamp(MIN_WINDOW_SIDE, MAX_WINDOW_SIDE),
             self.height.clamp(MIN_WINDOW_SIDE, MAX_WINDOW_SIDE),
-        ]
+        ];
     }
 
     /// The saved tab, or Home when nothing valid was persisted.
-    pub(super) fn tab(&self) -> UiTab {
-        UiTab::from_key(&self.tab).unwrap_or(UiTab::Home)
+    pub(super) fn tab(&self) -> UiTab
+    {
+        return UiTab::from_key(&self.tab).unwrap_or(UiTab::Home);
     }
 
     /// A cheap signature used to detect changes worth writing to disk.
-    pub(super) fn signature(&self) -> String {
-        format!(
+    pub(super) fn signature(&self) -> String
+    {
+        return format!(
             "{}|{}|{}|{}|{}x{}",
             self.game_root,
             self.profile,
@@ -107,24 +128,28 @@ impl UiPreferences {
             self.dark_mode,
             self.width.round(),
             self.height.round()
-        )
+        );
     }
 }
 
 /// A sibling of the settings config file, so both live in the same per-user
 /// directory and honor the same `SA_MOD_MANAGER_CONFIG` override location.
-fn ui_state_path() -> Option<PathBuf> {
-    crate::settings::config_file_path().map(|path| path.with_file_name(UI_STATE_FILE))
+fn ui_state_path() -> Option<PathBuf>
+{
+    return crate::settings::config_file_path().map(|path| path.with_file_name(UI_STATE_FILE));
 }
 
 #[cfg(test)]
-mod tests {
+mod tests
+{
     use super::*;
 
     #[test]
-    fn defaults_and_corrupt_input_round_trip_to_safe_values() {
+    fn defaults_and_corrupt_input_round_trip_to_safe_values()
+    {
         // Missing fields fall back to defaults rather than failing to parse.
-        let partial: UiPreferences = serde_json::from_str("{\"tab\":\"run\"}").unwrap();
+        let partial: UiPreferences = serde_json::from_str("{\"tab\":\"run\"}")
+            .expect("the test fixture is created before this assertion reads it");
         assert_eq!(partial.tab, "run");
         assert!(partial.dark_mode);
         assert_eq!(partial.window_size(), [DEFAULT_WIDTH, DEFAULT_HEIGHT]);
@@ -147,10 +172,12 @@ mod tests {
     }
 
     #[test]
-    fn signature_tracks_meaningful_changes() {
+    fn signature_tracks_meaningful_changes()
+    {
         let base = UiPreferences::default();
         let mut changed = UiPreferences::default();
         changed.profile = "vanilla-plus".to_string();
         assert_ne!(base.signature(), changed.signature());
     }
 }
+
