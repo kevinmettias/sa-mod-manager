@@ -1,26 +1,26 @@
-use crate::prelude::*;
+﻿use crate::prelude::*;
 
-pub(crate) fn classify_component(lower: &str, components: &mut BTreeSet<Component>)
+pub(crate) fn classify_component(lower: &str, component_paths: &mut BTreeSet<Component>)
 {
     for rule in component_rules()
     {
-        insert_component_for_rule(lower, components, rule);
+        insert_component_for_rule(lower, component_paths, rule);
     }
 }
 
 fn insert_component_for_rule(
     lower: &str,
-    components: &mut BTreeSet<Component>,
+    component_paths: &mut BTreeSet<Component>,
     rule: &ComponentRule,
 )
 {
-    if component_rule_matches(lower, rule)
+    if is_component_rule_match(lower, rule)
     {
-        components.insert(rule.component);
+        component_paths.insert(rule.component);
     }
 }
 
-fn component_rule_matches(lower: &str, rule: &ComponentRule) -> bool
+fn is_component_rule_match(lower: &str, rule: &ComponentRule) -> bool
 {
     return has_any_contains_match(lower, &rule.contains)
         || has_any_prefix_match(lower, &rule.prefixes)

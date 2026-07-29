@@ -1,4 +1,4 @@
-use crate::prelude::*;
+﻿use crate::prelude::*;
 
 const MAX_IMPORT_STAGING_COLLISIONS: usize = 1000;
 
@@ -42,7 +42,7 @@ fn stage_import_source(
 
     if let Err(err) = import_result
     {
-        remove_dir_if_exists(&staged_source)?;
+        remove_directory_if_exists(&staged_source)?;
         return Err(err);
     }
 
@@ -78,7 +78,7 @@ fn replace_import_source(
     let replaced_source = replacement_backup_path(source_root, package_id);
     if replaced_source.exists()
     {
-        remove_dir_if_exists(&replaced_source)?;
+        remove_directory_if_exists(&replaced_source)?;
     }
 
     let had_previous_source = source_root.exists();
@@ -89,7 +89,7 @@ fn replace_import_source(
 
     return match fs::rename(staged_source, source_root) {
         Ok(()) => {
-            remove_dir_if_exists(&replaced_source)?;
+            remove_directory_if_exists(&replaced_source)?;
             Ok(())
         }
         Err(err) => {
@@ -131,7 +131,7 @@ fn restore_previous_source(
 {
     if source_root.exists()
     {
-        remove_dir_if_exists(source_root)?;
+        remove_directory_if_exists(source_root)?;
     }
     if matches!(previous_source, PreviousSourceState::Present) && replaced_source.exists()
     {
@@ -210,7 +210,7 @@ pub(crate) fn target_template(kind: &TargetKind, package_id: &str) -> String
     };
 }
 
-fn remove_dir_if_exists(path: &Path) -> Result<(), AppError>
+fn remove_directory_if_exists(path: &Path) -> Result<(), AppError>
 {
     if path.exists()
     {
@@ -228,7 +228,7 @@ mod tests
     fn read_import_manifest_tolerates_minified_and_reordered_json()
     {
         let root = test_root("import_manifest_minified");
-        // Minified, fields reordered, whitespace stripped — the old
+        // Minified, fields reordered, whitespace stripped â€” the old
         // one-field-per-line parser would have yielded zeros for all of these.
         let path = root.join("import.json");
         fs::write(
@@ -244,7 +244,7 @@ mod tests
         assert_eq!(manifest.imported_unix, 1234); // literal: allow test fixture value is the specimen under judgment
         assert_eq!(manifest.entry_count, 9); // literal: allow test fixture value is the specimen under judgment
         assert_eq!(manifest.operation_count, 7); // literal: allow test fixture value is the specimen under judgment
-        remove_dir_if_exists(&root)
+        remove_directory_if_exists(&root)
             .expect("the test fixture is created before this assertion reads it");
     }
 
@@ -282,7 +282,7 @@ mod tests
             "new"
         );
         assert!(!staged.exists());
-        remove_dir_if_exists(&root)
+        remove_directory_if_exists(&root)
             .expect("the test fixture is created before this assertion reads it");
     }
 
@@ -305,7 +305,7 @@ mod tests
                 .expect("the test fixture is created before this assertion reads it"),
             "old"
         );
-        remove_dir_if_exists(&root)
+        remove_directory_if_exists(&root)
             .expect("the test fixture is created before this assertion reads it");
     }
 
@@ -316,7 +316,7 @@ mod tests
             std::process::id(),
             unix_now()
         ));
-        remove_dir_if_exists(&root)
+        remove_directory_if_exists(&root)
             .expect("the test fixture is created before this assertion reads it");
         fs::create_dir_all(&root)
             .expect("the test fixture is created before this assertion reads it");

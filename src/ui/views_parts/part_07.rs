@@ -39,11 +39,11 @@ fn content_modloader_view(
         // Mergeable data files (handling.cfg, *.ideâ€¦) are soft: ModLoader combines
         // them entry-by-entry, so they collide only on overlapping entries. The
         // rest are hard: the highest-priority folder wins the whole file.
-        let override_count = conflicts.iter().filter(|c| !c.mergeable).count();
+        let override_count = conflicts.iter().filter(|conflict| !conflict.mergeable).count();
         let merge_count = conflicts.len() - override_count;
         let ambiguous = conflicts
             .iter()
-            .filter(|c| c.ambiguous && !c.mergeable)
+            .filter(|conflict| conflict.ambiguous && !conflict.mergeable)
             .count();
         let mut parts = Vec::new();
         if override_count > 0
@@ -85,7 +85,7 @@ fn content_modloader_view(
                             let winner_priority = conflict
                                 .contenders
                                 .first()
-                                .map(|c| c.priority)
+                                .map(|contender| contender.priority)
                                 .unwrap_or_default();
                             if conflict.mergeable
                             {
@@ -117,7 +117,7 @@ fn content_modloader_view(
                             }
                             let others: Vec<String> = conflict.contenders[1..]
                                 .iter()
-                                .map(|c| format!("{} ({})", c.folder, c.priority))
+                                .map(|contender| format!("{} ({})", contender.folder, contender.priority))
                                 .collect();
                             if others.is_empty()
                             {
@@ -143,10 +143,10 @@ fn content_modloader_view(
                 (priority, folder, folder_rows)
             })
             .collect();
-    groups.sort_by(|a, b| {
-        a.0.unwrap_or(MODLOADER_DEFAULT_PRIORITY)
-            .cmp(&b.0.unwrap_or(MODLOADER_DEFAULT_PRIORITY))
-            .then_with(|| a.1.cmp(&b.1))
+    groups.sort_by(|left, right| {
+        left.0.unwrap_or(MODLOADER_DEFAULT_PRIORITY)
+            .cmp(&right.0.unwrap_or(MODLOADER_DEFAULT_PRIORITY))
+            .then_with(|| left.1.cmp(&right.1))
     });
 
     let default_open = groups.len() <= DEFAULT_OPEN_GROUP_LIMIT;
@@ -455,6 +455,3 @@ fn modloader_folder_of(target: &str) -> Option<String>
     }
     return None;
 }
-
-
-

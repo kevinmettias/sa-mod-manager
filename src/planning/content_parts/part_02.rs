@@ -15,26 +15,26 @@ fn categorize_by_path(lower: &str) -> ContentCategory
     {
         ContentCategory::Img
     }
-    else if lower.ends_with(".gxt") || segment_contains(SegmentNeedle { lower: lower, needle: "text" })
+    else if lower.ends_with(".gxt") || has_segment_needle(SegmentNeedle { lower: lower, needle: "text" })
     {
         ContentCategory::Text
     }
-    else if lower.ends_with(".ifp") || segment_contains(SegmentNeedle { lower: lower, needle: "anim" })
+    else if lower.ends_with(".ifp") || has_segment_needle(SegmentNeedle { lower: lower, needle: "anim" })
     {
         ContentCategory::Anim
     }
-    else if segment_contains(SegmentNeedle { lower: lower, needle: "audio" }) || lower.ends_with(".ogg")
+    else if has_segment_needle(SegmentNeedle { lower: lower, needle: "audio" }) || lower.ends_with(".ogg")
     {
         ContentCategory::Audio
     }
-    else if segment_contains(SegmentNeedle { lower: lower, needle: "models" })
+    else if has_segment_needle(SegmentNeedle { lower: lower, needle: "models" })
     {
         ContentCategory::Models
     }
     else if lower.ends_with(".scm") || lower.ends_with(".cm")
     {
         ContentCategory::Script
-    } else if segment_contains(SegmentNeedle { lower: lower, needle: "data" })
+    } else if has_segment_needle(SegmentNeedle { lower: lower, needle: "data" })
         || lower.ends_with(".dat")
         || lower.ends_with(".ide")
         || lower.ends_with(".ipl")
@@ -56,7 +56,7 @@ struct SegmentNeedle<'a>
     needle: &'a str,
 }
 
-fn segment_contains(segment: SegmentNeedle<'_>) -> bool
+fn has_segment_needle(segment: SegmentNeedle<'_>) -> bool
 {
     let lower = segment.lower;
     let needle = segment.needle;
@@ -156,7 +156,7 @@ pub(crate) fn parse_modloader_priorities(text: &str) -> ModLoaderPriorities
         {
             continue;
         }
-        if let Some(section) = line.strip_prefix('[').and_then(|s| s.strip_suffix(']'))
+        if let Some(section) = line.strip_prefix('[').and_then(|section_text| section_text.strip_suffix(']'))
         {
             in_priority_section = section.trim().to_ascii_lowercase().contains("priority");
             continue;
@@ -289,9 +289,9 @@ fn parse_modloader_log_version(line: &str) -> Option<String>
     let after = line[idx + "mod loader ".len()..].trim_start();
     let token: String = after
         .chars()
-        .take_while(|c| c.is_ascii_digit() || *c == '.')
+        .take_while(|character| character.is_ascii_digit() || *character == '.')
         .collect();
-    return if token.chars().next().is_some_and(|c| c.is_ascii_digit())
+    return if token.chars().next().is_some_and(|character| character.is_ascii_digit())
     {
         Some(token)
     }
@@ -377,7 +377,7 @@ impl ModLoaderConflict
     {
         return self.contenders
             .first()
-            .map(|c| c.folder.as_str())
+            .map(|contender| contender.folder.as_str())
             .unwrap_or("");
     }
 }
@@ -387,7 +387,7 @@ impl ModLoaderConflict
 /// An allowlist taken from the std.data trait registrations (AddMerger); anything
 /// not listed â€” including override-only data like timecyc/popcycle/fonts/clothes
 /// and all `.ipl`/`.zon` â€” is treated as winner-take-all.
-pub(crate) fn is_mergeable_data_file(target: &str) -> bool
+pub(crate) fn is_mergeable_game_resource_file(target: &str) -> bool
 {
     let name = target
         .rsplit('/')
@@ -497,4 +497,3 @@ pub(crate) fn modloader_virtual_asset(target: &str) -> Option<String>
         Some(tail.join("/").to_ascii_lowercase())
     };
 }
-

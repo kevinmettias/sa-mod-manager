@@ -1,4 +1,4 @@
-use crate::prelude::*;
+﻿use crate::prelude::*;
 
 #[derive(Clone, Copy)]
 pub(crate) enum TargetKind
@@ -13,7 +13,7 @@ pub(crate) enum TargetKind
     /// CLEO script modules reached via the `modules:` path prefix, in
     /// `CLEO/cleo_modules/`.
     CleoModules,
-    /// CLEO per-script save data in `CLEO/cleo_saves/` — runtime user data.
+    /// CLEO per-script save data in `CLEO/cleo_saves/` â€” runtime user data.
     CleoSaves,
     Asi,
     Bootstrap,

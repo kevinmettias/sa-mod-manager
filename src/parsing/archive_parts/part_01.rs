@@ -1,4 +1,4 @@
-use crate::prelude::*;
+﻿use crate::prelude::*;
 use std::io::Read;
 use std::process::Stdio;
 use std::sync::Mutex;
@@ -110,12 +110,12 @@ pub(crate) fn list_archive_entries_native(
             is_dir: file.is_dir(),
         });
     }
-    entries.sort_by(|a, b| a.path.cmp(&b.path));
+    entries.sort_by(|left, right| left.path.cmp(&right.path));
     return Ok(Some(entries));
 }
 
-/// Reject a listed archive entry whose path would extract outside the target —
-/// absolute, drive-qualified (`C:\…`), or containing a `..` component. This is
+/// Reject a listed archive entry whose path would extract outside the target â€”
+/// absolute, drive-qualified (`C:\â€¦`), or containing a `..` component. This is
 /// the 7-Zip-path equivalent of the native backend's `enclosed_name()` guard.
 struct SevenZipListingTotals
 {
@@ -294,7 +294,7 @@ fn seven_zip_preflight(
             {
                 continue;
             }
-            process_seven_zip_listing_line(&line, package, budget, &mut declared)?;
+            parse_seven_zip_listing_line(&line, package, budget, &mut declared)?;
         }
     }
     let output = child.wait_with_output()?;
@@ -317,7 +317,7 @@ fn seven_zip_preflight(
     return Ok(());
 }
 
-fn process_seven_zip_listing_line(
+fn parse_seven_zip_listing_line(
     line: &str,
     package: &Path,
     budget: &ExtractBudget,

@@ -1,4 +1,4 @@
-use crate::prelude::*;
+﻿use crate::prelude::*;
 
 pub(crate) fn init_state(game_root: &Path) -> Result<(), AppError>
 {

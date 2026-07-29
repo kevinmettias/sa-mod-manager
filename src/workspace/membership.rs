@@ -1,4 +1,4 @@
-use crate::prelude::*;
+﻿use crate::prelude::*;
 
 pub(crate) struct ProfileModSelection<'a>
 {
@@ -132,10 +132,10 @@ fn normalize_profile_mod_entries(mods: &mut Vec<ProfileModEntry>)
 {
     let mut seen = BTreeSet::new();
     mods.retain(|entry| seen.insert(entry.id.clone()));
-    mods.sort_by(|a, b| {
-        a.load_order
-            .cmp(&b.load_order)
-            .then_with(|| a.id.cmp(&b.id))
+    mods.sort_by(|left, right| {
+        left.load_order
+            .cmp(&right.load_order)
+            .then_with(|| left.id.cmp(&right.id))
     });
 }
 
@@ -186,7 +186,7 @@ mod tests
         write_profile_json(&game_root, &profile)
             .expect("the test fixture is created before this assertion reads it");
 
-        // All off → every mod disabled (vanilla), then all on → every mod enabled.
+        // All off â†’ every mod disabled (vanilla), then all on â†’ every mod enabled.
         set_all_profile_mods(&game_root, "vanilla", ProfileModActivation::Disabled)
             .expect("the test fixture is created before this assertion reads it");
         let read = load_profile_for_edit(&game_root, "vanilla")

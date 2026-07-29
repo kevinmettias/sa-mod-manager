@@ -1,4 +1,4 @@
-#[derive(Clone, Copy, PartialEq, Eq)]
+﻿#[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ModActivation
 {
     Enabled,

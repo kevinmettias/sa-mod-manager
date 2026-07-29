@@ -23,7 +23,7 @@ pub(super) struct UiPreferences
     pub(super) profile: String,
     #[serde(default)]
     pub(super) tab: String,
-    #[serde(default = "default_dark_mode")]
+    #[serde(default = "is_default_dark_mode")]
     pub(super) dark_mode: bool,
     #[serde(default = "default_width")]
     pub(super) width: f32,
@@ -31,7 +31,7 @@ pub(super) struct UiPreferences
     pub(super) height: f32,
 }
 
-fn default_dark_mode() -> bool
+fn is_default_dark_mode() -> bool
 {
     return true;
 }
@@ -54,7 +54,7 @@ impl Default for UiPreferences
             game_root: String::new(),
             profile: String::new(),
             tab: String::new(),
-            dark_mode: default_dark_mode(),
+            dark_mode: is_default_dark_mode(),
             width: DEFAULT_WIDTH,
             height: DEFAULT_HEIGHT,
         };
@@ -180,4 +180,3 @@ mod tests
         assert_ne!(base.signature(), changed.signature());
     }
 }
-

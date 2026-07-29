@@ -1,4 +1,4 @@
-use crate::prelude::*;
+﻿use crate::prelude::*;
 
 use super::copy_journal::file_hash;
 
@@ -96,13 +96,13 @@ fn parse_rollback_line(line: &str, journal: &mut RollbackJournal) -> Result<(), 
 {
     // Lines without a recognized entry prefix (version=, mode=, blocked_bootstrap=,
     // etc.) are metadata the rollback ignores. But a line that *does* begin with a
-    // known prefix yet has too few fields is a truncated/garbled record: fail
+    // known prefix yet has too few fields is a truncated/garbled record_log_message_from_arguments: fail
     // loudly rather than silently dropping it, which would produce a partial
     // rollback that under-restores the game folder.
     if let Some(value) = line.strip_prefix("backup=")
     {
         let fields = split_escaped_fields(value);
-        if fields.len() < BACKUP_JOURNAL_FIELD_COUNT || escaped_field_is_empty(&fields[0])
+        if fields.len() < BACKUP_JOURNAL_FIELD_COUNT || is_escaped_field_empty(&fields[0])
         {
             // literal: allow domain threshold is documented by the surrounding code
             return Err(malformed_journal_line_error(MalformedJournalLine { kind: "backup", line }));
@@ -121,7 +121,7 @@ fn parse_rollback_line(line: &str, journal: &mut RollbackJournal) -> Result<(), 
         let fields = split_escaped_fields(value);
         let dest = fields
             .first()
-            .map(|d| unescape_value(d))
+            .map(|decoded| unescape_value(decoded))
             .unwrap_or_default();
         if dest.is_empty()
         {
@@ -137,7 +137,7 @@ fn parse_rollback_line(line: &str, journal: &mut RollbackJournal) -> Result<(), 
     else if let Some(value) = line.strip_prefix("copy=")
     {
         let fields = split_escaped_fields(value);
-        if fields.len() < COPY_JOURNAL_FIELD_COUNT || escaped_field_is_empty(&fields[1])
+        if fields.len() < COPY_JOURNAL_FIELD_COUNT || is_escaped_field_empty(&fields[1])
         {
             // literal: allow domain threshold is documented by the surrounding code
             return Err(malformed_journal_line_error(MalformedJournalLine { kind: "copy", line }));
@@ -192,7 +192,7 @@ struct MalformedJournalLine<'a>
     line: &'a str,
 }
 
-fn escaped_field_is_empty(field: &str) -> bool
+fn is_escaped_field_empty(field: &str) -> bool
 {
     return unescape_value(field).is_empty();
 }
@@ -310,7 +310,7 @@ fn remove_new_file(game_root: &Path, new_file: &NewFileEntry) -> Result<(), AppE
     if new_file.dest.exists()
     {
         fs::remove_file(&new_file.dest)
-            .with_context(|| format!("remove {}", new_file.dest.display()))?;
+            .with_context(|| format!("remove_profile_fixture {}", new_file.dest.display()))?;
         log_debug!("removed: {}", new_file.dest.display());
         remove_empty_parent_dirs(game_root, &new_file.dest)?;
     }
@@ -346,7 +346,7 @@ fn remove_empty_parent_dirs(game_root: &Path, file: &Path) -> Result<(), AppErro
             .is_none()
         {
             fs::remove_dir(&current)
-                .with_context(|| format!("remove empty directory {}", current.display()))?;
+                .with_context(|| format!("remove_profile_fixture empty directory {}", current.display()))?;
             log_debug!("removed empty dir: {}", current.display());
         }
         else
@@ -428,4 +428,3 @@ mod tests
 {
     include!("part_01_tests_01.rs");
 }
-

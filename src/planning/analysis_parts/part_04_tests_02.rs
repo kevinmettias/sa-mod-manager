@@ -1,4 +1,4 @@
-
+﻿
     #[test]
     fn readme_fuses_multiline_install_paragraph_context()
     {
@@ -38,7 +38,7 @@
         assert_eq!(plan.operations.len(), 1);
         assert_eq!(plan.operations[0].source_root, "scripts");
         assert_eq!(plan.operations[0].target_root, root.join("CLEO"));
-        remove_dir_if_exists(&root).expect("the test fixture is created before this assertion reads it");
+        remove_directory_if_exists(&root).expect("the test fixture is created before this assertion reads it");
     }
 
     #[test]
@@ -79,7 +79,7 @@
             plan.operations[0].target_root,
             root.join("modloader").join("vehicle").join("gta3.img")
         );
-        remove_dir_if_exists(&root).expect("the test fixture is created before this assertion reads it");
+        remove_directory_if_exists(&root).expect("the test fixture is created before this assertion reads it");
     }
 
     fn analyze_package_error(package: &Path, root: &Path) -> AppError
@@ -109,12 +109,12 @@
             std::process::id(),
             unix_now()
         ));
-        remove_dir_if_exists(&root).expect("the test fixture is created before this assertion reads it"); // error-type: allow included only from cfg(test) harness code
+        remove_directory_if_exists(&root).expect("the test fixture is created before this assertion reads it"); // error-type: allow included only from cfg(test) harness code
         fs::create_dir_all(&root).expect("the test fixture is created before this assertion reads it"); // error-type: allow included only from cfg(test) harness code
         return root;
     }
 
-    fn remove_dir_if_exists(path: &Path) -> Result<(), AppError>
+    fn remove_directory_if_exists(path: &Path) -> Result<(), AppError>
     {
         if path.exists()
         {
@@ -122,4 +122,3 @@
         }
         return Ok(());
     }
-

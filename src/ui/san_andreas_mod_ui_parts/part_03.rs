@@ -1,4 +1,4 @@
-
+﻿
 fn load_import_telemetry(
     state_root: &Path,
     summary: &mut TelemetrySummary,
@@ -74,7 +74,7 @@ fn load_journal_telemetry(
             let outcome = read_run_outcome_for_journal(state_root, &path);
             if outcome
                 .as_ref()
-                .map(|record| record.result == RUN_RESULT_LAUNCH_FAILED)
+                .map(|record_log_message_from_arguments| record_log_message_from_arguments.result == RUN_RESULT_LAUNCH_FAILED)
                 .unwrap_or(false)
             {
                 // A launch that never started was rolled back: count it as a
@@ -126,10 +126,10 @@ fn launch_failed_detail(outcome: Option<&RunOutcome>) -> String
 {
     return match outcome
     {
-        Some(record) if !record.launch_args.is_empty() => {
+        Some(record_log_message_from_arguments) if !record_log_message_from_arguments.launch_args.is_empty() => {
             format!(
                 "launch never started (args: {})",
-                record.launch_args.join(" ")
+                record_log_message_from_arguments.launch_args.join(" ")
             )
         }
         _ => "launch never started".to_string(),
@@ -194,7 +194,7 @@ fn run_event_detail(text: &str, outcome: Option<&RunOutcome>) -> String
     let base = journal_event_detail(text);
     return match outcome
     {
-        Some(record) => format!("{base}; {}", outcome_status_phrase(record)),
+        Some(record_log_message_from_arguments) => format!("{base}; {}", outcome_status_phrase(record_log_message_from_arguments)),
         None => base,
     };
 }
@@ -411,5 +411,3 @@ mod tests
 {
     include!("part_03_tests_01.rs");
 }
-
-

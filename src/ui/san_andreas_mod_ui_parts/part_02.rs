@@ -274,7 +274,7 @@ impl SanAndreasModUi
         {
             ConfirmAction::RemoveMod(mod_id) => self.remove_mod_from_profile(&mod_id),
             ConfirmAction::CleanSelectedRun => self.cleanup_pending_run(),
-            ConfirmAction::CleanRunRecord(record) => self.cleanup_pending_run_record(record),
+            ConfirmAction::CleanRunRecord(record_log_message_from_arguments) => self.cleanup_pending_run_record(record_log_message_from_arguments),
             ConfirmAction::CleanFinishedRuns => self.cleanup_stale_pending_runs(),
             ConfirmAction::DeleteProfile(name) => self.delete_selected_profile(&name),
         }
@@ -400,7 +400,7 @@ impl eframe::App for SanAndreasModUi
             .default_width(560.0) // literal: allow UI tuning threshold is local to this control
             .show(context, |ui| self.detail_panel(ui));
         egui::CentralPanel::default().show(context, |ui| self.mods_center_panel(ui));
-        self.mod_info_window(context);
+        self.mod_details_window(context);
         self.confirm_modal(context);
         self.persist_preferences_if_changed(context);
     }
@@ -424,29 +424,16 @@ fn load_telemetry_summary(
     };
     load_import_telemetry(&state_root, &mut summary)?;
     load_journal_telemetry(&state_root, &mut summary)?;
-    summary.recent_events.sort_by(|a, b| {
-        b.created_unix
-            .cmp(&a.created_unix)
-            .then_with(|| a.title.cmp(&b.title))
+    summary.recent_events.sort_by(|left, right| {
+        right.created_unix
+            .cmp(&left.created_unix)
+            .then_with(|| left.title.cmp(&right.title))
     });
     summary.recent_events.truncate(200); // literal: allow UI tuning threshold is local to this control
-    summary.mod_history.sort_by(|a, b| {
-        b.last_seen_unix
-            .cmp(&a.last_seen_unix)
-            .then_with(|| a.id.cmp(&b.id))
+    summary.mod_history.sort_by(|left, right| {
+        right.last_seen_unix
+            .cmp(&left.last_seen_unix)
+            .then_with(|| left.id.cmp(&right.id))
     });
     return Ok(summary);
 }
-
-
-
-
-
-
-
-
-
-
-
-
-

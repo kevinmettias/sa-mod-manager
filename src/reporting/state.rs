@@ -161,6 +161,3 @@ mod tests
         assert!(note.contains("my_profile"), "{note}");
     }
 }
-
-
-

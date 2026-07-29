@@ -1,8 +1,8 @@
-use crate::prelude::*;
+﻿use crate::prelude::*;
 
 /// A labeled divider row in a profile's load-order list (MO2's separators). It is
-/// purely organizational: `position` is a *display slot* — the separator renders
-/// immediately above the mod currently at that slot — so it is decoupled from the
+/// purely organizational: `position` is a *display slot* â€” the separator renders
+/// immediately above the mod currently at that slot â€” so it is decoupled from the
 /// mods' own load order and survives mod reordering without touching it. Stored
 /// per profile under `.sa-mod-manager/separators/<profile>.json`.
 #[derive(Serialize, Deserialize, Clone, Default)]
@@ -23,7 +23,7 @@ struct SeparatorsFile
 }
 
 /// Read a profile's separators (sorted by position), or an empty list when none
-/// are saved / the file is unreadable — separators are optional cosmetics.
+/// are saved / the file is unreadable â€” separators are optional cosmetics.
 pub(crate) fn read_separators(state_root: &Path, profile: &str) -> Vec<Separator>
 {
     let path = separators_path(state_root, profile);

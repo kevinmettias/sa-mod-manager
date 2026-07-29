@@ -1,4 +1,4 @@
-pub(crate) struct Entry
+﻿pub(crate) struct Entry
 {
     pub(crate) path: String,
     pub(crate) size: u64,

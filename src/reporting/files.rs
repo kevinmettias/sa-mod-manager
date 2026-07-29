@@ -1,8 +1,8 @@
-use crate::prelude::*;
+﻿use crate::prelude::*;
 
-pub(crate) fn list_matching<F>(dir: &Path, predicate: F) -> io::Result<Vec<PathBuf>>
+pub(crate) fn list_matching<Predicate>(dir: &Path, predicate: Predicate) -> io::Result<Vec<PathBuf>>
 where
-    F: Fn(&Path) -> bool,
+    Predicate: Fn(&Path) -> bool,
 {
     let mut matches = Vec::new();
     if !dir.exists()
@@ -21,7 +21,7 @@ where
     return Ok(matches);
 }
 
-pub(crate) fn extension_eq(path: &Path, extension: &str) -> bool
+pub(crate) fn has_extension_equal_to(path: &Path, extension: &str) -> bool
 {
     return path
         .extension()
@@ -35,7 +35,7 @@ pub(crate) fn find_seven_zip() -> Option<PathBuf>
     // An explicit path from `SA_MOD_MANAGER_7Z` or the config file wins.
     if let Some(path) = configured_seven_zip()
     {
-        if command_candidate_works(&path)
+        if can_command_candidate_run(&path)
         {
             return Some(path);
         }
@@ -56,10 +56,10 @@ pub(crate) fn find_seven_zip() -> Option<PathBuf>
 
     return candidates
         .into_iter()
-        .find(|path| command_candidate_works(path.as_path()));
+        .find(|path| can_command_candidate_run(path.as_path()));
 }
 
-fn command_candidate_works(path: &Path) -> bool
+fn can_command_candidate_run(path: &Path) -> bool
 {
     if path.is_absolute() && !path.exists()
     {

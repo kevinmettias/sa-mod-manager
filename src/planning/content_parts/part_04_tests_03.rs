@@ -1,4 +1,4 @@
-
+﻿
     #[test]
     fn managed_profile_preserves_user_config_and_leaves_default_active()
     {

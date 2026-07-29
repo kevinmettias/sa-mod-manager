@@ -1,4 +1,4 @@
-impl SanAndreasModUi
+﻿impl SanAndreasModUi
 {
     /// Per-profile install-root overrides (disable or retarget a single root),
     /// previously reachable only via `profile-root`/`profile-root-target`.
@@ -26,7 +26,7 @@ impl SanAndreasModUi
                 continue;
             }
             egui::CollapsingHeader::new(format!(
-                "{} — {} roots",
+                "{} â€” {} roots",
                 entry.id,
                 item.config.install_roots.len()
             ))
@@ -51,10 +51,10 @@ impl SanAndreasModUi
         let key = format!("{mod_id}#{}", root.source);
         let override_entry = entry.root_overrides.get(&root.source);
         let mut enabled = override_entry
-            .and_then(|o| o.enabled)
+            .and_then(|override_value| override_value.enabled)
             .unwrap_or(root.enabled);
         let effective_target = override_entry
-            .and_then(|o| o.target.clone())
+            .and_then(|override_value| override_value.target.clone())
             .unwrap_or_else(|| root.target.clone());
         let mut enabled_changed = false;
         let mut save_target = None;
@@ -69,7 +69,7 @@ impl SanAndreasModUi
                 .on_hover_text("Enable this install root for this profile")
                 .changed();
             ui.label(&root.source);
-            ui.label("→");
+            ui.label("â†’");
             ui.add_sized(
                 [ROOT_OVERRIDE_TARGET_WIDTH, ROW_HEIGHT],
                 egui::TextEdit::singleline(target_buf),
@@ -94,6 +94,3 @@ impl SanAndreasModUi
         }
     }
 }
-
-
-

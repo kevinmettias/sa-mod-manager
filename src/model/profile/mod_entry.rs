@@ -1,4 +1,4 @@
-use crate::prelude::*;
+﻿use crate::prelude::*;
 
 #[derive(Clone, Default, Debug)]
 pub(crate) struct ModEntry

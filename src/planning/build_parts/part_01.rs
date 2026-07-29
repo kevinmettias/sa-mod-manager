@@ -1,4 +1,4 @@
-use crate::prelude::*;
+﻿use crate::prelude::*;
 const TARGET_ORDER_CLEO: u8 = 2;
 const TARGET_ORDER_CLEO_MODULES: u8 = 3;
 const TARGET_ORDER_CLEO_PLUGIN: u8 = 4;
@@ -8,7 +8,7 @@ const TARGET_ORDER_ASI: u8 = 7;
 const TARGET_ORDER_DIRECT_MANAGED: u8 = 8;
 
 #[cfg(test)]
-const TEST_DATA_BYTES: u64 = 10;
+const TEST_ARCHIVE_BYTES: u64 = 10;
 #[cfg(test)]
 const TEST_LOOKALIKE_BYTES: u64 = 99;
 #[cfg(test)]
@@ -18,9 +18,9 @@ const TEST_ANIM_BYTES: u64 = 5;
 #[cfg(test)]
 const TEST_MODEL_BYTES: u64 = 7;
 #[cfg(test)]
-const EXPECTED_DATA_ENTRY_COUNT: usize = 3;
+const EXPECTED_ARCHIVE_ENTRY_COUNT: usize = 3;
 #[cfg(test)]
-const EXPECTED_DATA_BYTES: u64 = 35;
+const EXPECTED_ARCHIVE_BYTES: u64 = 35;
 #[cfg(test)]
 const EXPECTED_ROOT_ENTRY_COUNT: usize = 5;
 #[cfg(test)]
@@ -165,7 +165,7 @@ fn add_readme_operations(
     let mut count = 0;
     for instruction in &context.report.readme_instructions
     {
-        if push_readme_operation(instruction, &context, collections)
+        if should_push_readme_operation(instruction, &context, collections)
         {
             count += 1;
         }
@@ -173,7 +173,7 @@ fn add_readme_operations(
     return count;
 }
 
-fn push_readme_operation(
+fn should_push_readme_operation(
     instruction: &ReadmeInstruction,
     context: &PlanReadmeContext<'_>,
     collections: &mut PlanBuildCollections,
@@ -251,7 +251,7 @@ impl SourceStatsIndex
             .filter(|entry| !entry.is_dir)
             .map(|entry| (normalize_path(&entry.path), entry.size))
             .collect();
-        entries.sort_by(|a, b| a.0.cmp(&b.0));
+        entries.sort_by(|left, right| left.0.cmp(&right.0));
         let total = SourceStats {
             file_count: entries.len(),
             total_bytes: entries.iter().map(|(_, size)| size).sum(),
@@ -365,35 +365,35 @@ fn is_optional_source(source: &str, option_groups: &[String]) -> bool
 
 fn target_kind(candidate: &InstallCandidate) -> TargetKind
 {
-    return if candidate.components.contains(&Component::ModLoader)
+    return if candidate.component_paths.contains(&Component::ModLoader)
         || candidate.target_strategy == "game root"
     {
         TargetKind::Bootstrap
     }
-    else if candidate.components.contains(&Component::CleoPlugin)
+    else if candidate.component_paths.contains(&Component::CleoPlugin)
     {
         TargetKind::CleoPlugin
     }
-    else if candidate.components.contains(&Component::CleoModules)
+    else if candidate.component_paths.contains(&Component::CleoModules)
     {
         TargetKind::CleoModules
     }
-    else if candidate.components.contains(&Component::CleoSaves)
+    else if candidate.component_paths.contains(&Component::CleoSaves)
     {
         TargetKind::CleoSaves
     }
-    else if candidate.components.contains(&Component::CleoText)
+    else if candidate.component_paths.contains(&Component::CleoText)
     {
         TargetKind::CleoText
     }
-    else if candidate.components.contains(&Component::Cleo)
+    else if candidate.component_paths.contains(&Component::Cleo)
     {
         TargetKind::Cleo
     }
-    else if candidate.components.contains(&Component::Asi)
+    else if candidate.component_paths.contains(&Component::Asi)
     {
         TargetKind::Asi
-    } else if candidate.components.contains(&Component::ModLoaderContent)
+    } else if candidate.component_paths.contains(&Component::ModLoaderContent)
         || candidate.target_strategy.contains("modloader")
     {
         TargetKind::ModLoader
@@ -467,11 +467,11 @@ pub(crate) fn readme_copy_install_root(request: ReadmeCopyInstallRoot<'_>) -> Mo
  // literal: allow UI tuning threshold is local to this control
 pub(crate) fn sort_operations_for_apply(plan: &mut InstallPlan)
 {
-    plan.operations.sort_by(|a, b| {
-        a.optional
-            .cmp(&b.optional)
-            .then_with(|| target_order(&a.target_kind).cmp(&target_order(&b.target_kind)))
-            .then_with(|| a.source_root.cmp(&b.source_root))
+    plan.operations.sort_by(|left, right| {
+        left.optional
+            .cmp(&right.optional)
+            .then_with(|| target_order(&left.target_kind).cmp(&target_order(&right.target_kind)))
+            .then_with(|| left.source_root.cmp(&right.source_root))
     });
 }
 
@@ -489,9 +489,3 @@ fn readme_target_kind(target: &str) -> TargetKind
         _ => TargetKind::DirectManaged,
     };
 }
-
-
-
-
-
-

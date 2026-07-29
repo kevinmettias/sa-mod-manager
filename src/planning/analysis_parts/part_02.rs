@@ -1,4 +1,4 @@
-
+﻿
 fn add_language_insights(report: &PackageReport, insights: &mut Vec<ReadmeInsight>)
 {
     for document in &report.readme_documents
@@ -124,7 +124,7 @@ fn build_readme_insight(
 fn detected_layout_templates(report: &PackageReport) -> Vec<String>
 {
     let mut layouts = Vec::new();
-    let has = |component| report.components.contains(&component);
+    let has = |component| report.component_paths.contains(&component);
     if has(Component::ModLoaderContent)
         && (has(Component::Data)
             || has(Component::Models)
@@ -139,7 +139,7 @@ fn detected_layout_templates(report: &PackageReport) -> Vec<String>
     }
     if has(Component::Cleo) || has(Component::CleoText) || has(Component::CleoPlugin)
     {
-        layouts.push("CLEO package: .cs/.cs4/.cs3 → CLEO/, .cleo plugins → CLEO/cleo_plugins/, .fxt → CLEO/cleo_text/".to_string());
+        layouts.push("CLEO package: .cs/.cs4/.cs3 â†’ CLEO/, .cleo plugins â†’ CLEO/cleo_plugins/, .fxt â†’ CLEO/cleo_text/".to_string());
     }
     if has(Component::Asi)
     {
@@ -171,7 +171,7 @@ fn detected_layout_templates(report: &PackageReport) -> Vec<String>
         .iter()
         .any(|entry| is_streaming_nodes(&normalize_path(&entry.path)))
     {
-        layouts.push("streaming nodes: nodesN.dat load only inside an *.img folder — place under modloader/<mod>/gta3.img/".to_string());
+        layouts.push("streaming nodes: nodesN.dat load only inside an *.img folder â€” place under modloader/<mod>/gta3.img/".to_string());
     }
     if report.entries.iter().any(|entry| {
         let lower = normalize_path(&entry.path).to_ascii_lowercase();
@@ -180,14 +180,14 @@ fn detected_layout_templates(report: &PackageReport) -> Vec<String>
             .any(|seg| seg == "player.img" || seg == "player_img")
     })
     {
-        layouts.push("clothing: new clothes must sit in a folder named player.img — modloader/<mod>/player.img/".to_string());
+        layouts.push("clothing: new clothes must sit in a folder named player.img â€” modloader/<mod>/player.img/".to_string());
     }
     layouts.sort();
     layouts.dedup();
     return layouts;
 }
 
-/// A `nodes<N>.dat` path-streaming file (nodes0.dat … nodes63.dat), which
+/// A `nodes<N>.dat` path-streaming file (nodes0.dat â€¦ nodes63.dat), which
 /// ModLoader's std.stream only loads from inside an `*.img` folder.
 fn is_streaming_nodes(path: &str) -> bool
 {
@@ -198,7 +198,7 @@ fn is_streaming_nodes(path: &str) -> bool
     let Some(digits) = stem.strip_prefix("nodes") else {
         return false;
     };
-    return !digits.is_empty() && digits.chars().all(|c| c.is_ascii_digit());
+    return !digits.is_empty() && digits.chars().all(|character| character.is_ascii_digit());
 }
 
 struct ReadmeLineContext
@@ -273,12 +273,12 @@ fn readme_line_contexts(text: &str) -> Vec<ReadmeLineContext>
 fn readme_paragraph_context(lines: &[&str], index: usize) -> String
 {
     let mut start = index;
-    while start > 0 && readme_line_has_paragraph_text(lines[start - 1])
+    while start > 0 && has_readme_line_paragraph_text(lines[start - 1])
     {
         start -= 1;
     }
     let mut end = index;
-    while end + 1 < lines.len() && readme_line_has_paragraph_text(lines[end + 1])
+    while end + 1 < lines.len() && has_readme_line_paragraph_text(lines[end + 1])
     {
         end += 1;
     }
@@ -290,7 +290,7 @@ fn readme_paragraph_context(lines: &[&str], index: usize) -> String
         .join(" ");
 }
 
-fn readme_line_has_paragraph_text(line: &str) -> bool
+fn has_readme_line_paragraph_text(line: &str) -> bool
 {
     return !line.trim().is_empty();
 }
@@ -315,7 +315,7 @@ fn readme_instruction_from_line(
         text: trimmed,
         normalized_text: &evidence_context,
     };
-    if contains_do_not_install(lower)
+    if has_skip_install_marker(lower)
     {
         return Some(readme_instruction(
             &instruction_context,
@@ -330,7 +330,7 @@ fn readme_instruction_from_line(
             },
         ));
     }
-    if contains_conflict(lower)
+    if has_conflict_marker(lower)
     {
         return Some(readme_instruction(
             &instruction_context,
@@ -345,7 +345,7 @@ fn readme_instruction_from_line(
             },
         ));
     }
-    if contains_load_after(lower)
+    if has_load_after_marker(lower)
     {
         return Some(readme_instruction(
             &instruction_context,
@@ -360,7 +360,7 @@ fn readme_instruction_from_line(
             },
         ));
     }
-    if contains_optional(lower)
+    if has_optional_marker(lower)
     {
         let optional_source = infer_source_from_line(&evidence_context, source_candidates);
         return Some(readme_instruction(
@@ -376,7 +376,7 @@ fn readme_instruction_from_line(
             },
         ));
     }
-    if contains_requirement(lower)
+    if has_requirement(lower)
     {
         return Some(readme_instruction(
             &instruction_context,
@@ -391,7 +391,7 @@ fn readme_instruction_from_line(
             },
         ));
     }
-    let install_verb = contains_install_verb(lower);
+    let install_verb = has_install_verb(lower);
     let install_section = context
         .section
         .as_deref()
@@ -469,10 +469,3 @@ fn readme_instruction(
         confidence_reasons: draft.confidence.reasons,
     };
 }
-
-
-
-
-
-
-

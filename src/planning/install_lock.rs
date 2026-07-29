@@ -2,10 +2,10 @@
 
 use super::rollback::rollback_journal;
 
-/// A record of the permanent install that currently holds the game folder.
+/// A record_log_message_from_arguments of the permanent install that currently holds the game folder.
 ///
 /// Written when `apply_install_plan` begins and removed on success. If the
-/// process dies before the record is removed, its presence marks an install
+/// process dies before the record_log_message_from_arguments is removed, its presence marks an install
 /// that was interrupted mid-transaction and can be rolled back with `recover`.
 pub(crate) struct InstallLock
 {
@@ -77,14 +77,14 @@ fn parse_install_lock(text: &str) -> Result<Option<InstallLock>, AppError>
     };
 }
 
-fn parse_lock_number<T>(field: LockNumberField<'_>) -> Result<T, AppError>
+fn parse_lock_number<Number>(field: LockNumberField<'_>) -> Result<Number, AppError>
 where
-    T: std::str::FromStr,
-    T::Err: std::fmt::Debug,
+    Number: std::str::FromStr,
+    Number::Err: std::fmt::Debug,
 {
     let value = field.value;
     let field = field.name;
-    return value.trim().parse::<T>().map_err(|err| {
+    return value.trim().parse::<Number>().map_err(|err| {
         AppError::Usage(format!(
             "install lock is corrupt: `{field}` value `{}` is not a valid number; delete `install.lock` or run `recover`",
             value.trim()
@@ -143,7 +143,7 @@ pub(crate) fn acquire_install_lock(
     ensure_lock_parent(&path)?;
     // Create the marker atomically: `create_new` fails if the file already
     // exists, so a second install that raced past the check above cannot
-    // silently overwrite our record (or we, theirs). The check above still runs
+    // silently overwrite our record_log_message_from_arguments (or we, theirs). The check above still runs
     // first only to produce a friendlier message in the common, uncontended case.
     return match fs::OpenOptions::new()
         .write(true)
@@ -172,7 +172,7 @@ pub(crate) fn acquire_install_lock(
 
 fn lock_conflict_error(existing: &InstallLock) -> AppError
 {
-    if lock_owner_is_running(existing)
+    if is_lock_owner_running(existing)
     {
         return AppError::Usage(format!(
             "another install is already in progress (pid {}); wait for it to finish before installing again",
@@ -191,7 +191,7 @@ pub(crate) fn release_install_lock(game_root: &Path) -> Result<(), AppError>
     if path.exists()
     {
         fs::remove_file(&path)
-            .with_context(|| format!("remove install lock {}", path.display()))?;
+            .with_context(|| format!("remove_profile_fixture install lock {}", path.display()))?;
     }
     return Ok(());
 }
@@ -200,7 +200,7 @@ pub(crate) fn release_install_lock(game_root: &Path) -> Result<(), AppError>
 pub(crate) fn interrupted_install(game_root: &Path) -> Result<Option<InstallLock>, AppError>
 {
     return match read_install_lock(game_root)? {
-        Some(lock) if !lock_owner_is_running(&lock) => Ok(Some(lock)),
+        Some(lock) if !is_lock_owner_running(&lock) => Ok(Some(lock)),
         _ => Ok(None),
     };
 }
@@ -214,7 +214,7 @@ pub(crate) fn recover_interrupted_install(game_root: &Path) -> Result<Option<Str
     let Some(lock) = read_install_lock(game_root)? else {
         return Ok(None);
     };
-    if lock_owner_is_running(&lock)
+    if is_lock_owner_running(&lock)
     {
         return Err(AppError::Usage(format!(
             "an install is currently in progress (pid {}); cannot recover while it is running",
@@ -249,7 +249,7 @@ fn write_lock_fields(
         escape_value(&journal.display().to_string())
     )?;
     writeln!(file, "pid={pid}")?;
-    if let Some(start) = crate::game_launch::current_process_start_ticks()
+    if let Some(start) = crate::game_launch::current_program_start_ticks()
     {
         writeln!(file, "pid_start={start}")?;
     }
@@ -274,12 +274,12 @@ fn ensure_lock_parent(path: &Path) -> Result<(), AppError>
     return Ok(());
 }
 
-fn lock_owner_is_running(lock: &InstallLock) -> bool
+fn is_lock_owner_running(lock: &InstallLock) -> bool
 {
     let Some(pid) = lock.pid else {
         return false;
     };
-    if !crate::game_launch::process_is_running(pid)
+    if !crate::game_launch::is_child_program_running(pid)
     {
         return false;
     }
@@ -288,7 +288,7 @@ fn lock_owner_is_running(lock: &InstallLock) -> bool
     // exited and the OS handed its PID to an unrelated process, so the install
     // is not actually running and recovery must not be blocked on it.
     return match lock.pid_start {
-        Some(expected) => crate::game_launch::process_start_ticks(pid) == Some(expected),
+        Some(expected) => crate::game_launch::program_start_ticks(pid) == Some(expected),
         None => true,
     };
 }

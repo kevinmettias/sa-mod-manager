@@ -61,7 +61,7 @@
         let reorderable = visible.is_none();
         // Deferred side effects (at most one fires per frame in practice).
         let mut activation: Option<(String, bool)> = None;
-        let mut remove: Option<String> = None;
+        let mut remove_profile_fixture: Option<String> = None;
         let mut reorder: Option<Vec<String>> = None;
         // (mod id, conflicts_only) for a "Show in Content" cross-link click.
         let mut focus: Option<(String, bool)> = None;
@@ -158,14 +158,14 @@
                         update_separator_edit_buffer(edit_state, sep_edit.as_mut(), &buf);
                         match action
                         {
-                            Some(SepAction::ToggleCollapse) => sep_collapse = Some(sep.id.clone()),
-                            Some(SepAction::StartEdit) => sep_start_edit = Some(sep.id.clone()),
-                            Some(SepAction::Commit) => sep_rename = Some((sep.id.clone(), buf)),
-                            Some(SepAction::Remove) => sep_remove = Some(sep.id.clone()),
-                            Some(SepAction::MoveUp) => {
+                            Some(SeparatorAction::ToggleCollapse) => sep_collapse = Some(sep.id.clone()),
+                            Some(SeparatorAction::StartEdit) => sep_start_edit = Some(sep.id.clone()),
+                            Some(SeparatorAction::Commit) => sep_rename = Some((sep.id.clone(), buf)),
+                            Some(SeparatorAction::Remove) => sep_remove = Some(sep.id.clone()),
+                            Some(SeparatorAction::MoveUp) => {
                                 sep_move = Some((sep.id.clone(), sep.position.saturating_sub(1)));
                             }
-                            Some(SepAction::MoveDown) => {
+                            Some(SeparatorAction::MoveDown) => {
                                 sep_move =
                                     Some((sep.id.clone(), (sep.position + 1).min(entries_len)));
                             }
@@ -386,7 +386,7 @@
                                 .on_hover_text("Remove this mod from the profile (asks first)")
                                 .clicked()
                             {
-                                remove = Some(entry.id.clone());
+                                remove_profile_fixture = Some(entry.id.clone());
                             }
                             ui.menu_button("â‹¯", |ui| {
                                 if ui.button("Detailsâ€¦").clicked()
@@ -451,14 +451,14 @@
                         update_separator_edit_buffer(edit_state, sep_edit.as_mut(), &buf);
                     match action
                     {
-                        Some(SepAction::ToggleCollapse) => sep_collapse = Some(sep.id.clone()),
-                        Some(SepAction::StartEdit) => sep_start_edit = Some(sep.id.clone()),
-                        Some(SepAction::Commit) => sep_rename = Some((sep.id.clone(), buf)),
-                        Some(SepAction::Remove) => sep_remove = Some(sep.id.clone()),
-                        Some(SepAction::MoveUp) => {
+                        Some(SeparatorAction::ToggleCollapse) => sep_collapse = Some(sep.id.clone()),
+                        Some(SeparatorAction::StartEdit) => sep_start_edit = Some(sep.id.clone()),
+                        Some(SeparatorAction::Commit) => sep_rename = Some((sep.id.clone(), buf)),
+                        Some(SeparatorAction::Remove) => sep_remove = Some(sep.id.clone()),
+                        Some(SeparatorAction::MoveUp) => {
                             sep_move = Some((sep.id.clone(), sep.position.saturating_sub(1)));
                         }
-                        Some(SepAction::MoveDown) => {
+                        Some(SeparatorAction::MoveDown) => {
                             sep_move = Some((sep.id.clone(), (sep.position + 1).min(entries_len)));
                         }
                         None => {}
@@ -478,7 +478,7 @@
         {
             activation,
             reorder,
-            remove,
+            remove_profile_fixture,
             focus,
             details,
             separator_edit: sep_edit,

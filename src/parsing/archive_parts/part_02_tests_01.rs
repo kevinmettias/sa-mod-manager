@@ -1,4 +1,4 @@
-    use super::{ArchiveBackend, ExtractBudget, PARALLEL_ZIP_TEST_DIRECTORY_MODULUS, PARALLEL_ZIP_TEST_FILE_COUNT, archive_backend, ensure_contained_entry, extract_archive_to_directory, extract_zip_to_directory, is_symlink_mode, list_archive_entries_native, missing_7zip_error_for_package, read_package_text_file};
+﻿    use super::{ArchiveBackend, ExtractBudget, PARALLEL_ZIP_TEST_DIRECTORY_MODULUS, PARALLEL_ZIP_TEST_FILE_COUNT, archive_backend, ensure_contained_entry, extract_archive_to_directory, extract_zip_to_directory, is_symlink_mode, list_archive_entries_native, missing_7zip_error_for_package, read_package_text_file};
     use crate::prelude::*;
     use zip::write::SimpleFileOptions;
 
@@ -28,7 +28,7 @@
             fs::read_to_string(target.join("modloader").join("Test").join("file.txt")).expect("the test fixture is created before this assertion reads it"),
             "payload"
         );
-        remove_dir_if_exists(&root).expect("the test fixture is created before this assertion reads it");
+        remove_directory_if_exists(&root).expect("the test fixture is created before this assertion reads it");
     }
 
     #[test]
@@ -45,7 +45,7 @@
             .to_string();
 
         assert!(err.contains("extraction limit"));
-        remove_dir_if_exists(&root).expect("the test fixture is created before this assertion reads it");
+        remove_directory_if_exists(&root).expect("the test fixture is created before this assertion reads it");
     }
 
     #[test]
@@ -53,7 +53,7 @@
     {
         let root = test_root("zip_entry_budget");
         let package = root.join("many.zip");
-        write_zip_package(&package, &[("a.txt", "a"), ("b.txt", "b")]);
+        write_zip_package(&package, &[("left.txt", "a"), ("right.txt", "b")]);
 
         let budget = ExtractBudget::with_limits(1 << 20, 1); // literal: allow test fixture value is the specimen under judgment
         let err = extract_zip_to_directory(&package, &root.join("out"), &budget)
@@ -61,7 +61,7 @@
             .to_string();
 
         assert!(err.contains("extraction limit"));
-        remove_dir_if_exists(&root).expect("the test fixture is created before this assertion reads it");
+        remove_directory_if_exists(&root).expect("the test fixture is created before this assertion reads it");
     }
 
     #[test]
@@ -140,7 +140,7 @@
         assert!(target.join("outer.txt").exists());
         assert!(target.join("modloader").join("inner.txt").exists());
         assert!(!target.join("inner.zip").exists());
-        remove_dir_if_exists(&root).expect("the test fixture is created before this assertion reads it");
+        remove_directory_if_exists(&root).expect("the test fixture is created before this assertion reads it");
     }
 
     #[test]
@@ -196,7 +196,7 @@
         {
             assert_eq!(fs::read_to_string(target.join(name)).expect("the test fixture is created before this assertion reads it"), *content);
         }
-        remove_dir_if_exists(&root).expect("the test fixture is created before this assertion reads it");
+        remove_directory_if_exists(&root).expect("the test fixture is created before this assertion reads it");
     }
 
     fn write_zip_package(path: &Path, entries: &[(&str, &str)])
@@ -219,12 +219,12 @@
             std::process::id(),
             unix_now()
         ));
-        remove_dir_if_exists(&root).expect("the test fixture is created before this assertion reads it"); // error-type: allow included only from cfg(test) harness code
+        remove_directory_if_exists(&root).expect("the test fixture is created before this assertion reads it"); // error-type: allow included only from cfg(test) harness code
         fs::create_dir_all(&root).expect("the test fixture is created before this assertion reads it"); // error-type: allow included only from cfg(test) harness code
         return root;
     }
 
-    fn remove_dir_if_exists(path: &Path) -> Result<(), AppError>
+    fn remove_directory_if_exists(path: &Path) -> Result<(), AppError>
     {
         if path.exists()
         {
@@ -232,4 +232,3 @@
         }
         return Ok(());
     }
-

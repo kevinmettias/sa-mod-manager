@@ -1,19 +1,19 @@
-// Per-script CLEO plugin dependency analysis.
+﻿// Per-script CLEO plugin dependency analysis.
 //
 // A compiled CLEO script (`.cs`/`.cs4`/`.cs3`) is SCM bytecode. It references
-// plugin functionality by *opcode number*, not by plugin name, so the only way
+// plugin functionality by *opcode_bytes number*, not by plugin name, so the only way
 // to know which plugins a script needs is to walk its instructions and collect
-// the opcodes it uses, then map each opcode to the plugin that provides it.
+// the opcodes it uses, then map each opcode_bytes to the plugin that provides it.
 //
 // Two data sources make this possible:
-//   * the game's `CLEO/.config/sa.json` opcode database gives each opcode's
+//   * the game's `CLEO/.config/sa.json` opcode_bytes database gives each opcode_bytes's
 //     parameter count (needed to advance the instruction pointer correctly);
-//   * CLEO5's `source/.OpcodeMap.csv` assigns opcode *ranges* to plugins.
+//   * CLEO5's `source/.OpcodeMap.csv` assigns opcode_bytes *ranges* to plugins.
 //
-// The walker is deliberately conservative: the moment it meets an opcode it
+// The walker is deliberately conservative: the moment it meets an opcode_bytes it
 // cannot size (missing from the database) or a parameter byte it does not
 // recognize, it stops and marks the disassembly incomplete rather than guessing
-// — so a reported dependency is always one actually reached in clean bytecode.
+// â€” so a reported dependency is always one actually reached in clean bytecode.
 
 use crate::prelude::*;
 const PLUGIN_RANGE_COUNT: usize = 11;
@@ -23,7 +23,7 @@ const OPCODE_BYTE_WIDTH: usize = 2;
 
 const CLEO_CORE_FIRST_OPCODE: u16 = 0x2000;
 const INPUT_FIRST_OPCODE: u16 = 0x2080;
-const DEBUG_UTILS_FIRST_OPCODE: u16 = 0x2100;
+const DEBUGGER_FIRST_OPCODE: u16 = 0x2100;
 const IMGUI_FIRST_OPCODE: u16 = 0x2200;
 const FILE_OPERATIONS_FIRST_OPCODE: u16 = 0x2300;
 const MEMORY_OPERATIONS_FIRST_OPCODE: u16 = 0x2400;
@@ -67,7 +67,7 @@ const PARAM_WIDTH_ARRAY: usize = 6;
 const PARAM_WIDTH_SHORT_STRING: usize = 8;
 const PARAM_WIDTH_LONG_STRING: usize = 16;
 
-/// One CLEO5 plugin opcode range. Opcodes at or above `first_opcode` (until the
+/// One CLEO5 plugin opcode_bytes range. Opcodes at or above `first_opcode` (until the
 /// next range) are provided by `plugin`. Transcribed from CLEO5
 /// `source/.OpcodeMap.csv` (ids are hex; the table is range-based).
 struct PluginRange
@@ -76,7 +76,7 @@ struct PluginRange
     plugin: &'static str,
 }
 
-/// Plugin opcode ranges, ascending by `first_opcode`. `CLEO core` is the engine
+/// Plugin opcode_bytes ranges, ascending by `first_opcode`. `CLEO core` is the engine
 /// itself (no plugin file); the rest correspond to bundled `.cleo` modules.
 const PLUGIN_RANGES: [PluginRange; PLUGIN_RANGE_COUNT] = [
     PluginRange {
@@ -88,7 +88,7 @@ const PLUGIN_RANGES: [PluginRange; PLUGIN_RANGE_COUNT] = [
         plugin: "Input",
     },
     PluginRange {
-        first_opcode: DEBUG_UTILS_FIRST_OPCODE,
+        first_opcode: DEBUGGER_FIRST_OPCODE,
         plugin: "DebugUtils",
     },
     PluginRange {
@@ -125,17 +125,17 @@ const PLUGIN_RANGES: [PluginRange; PLUGIN_RANGE_COUNT] = [
     },
 ];
 
-/// Load and parse the opcode database from `CLEO/.config/sa.json`. Tolerant of
+/// Load and parse the opcode_bytes database from `CLEO/.config/sa.json`. Tolerant of
 /// unknown fields and shapes: any entry missing an id/params is simply skipped.
 /// Returns `None` if the file is absent or not valid JSON.
-pub(crate) fn load_opcode_db(sa_json_path: &Path) -> Option<ScmOpcodeDb>
+pub(crate) fn load_opcode_db(sa_json_path: &Path) -> Option<ScriptOpcodeDatabase>
 {
     let text = fs::read_to_string(sa_json_path).ok()?;
     let value: serde_json::Value = serde_json::from_str(&text).ok()?;
     let mut opcodes = BTreeMap::new();
     for extension in value.get("extensions")?.as_array()?
     {
-        let Some(commands) = extension.get("commands").and_then(|c| c.as_array()) else {
+        let Some(commands) = extension.get("commands").and_then(|command_value| command_value.as_array()) else {
             continue;
         };
         for command in commands
@@ -149,7 +149,7 @@ pub(crate) fn load_opcode_db(sa_json_path: &Path) -> Option<ScmOpcodeDb>
             };
             let num_params = command
                 .get("num_params")
-                .and_then(|n| n.as_u64())
+                .and_then(|number| number.as_u64())
                 .unwrap_or(0) as u16;
             let is_variadic = command
                 .get("attrs")
@@ -158,31 +158,31 @@ pub(crate) fn load_opcode_db(sa_json_path: &Path) -> Option<ScmOpcodeDb>
                 .unwrap_or(false);
             opcodes.insert(
                 id & OPCODE_NOT_FLAG_MASK,
-                OpcodeSig {
+                OpcodeSignature {
                     num_params,
                     is_variadic,
                 },
             );
         }
     }
-    return Some(ScmOpcodeDb { opcodes });
+    return Some(ScriptOpcodeDatabase { opcodes });
 }
 
-/// Analyze one script's bytecode against the opcode database.
-pub(crate) fn analyze_script(bytes: &[u8], db: &ScmOpcodeDb) -> ScriptDeps
+/// Analyze one script's bytecode against the opcode_bytes database.
+pub(crate) fn analyze_script(bytes: &[u8], db: &ScriptOpcodeDatabase) -> ScriptDeps
 {
     let mut used = BTreeSet::new();
-    let complete = collect_opcodes(bytes, db, &mut used);
+    let complete = should_collect_opcodes(bytes, db, &mut used);
     let mut plugins = BTreeSet::new();
     let mut unmapped = BTreeSet::new();
     let mut capabilities = BTreeSet::new();
-    for opcode in used
+    for opcode_bytes in used
     {
-        if let Some(capability) = capability_for_opcode(opcode)
+        if let Some(capability) = capability_for_opcode(opcode_bytes)
         {
             capabilities.insert(capability);
         }
-        let Some(extension) = extension_for_opcode(opcode) else {
+        let Some(extension) = extension_for_opcode(opcode_bytes) else {
             continue;
         };
         if extension == "CLEO core"
@@ -207,21 +207,21 @@ pub(crate) fn analyze_script(bytes: &[u8], db: &ScmOpcodeDb) -> ScriptDeps
     };
 }
 
-/// An opcode's signature, enough to skip its arguments: how many parameters it
+/// An opcode_bytes's signature, enough to skip its arguments: how many parameters it
 /// takes, and whether that count is variable (terminated by a `0x00` byte).
-struct OpcodeSig
+struct OpcodeSignature
 {
     num_params: u16,
     is_variadic: bool,
 }
 
-/// The SCM opcode database, parsed from `sa.json`: masked opcode id → signature.
-pub(crate) struct ScmOpcodeDb
+/// The SCM opcode_bytes database, parsed from `sa.json`: masked opcode_bytes id â†’ signature.
+pub(crate) struct ScriptOpcodeDatabase
 {
-    opcodes: BTreeMap<u16, OpcodeSig>,
+    opcodes: BTreeMap<u16, OpcodeSignature>,
 }
 
-impl ScmOpcodeDb
+impl ScriptOpcodeDatabase
 {
     #[cfg(test)]
     fn from_pairs(pairs: &[(u16, u16, bool)]) -> Self
@@ -231,7 +231,7 @@ impl ScmOpcodeDb
             .map(|(id, num_params, is_variadic)| {
                 (
                     id & OPCODE_NOT_FLAG_MASK,
-                    OpcodeSig {
+                    OpcodeSignature {
                         num_params: *num_params,
                         is_variadic: *is_variadic,
                     },
@@ -241,36 +241,36 @@ impl ScmOpcodeDb
         return Self { opcodes };
     }
 
-    fn get(&self, opcode: u16) -> Option<&OpcodeSig>
+    fn get(&self, opcode_bytes: u16) -> Option<&OpcodeSignature>
     {
-        return self.opcodes.get(&opcode);
+        return self.opcodes.get(&opcode_bytes);
     }
 }
 
-/// Walk the bytecode, recording each opcode used. Returns whether it reached the
-/// end cleanly; a `false` means an unknown opcode or parameter type stopped it.
-fn collect_opcodes(bytes: &[u8], db: &ScmOpcodeDb, used: &mut BTreeSet<u16>) -> bool
+/// Walk the bytecode, recording each opcode_bytes used. Returns whether it reached the
+/// end cleanly; a `false` means an unknown opcode_bytes or parameter type stopped it.
+fn should_collect_opcodes(bytes: &[u8], db: &ScriptOpcodeDatabase, used: &mut BTreeSet<u16>) -> bool
 {
     let mut pos = 0usize;
-    // A trailing 0/1 byte is a clean end (an opcode needs two bytes).
+    // A trailing 0/1 byte is a clean end (an opcode_bytes needs two bytes).
     while pos + OPCODE_BYTE_WIDTH <= bytes.len()
     {
-        let opcode = u16::from_le_bytes([bytes[pos], bytes[pos + 1]]);
+        let opcode_bytes = u16::from_le_bytes([bytes[pos], bytes[pos + 1]]);
         pos += OPCODE_BYTE_WIDTH;
         // The high bit is the "not" flag on conditional opcodes; mask for lookup.
-        let masked = opcode & OPCODE_NOT_FLAG_MASK;
+        let masked = opcode_bytes & OPCODE_NOT_FLAG_MASK;
         let Some(sig) = db.get(masked) else {
             return false;
         };
         used.insert(masked);
         if sig.is_variadic
         {
-            if !skip_variadic_params(bytes, &mut pos)
+            if !should_skip_variadic_parameters(bytes, &mut pos)
             {
                 return false;
             }
         }
-        else if !skip_fixed_params(bytes, &mut pos, sig.num_params)
+        else if !should_skip_fixed_parameters(bytes, &mut pos, sig.num_params)
         {
             return false;
         }
@@ -288,14 +288,14 @@ pub(crate) struct ScriptDeps
     /// Plugin extensions used but not mapped to a known file (e.g. `ImGUI`).
     pub(crate) unmapped_extensions: BTreeSet<String>,
     /// Elevated capabilities the script uses (memory access, DLL loading, file
-    /// I/O) — a trust hint when reviewing an unknown script.
+    /// I/O) â€” a trust hint when reviewing an unknown script.
     pub(crate) capabilities: BTreeSet<&'static str>,
     /// False if disassembly stopped early; `plugins` may then be incomplete.
     pub(crate) complete: bool,
 }
 
 /// Skip a variadic parameter list, terminated by a `0x00` (EOL) type byte.
-fn skip_variadic_params(bytes: &[u8], pos: &mut usize) -> bool
+fn should_skip_variadic_parameters(bytes: &[u8], pos: &mut usize) -> bool
 {
     while *pos < bytes.len()
     {
@@ -305,7 +305,7 @@ fn skip_variadic_params(bytes: &[u8], pos: &mut usize) -> bool
         {
             return true;
         }
-        if !skip_param_data(type_byte, bytes, pos)
+        if !should_skip_parameter_payload(type_byte, bytes, pos)
         {
             return false;
         }
@@ -315,11 +315,11 @@ fn skip_variadic_params(bytes: &[u8], pos: &mut usize) -> bool
 
 /// Skip a fixed number of parameters. Returns false on a truncated or
 /// unrecognized parameter.
-fn skip_fixed_params(bytes: &[u8], pos: &mut usize, num_params: u16) -> bool
+fn should_skip_fixed_parameters(bytes: &[u8], pos: &mut usize, num_params: u16) -> bool
 {
     for _ in 0..num_params
     {
-        if !skip_one_param(bytes, pos)
+        if !should_skip_one_parameter(bytes, pos)
         {
             return false;
         }
@@ -328,21 +328,21 @@ fn skip_fixed_params(bytes: &[u8], pos: &mut usize, num_params: u16) -> bool
 }
 
 /// Read one parameter's type byte and skip its data.
-fn skip_one_param(bytes: &[u8], pos: &mut usize) -> bool
+fn should_skip_one_parameter(bytes: &[u8], pos: &mut usize) -> bool
 {
     let Some(&type_byte) = bytes.get(*pos) else {
         return false;
     };
     *pos += 1;
-    return skip_param_data(type_byte, bytes, pos);
+    return should_skip_parameter_payload(type_byte, bytes, pos);
 }
 
-/// An elevated capability an opcode confers, or `None` for an ordinary opcode.
+/// An elevated capability an opcode_bytes confers, or `None` for an ordinary opcode_bytes.
 /// Covers the legacy CLEO memory/DLL opcodes and the CLEO5 MemoryOperations /
 /// FileOperations plugin ranges.
-fn capability_for_opcode(opcode: u16) -> Option<&'static str>
+fn capability_for_opcode(opcode_bytes: u16) -> Option<&'static str>
 {
-    return match opcode
+    return match opcode_bytes
     {
         LEGACY_MEMORY_READ_OPCODE | LEGACY_MEMORY_WRITE_OPCODE => {
             Some("reads/writes process memory")
@@ -354,14 +354,14 @@ fn capability_for_opcode(opcode: u16) -> Option<&'static str>
     };
 }
 
-/// The plugin extension owning `opcode`, i.e. the range with the greatest
+/// The plugin extension owning `opcode_bytes`, i.e. the range with the greatest
 /// `first_opcode` not exceeding it. `None` for opcodes below the plugin block.
-fn extension_for_opcode(opcode: u16) -> Option<&'static str>
+fn extension_for_opcode(opcode_bytes: u16) -> Option<&'static str>
 {
     let mut found = None;
     for range in &PLUGIN_RANGES
     {
-        if opcode >= range.first_opcode
+        if opcode_bytes >= range.first_opcode
         {
             found = Some(range.plugin);
         }
@@ -394,7 +394,7 @@ fn plugin_file_for_extension(extension: &str) -> Option<&'static str>
 
 /// Advance `pos` past the data of a parameter whose type byte was already read.
 /// Returns false for an unknown type byte or a truncated variable-length string.
-fn skip_param_data(type_byte: u8, bytes: &[u8], pos: &mut usize) -> bool
+fn should_skip_parameter_payload(type_byte: u8, bytes: &[u8], pos: &mut usize) -> bool
 {
     // GTA SA SCM parameter data sizes, keyed by the data-type byte.
     let size = match type_byte {
@@ -432,4 +432,3 @@ mod tests
 {
     include!("part_01_tests_01.rs");
 }
-

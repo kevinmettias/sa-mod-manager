@@ -1,14 +1,14 @@
-
-fn env_overrides() -> EnvOverrides
+﻿
+fn environment_overrides() -> EnvironmentOverrides
 {
-    return EnvOverrides {
-        game_root: env_var_nonempty("SA_MOD_MANAGER_GAME_ROOT").map(PathBuf::from),
-        mod_roots: env_mod_roots(),
-        seven_zip: env_var_nonempty("SA_MOD_MANAGER_7Z").map(PathBuf::from),
+    return EnvironmentOverrides {
+        game_root: environment_variable_nonempty("SA_MOD_MANAGER_GAME_ROOT").map(PathBuf::from),
+        mod_roots: environment_mod_roots(),
+        seven_zip: environment_variable_nonempty("SA_MOD_MANAGER_7Z").map(PathBuf::from),
     };
 }
 
-fn env_var_nonempty(key: &str) -> Option<String>
+fn environment_variable_nonempty(key: &str) -> Option<String>
 {
     return match env::var(key)
     {
@@ -17,7 +17,7 @@ fn env_var_nonempty(key: &str) -> Option<String>
     };
 }
 
-fn env_mod_roots() -> Option<Vec<PathBuf>>
+fn environment_mod_roots() -> Option<Vec<PathBuf>>
 {
     let value = env::var_os("SA_MOD_MANAGER_MOD_ROOTS")?;
     let roots: Vec<PathBuf> = env::split_paths(&value)
@@ -28,7 +28,7 @@ fn env_mod_roots() -> Option<Vec<PathBuf>>
         Some(roots) };
 }
 
-fn resolve_settings(file: SettingsFile, env: EnvOverrides) -> Settings
+fn resolve_settings(file: SettingsFile, env: EnvironmentOverrides) -> Settings
 {
     let game_root = env
         .game_root
@@ -96,7 +96,7 @@ fn resolve_settings(file: SettingsFile, env: EnvOverrides) -> Settings
         modloader_order_prefix,
         infrastructure_checks,
         default_launch_args: file.default_launch_args,
-        default_launch_env: file.default_launch_env,
+        default_launch_environment: file.default_launch_environment,
         // An unrecognized log level falls back to Info rather than failing.
         log_level: file
             .log_level
@@ -178,11 +178,11 @@ mod tests
     use super::*;
 
     #[test]
-    fn env_beats_config_beats_default_for_game_root()
+    fn environment_beats_config_beats_default_for_game_root()
     {
         // default: with nothing configured, the game root is auto-detected (or the
         // working directory), i.e. exactly what `resolved_default_game_root` returns.
-        let s = resolve_settings(SettingsFile::default(), empty_env());
+        let s = resolve_settings(SettingsFile::default(), empty_environment());
         assert_eq!(s.game_root, resolved_default_game_root());
 
         // config overrides default
@@ -190,7 +190,7 @@ mod tests
             game_root: Some(r"D:\Games\GTA SA".to_string()),
             ..Default::default()
         };
-        let s = resolve_settings(file, empty_env());
+        let s = resolve_settings(file, empty_environment());
         assert_eq!(s.game_root, PathBuf::from(r"D:\Games\GTA SA"));
 
         // env overrides config
@@ -198,9 +198,9 @@ mod tests
             game_root: Some(r"D:\Games\GTA SA".to_string()),
             ..Default::default()
         };
-        let env = EnvOverrides {
+        let env = EnvironmentOverrides {
             game_root: Some(PathBuf::from(r"E:\GTA")),
-            ..empty_env()
+            ..empty_environment()
         };
         let s = resolve_settings(file, env);
         assert_eq!(s.game_root, PathBuf::from(r"E:\GTA"));
@@ -213,7 +213,7 @@ mod tests
             mod_roots: Some(vec!["A".to_string(), "B".to_string()]),
             ..Default::default()
         };
-        let s = resolve_settings(file, empty_env());
+        let s = resolve_settings(file, empty_environment());
         assert_eq!(s.mod_roots, vec![PathBuf::from("A"), PathBuf::from("B")]);
     }
 
@@ -222,7 +222,7 @@ mod tests
     {
         // No personal path is baked in: an unconfigured scan list is empty, and
         // the CLI turns that into a prompt rather than scanning someone's drive.
-        let s = resolve_settings(SettingsFile::default(), empty_env());
+        let s = resolve_settings(SettingsFile::default(), empty_environment());
         assert!(s.mod_roots.is_empty());
     }
 
@@ -263,7 +263,7 @@ mod tests
             }],
             ..Default::default()
         };
-        let s = resolve_settings(file, empty_env());
+        let s = resolve_settings(file, empty_environment());
 
         assert_eq!(s.component_rules.len(), builtin_components + 1);
         // The appended rule classifies a pattern the built-ins would miss.
@@ -276,8 +276,8 @@ mod tests
     #[test]
     fn log_level_and_default_profile_default_and_normalize()
     {
-        // Unset → Info level and the built-in "default" profile.
-        let s = resolve_settings(SettingsFile::default(), empty_env());
+        // Unset â†’ Info level and the built-in "default" profile.
+        let s = resolve_settings(SettingsFile::default(), empty_environment());
         assert_eq!(s.log_level, crate::logging::Level::Info);
         assert_eq!(s.default_profile, "default");
 
@@ -288,7 +288,7 @@ mod tests
             default_profile: Some("My Profile!".to_string()),
             ..Default::default()
         };
-        let s = resolve_settings(file, empty_env());
+        let s = resolve_settings(file, empty_environment());
         assert_eq!(s.log_level, crate::logging::Level::Info);
         assert_eq!(s.default_profile, safe_name("My Profile!"));
     }
@@ -305,7 +305,7 @@ mod tests
             }],
             ..Default::default()
         };
-        let s = resolve_settings(file, empty_env());
+        let s = resolve_settings(file, empty_environment());
         assert_eq!(s.component_rules.len(), builtin_component_rules().len());
     }
 
@@ -332,13 +332,13 @@ mod tests
                 path: "dinput8.dll".to_string(),
             }],
             default_launch_args: vec!["-nointro".to_string()],
-            default_launch_env: BTreeMap::from([("K".to_string(), "V".to_string())]),
+            default_launch_environment: BTreeMap::from([("K".to_string(), "V".to_string())]),
             log_level: Some("debug".to_string()),
             default_profile: Some("racing".to_string()),
         };
         let text = serde_json::to_string_pretty(&example).expect("the test fixture is created before this assertion reads it");
         let parsed: SettingsFile = serde_json::from_str(&text).expect("the test fixture is created before this assertion reads it");
-        let resolved = resolve_settings(parsed, empty_env());
+        let resolved = resolve_settings(parsed, empty_environment());
         assert_eq!(resolved.game_root, PathBuf::from("G"));
         assert_eq!(resolved.mod_roots, vec![PathBuf::from("M")]);
         assert_eq!(
@@ -361,7 +361,7 @@ mod tests
         // Default launch args/env round-trip through the config too.
         assert_eq!(resolved.default_launch_args, vec!["-nointro".to_string()]);
         assert_eq!(
-            resolved.default_launch_env.get("K").map(String::as_str),
+            resolved.default_launch_environment.get("K").map(String::as_str),
             Some("V")
         );
         // Log level and default profile round-trip and normalize.
@@ -373,7 +373,7 @@ mod tests
     fn behavioral_tunables_default_and_clamp()
     {
         // Defaults when unset.
-        let s = resolve_settings(SettingsFile::default(), empty_env());
+        let s = resolve_settings(SettingsFile::default(), empty_environment());
         assert!((s.readme_auto_confidence - DEFAULT_README_AUTO_CONFIDENCE).abs() < f32::EPSILON);
         assert_eq!(s.pending_run_watch_secs, DEFAULT_PENDING_RUN_WATCH_SECS);
         assert_eq!(s.modloader_order_prefix, DEFAULT_MODLOADER_ORDER_PREFIX);
@@ -385,7 +385,7 @@ mod tests
             pending_run_watch_secs: Some(0),
             ..Default::default()
         };
-        let s = resolve_settings(file, empty_env());
+        let s = resolve_settings(file, empty_environment());
         assert!((s.readme_auto_confidence - 1.0).abs() < f32::EPSILON);
         assert!((s.readme_review_confidence - 0.0).abs() < f32::EPSILON);
         assert_eq!(s.pending_run_watch_secs, DEFAULT_PENDING_RUN_WATCH_SECS);
@@ -397,14 +397,14 @@ mod tests
             readme_review_confidence: Some(0.9), // literal: allow test fixture value is the specimen under judgment
             ..Default::default()
         };
-        let s = resolve_settings(inverted, empty_env());
+        let s = resolve_settings(inverted, empty_environment());
         assert!(s.readme_review_confidence <= s.readme_auto_confidence);
         assert!((s.readme_review_confidence - 0.4).abs() < f32::EPSILON); // literal: allow test fixture value is the specimen under judgment
     }
 
-    fn empty_env() -> EnvOverrides
+    fn empty_environment() -> EnvironmentOverrides
     {
-        return EnvOverrides {
+        return EnvironmentOverrides {
             game_root: None,
             mod_roots: None,
             seven_zip: None,

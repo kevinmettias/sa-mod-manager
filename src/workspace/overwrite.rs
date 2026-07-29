@@ -1,7 +1,7 @@
-use crate::prelude::*;
+﻿use crate::prelude::*;
 
 /// ModLoader / CLEO internals and loader stubs that live in these folders but are
-/// not "unmanaged content" — they belong to the loaders themselves.
+/// not "unmanaged content" â€” they belong to the loaders themselves.
 const INFRASTRUCTURE_FILES: [&str; 6] = [
     "modloader.ini",
     "modloader.log",
@@ -12,7 +12,7 @@ const INFRASTRUCTURE_FILES: [&str; 6] = [
 ];
 
 /// Files sitting in the game folder's mod areas (`modloader/`, `cleo/`) that no
-/// enabled mod in the current profile provides — MO2's "overwrite": content
+/// enabled mod in the current profile provides â€” MO2's "overwrite": content
 /// installed by hand or left behind by a tool, which the manager does not touch.
 ///
 /// `owned` is the set of materialized target paths from the content index
@@ -80,20 +80,20 @@ mod tests
         ));
         // Unmanaged: present in modloader/ but not owned.
         write_file(
-            &root.join("modloader").join("HandInstalled").join("a.dff"),
+            &root.join("modloader").join("HandInstalled").join("left.dff"),
             "x",
         );
-        // Owned by an enabled mod → excluded.
-        write_file(&root.join("modloader").join("FromMod").join("b.dff"), "x");
-        // Loader internals / infrastructure → excluded.
+        // Owned by an enabled mod â†’ excluded.
+        write_file(&root.join("modloader").join("FromMod").join("right.dff"), "x");
+        // Loader internals / infrastructure â†’ excluded.
         write_file(&root.join("modloader").join(".data").join("cache"), "x");
         write_file(&root.join("modloader").join("modloader.log"), "x");
 
         let mut owned = BTreeSet::new();
-        owned.insert("modloader/FromMod/b.dff".to_string());
+        owned.insert("modloader/FromMod/right.dff".to_string());
 
         let result = collect_overwrite_files(&root, &owned);
-        assert_eq!(result, vec!["modloader/HandInstalled/a.dff".to_string()]);
+        assert_eq!(result, vec!["modloader/HandInstalled/left.dff".to_string()]);
         fs::remove_dir_all(&root)
             .expect("the test fixture is created before this assertion reads it");
     }

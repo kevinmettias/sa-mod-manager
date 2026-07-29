@@ -1,4 +1,4 @@
-
+﻿
 fn target_order(kind: &TargetKind) -> u8
 {
     return match kind
@@ -55,7 +55,7 @@ mod tests
             target_strategy: "CLEO".to_string(),
             file_count: 1,
             total_bytes: 1,
-            components: BTreeSet::from([component]),
+            component_paths: BTreeSet::from([component]),
             notes: BTreeSet::new(),
         };
     }
@@ -64,17 +64,17 @@ mod tests
     fn source_stats_index_matches_exact_and_prefix_but_not_lookalikes()
     {
         let index = index_of(&[
-            ("data", TEST_DATA_BYTES),
+            ("data", TEST_ARCHIVE_BYTES),
             ("data.bak", TEST_LOOKALIKE_BYTES), // lookalike: sorts between "data" and "data/" but must not match
             ("data/handling.cfg", TEST_HANDLING_BYTES),
             ("data/anim/x", TEST_ANIM_BYTES),
-            ("models/a.dff", TEST_MODEL_BYTES),
+            ("models/left.dff", TEST_MODEL_BYTES),
         ]);
 
         // exact ("data") + everything under "data/", excluding "data.bak"
         assert_eq!(
             index.stats("data"),
-            SourceStats { file_count: EXPECTED_DATA_ENTRY_COUNT, total_bytes: EXPECTED_DATA_BYTES }
+            SourceStats { file_count: EXPECTED_ARCHIVE_ENTRY_COUNT, total_bytes: EXPECTED_ARCHIVE_BYTES }
         );
         assert_eq!(index.stats("data/anim"), SourceStats { file_count: 1, total_bytes: TEST_ANIM_BYTES });
         assert_eq!(index.stats("models"), SourceStats { file_count: 1, total_bytes: TEST_MODEL_BYTES });
@@ -91,9 +91,8 @@ mod tests
             .iter()
             .map(|(path, size)| (normalize_path(path), *size))
             .collect();
-        entries.sort_by(|a, b| a.0.cmp(&b.0));
+        entries.sort_by(|left, right| left.0.cmp(&right.0));
         let total = SourceStats { file_count: entries.len(), total_bytes: entries.iter().map(|(_, size)| size).sum() };
         return SourceStatsIndex { entries, total };
     }
 }
-

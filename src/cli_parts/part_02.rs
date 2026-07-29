@@ -1,4 +1,4 @@
-use crate::workspace::ProfileRenameRequest;
+﻿use crate::workspace::ProfileRenameRequest;
 
 fn handle_profile_rename_command(arguments: Vec<String>) -> Result<(), AppError>
 {
@@ -231,12 +231,12 @@ fn optional_game_root_from_cli_arguments(cursor: CliArguments) -> PathBuf
 
 fn handle_profile_all_off_command(arguments: Vec<String>) -> Result<(), AppError>
 {
-    return set_all_profile_mods_from_cli(arguments, ProfileModActivation::Disabled);
+    return set_all_profile_mods_from_cli_arguments(arguments, ProfileModActivation::Disabled);
 }
 
 fn handle_profile_all_on_command(arguments: Vec<String>) -> Result<(), AppError>
 {
-    return set_all_profile_mods_from_cli(arguments, ProfileModActivation::Enabled);
+    return set_all_profile_mods_from_cli_arguments(arguments, ProfileModActivation::Enabled);
 }
 fn handle_game_command(arguments: Vec<String>) -> Result<(), AppError>
 {
@@ -328,7 +328,7 @@ fn print_version()
     println!("sa-mod-manager {}", env!("CARGO_PKG_VERSION"));
 }
 
-fn set_all_profile_mods_from_cli(
+fn set_all_profile_mods_from_cli_arguments(
     arguments: Vec<String>,
     activation: ProfileModActivation,
 ) -> Result<(), AppError>
@@ -449,11 +449,3 @@ fn parse_game_root_from_arguments(
     }
     return Ok(game_root);
 }
-
-
-
-
-
-
-
-

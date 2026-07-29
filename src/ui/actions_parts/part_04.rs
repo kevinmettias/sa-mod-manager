@@ -1,4 +1,4 @@
-
+﻿
 impl SanAndreasModUi
 {
     pub(super) fn analyze_package(&mut self, ctx: &egui::Context)
@@ -173,7 +173,7 @@ fn materialize_and_launch_profile(
     let journal = materialize_profile_for_run(game_root, profile)?;
     let started_unix = unix_now();
     remember_pending_run(game_root, &journal, None)?;
-    return match launch_game_executable(game_root, &launch_args, &launch_env)
+    return match launch_game_executable_from_arguments(game_root, &launch_args, &launch_env)
     {
         Ok(child) => {
             remember_pending_run(game_root, &journal, Some(child.id()))?;
@@ -187,7 +187,7 @@ fn materialize_and_launch_profile(
             Ok((active, child))
         }
         Err(launch_error) => {
-            // The executable never started: record a launch-failed outcome so
+            // The executable never started: record_log_message_from_arguments a launch-failed outcome so
             // this rolled-back attempt is not later counted as a run.
             record_launch_failed_outcome(LaunchFailedOutcomeContext {
                 game_root,
@@ -258,7 +258,7 @@ fn record_launch_failed_outcome(context: LaunchFailedOutcomeContext<'_>)
     };
     if let Err(err) = write_run_outcome(&state_directory(context.game_root), &outcome)
     {
-        log_warn!("could not record launch-failed outcome: {err}");
+        log_warn!("could not record_log_message_from_arguments launch-failed outcome: {err}");
     }
 }
 
@@ -285,18 +285,18 @@ fn load_pending_run_records(game_root: &Path) -> Result<Vec<PendingRunRecord>, A
         {
             continue;
         }
-        if let Some(record) = read_pending_run_record(&path)?
+        if let Some(record_log_message_from_arguments) = read_pending_run_record(&path)?
         {
-            records.push(record);
+            records.push(record_log_message_from_arguments);
         }
     }
-    records.sort_by(|a, b| a.journal.cmp(&b.journal));
+    records.sort_by(|left, right| left.journal.cmp(&right.journal));
     return Ok(records);
 }
 
 fn read_pending_run_record(path: &Path) -> Result<Option<PendingRunRecord>, AppError>
 {
-    // A pending-run record is a handful of `key=value` lines; cap the read so a
+    // A pending-run record_log_message_from_arguments is a handful of `key=value` lines; cap the read so a
     // corrupt/oversized file can't dictate our memory use.
     let text = read_capped(path, README_ACCEPT_MAX_BYTES)?;
     let mut journal = None;
@@ -334,7 +334,7 @@ fn classify_pending_run_record(
     {
         Ok(()) => {
             let (status, detail) = match pid {
-                Some(pid) if process_is_running(pid) => (
+                Some(pid) if is_child_program_running(pid) => (
                     PendingRunStatus::Running,
                     format!("process {pid} is still running"),
                 ),
@@ -363,12 +363,12 @@ fn classify_pending_run_record(
     };
 }
 
-fn pending_run_matches_current_session(
-    record: &PendingRunRecord,
+fn is_pending_run_match_for_current_session(
+    record_log_message_from_arguments: &PendingRunRecord,
     current_pid: Option<u32>,
 ) -> bool
 {
-    return current_pid.is_some() && record.status == PendingRunStatus::Running && record.pid == current_pid;
+    return current_pid.is_some() && record_log_message_from_arguments.status == PendingRunStatus::Running && record_log_message_from_arguments.pid == current_pid;
 }
 
 fn forget_pending_run(game_root: &Path, journal: &Path) -> Result<(), AppError>
@@ -428,11 +428,11 @@ fn pending_record_path(game_root: &Path, journal: &Path) -> PathBuf
     return pending_runs_directory(game_root).join(format!("{name}.pending"));
 }
 
-fn process_is_running(pid: u32) -> bool
+fn is_child_program_running(pid: u32) -> bool
 {
     // Single source of truth: the same OpenProcess-based liveness check the
     // install lock uses, rather than a second copy that could drift from it.
-    return crate::game_launch::process_is_running(pid);
+    return crate::game_launch::is_child_program_running(pid);
 }
 
 #[cfg(test)]
@@ -440,6 +440,3 @@ mod tests
 {
     include!("part_04_tests_01.rs");
 }
-
-
-

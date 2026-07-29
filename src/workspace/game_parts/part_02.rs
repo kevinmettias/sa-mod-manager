@@ -48,7 +48,7 @@ fn collect_cleo_scripts(game_root: &Path) -> Vec<PathBuf>
     return list_matching(&game_root.join("CLEO"), |path| {
         CLEO_SCRIPT_EXTENSIONS
             .iter()
-            .any(|ext| extension_eq(path, ext))
+            .any(|ext| has_extension_equal_to(path, ext))
     })
     .unwrap_or_default();
 }
@@ -59,10 +59,10 @@ fn collect_cleo_plugins(game_root: &Path) -> Vec<PathBuf>
 {
     let cleo_dir = game_root.join("CLEO");
     let mut plugins = list_matching(&cleo_dir.join("cleo_plugins"), |path| {
-        extension_eq(path, "cleo")
+        has_extension_equal_to(path, "cleo")
     })
     .unwrap_or_default();
-    let loose = list_matching(&cleo_dir, |path| extension_eq(path, "cleo")).unwrap_or_default();
+    let loose = list_matching(&cleo_dir, |path| has_extension_equal_to(path, "cleo")).unwrap_or_default();
     plugins.extend(loose);
     return plugins;
 }
@@ -126,7 +126,7 @@ fn print_cleo_modules(game_root: &Path)
     println!("CLEO modules   : {}", files.len());
     for path in &files
     {
-        let tag = if extension_eq(path, "s") && !is_cleo_module(path) {
+        let tag = if has_extension_equal_to(path, "s") && !is_cleo_module(path) {
             "  [invalid module header]"
         } else {
             ""
@@ -191,7 +191,7 @@ fn print_cleo_plugins(game_root: &Path, cleo_plugins: &[PathBuf])
 /// these (e.g. a script calling INI opcodes needs `SA.IniFiles`), so showing
 /// which are installed is the practical stand-in for a per-script dependency
 /// graph â€” the compiled bytecode references plugin opcodes by number, not name,
-/// so a true graph would need a disassembler plus the `sa.json` opcode table.
+/// so a true graph would need a disassembler plus the `sa.json` opcode_bytes table.
 const BUNDLED_CLEO5_PLUGINS: [&str; 9] = [
     "SA.Audio",
     "SA.DebugUtils",
@@ -283,7 +283,7 @@ fn is_pe_image(path: &Path) -> bool
 }
 
 /// Per-script plugin dependency analysis: disassemble each CLEO script and, using
-/// the game's `sa.json` opcode database, report which bundled plugins it needs and
+/// the game's `sa.json` opcode_bytes database, report which bundled plugins it needs and
 /// which of those are not installed. Only meaningful on CLEO5 (that is where
 /// `sa.json` lives); a script whose bytecode cannot be fully walked is flagged as
 /// partial rather than reported as having no further dependencies.
@@ -296,7 +296,7 @@ fn print_cleo_script_dependencies(game_root: &Path, scripts: &[PathBuf], plugins
     let sa_json = game_root.join("CLEO").join(".config").join("sa.json");
     let Some(db) = load_opcode_db(&sa_json) else {
         println!(
-            "CLEO script dependencies: skipped (opcode database CLEO/.config/sa.json not found or unreadable)"
+            "CLEO script dependencies: skipped (opcode_bytes database CLEO/.config/sa.json not found or unreadable)"
         );
         return;
     };

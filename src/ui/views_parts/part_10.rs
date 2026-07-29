@@ -1,4 +1,4 @@
-
+﻿
 impl SanAndreasModUi
 {
     pub(super) fn telemetry_panel(&mut self, ui: &mut egui::Ui)
@@ -151,7 +151,3 @@ fn filtered_mod_history(rows: &[ModTelemetry], search: &str) -> Vec<ModTelemetry
         .cloned()
         .collect();
 }
-
-
-
-

@@ -1,4 +1,4 @@
-use crate::prelude::*;
+﻿use crate::prelude::*;
 use eframe::egui;
 
 use super::state::{InfrastructureItem, ModConfigItem, UiState};
@@ -35,10 +35,10 @@ pub(super) fn selected_profile_entries(
         return Vec::new();
     }
     let mut entries = profile.mods.clone();
-    entries.sort_by(|a, b| {
-        a.load_order
-            .cmp(&b.load_order)
-            .then_with(|| a.id.cmp(&b.id))
+    entries.sort_by(|left, right| {
+        left.load_order
+            .cmp(&right.load_order)
+            .then_with(|| left.id.cmp(&right.id))
     });
     return entries;
 }

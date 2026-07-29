@@ -25,7 +25,7 @@ mod tests
                 .expect("the test fixture is created before this assertion reads it")
                 .is_none()
         );
-        remove_dir_if_exists(&game_root)
+        remove_directory_if_exists(&game_root)
             .expect("the test fixture is created before this assertion reads it");
     }
 
@@ -44,7 +44,7 @@ mod tests
             .to_string();
 
         assert!(err.contains("already in progress"));
-        remove_dir_if_exists(&game_root)
+        remove_directory_if_exists(&game_root)
             .expect("the test fixture is created before this assertion reads it");
     }
 
@@ -63,7 +63,7 @@ mod tests
 
         assert!(err.contains("interrupted"));
         assert!(err.contains("recover"));
-        remove_dir_if_exists(&game_root)
+        remove_directory_if_exists(&game_root)
             .expect("the test fixture is created before this assertion reads it");
     }
 
@@ -95,7 +95,7 @@ mod tests
             .expect("the test fixture is created before this assertion reads it")
             .expect("the test fixture is created before this assertion reads it");
         assert_eq!(detected.txid, "tx-dead");
-        remove_dir_if_exists(&game_root)
+        remove_directory_if_exists(&game_root)
             .expect("the test fixture is created before this assertion reads it");
     }
 
@@ -104,7 +104,7 @@ mod tests
     // treated as a dead owner instead of wedging recovery.
     #[cfg(windows)]
     #[test]
-    fn acquire_reports_interrupted_when_pid_is_reused_by_another_process()
+    fn acquire_reports_interrupted_when_pid_is_reused_by_another_program()
     {
         let game_root = test_root("lock_pid_reuse");
         let journal = journal_path(&game_root, "tx-reused");
@@ -122,7 +122,7 @@ mod tests
             ),
         )
         .expect("the test fixture is created before this assertion reads it");
-        assert_ne!(crate::game_launch::current_process_start_ticks(), Some(1));
+        assert_ne!(crate::game_launch::current_program_start_ticks(), Some(1));
 
         let detected = interrupted_install(&game_root)
             .expect("the test fixture is created before this assertion reads it");
@@ -138,7 +138,7 @@ mod tests
             .unwrap_err()
             .to_string();
         assert!(err.contains("interrupted"));
-        remove_dir_if_exists(&game_root)
+        remove_directory_if_exists(&game_root)
             .expect("the test fixture is created before this assertion reads it");
     }
 
@@ -169,7 +169,7 @@ mod tests
                 .expect("the test fixture is created before this assertion reads it")
                 .is_none()
         );
-        remove_dir_if_exists(&game_root)
+        remove_directory_if_exists(&game_root)
             .expect("the test fixture is created before this assertion reads it");
     }
 
@@ -192,7 +192,7 @@ mod tests
                 .expect("the test fixture is created before this assertion reads it")
                 .is_some()
         );
-        remove_dir_if_exists(&game_root)
+        remove_directory_if_exists(&game_root)
             .expect("the test fixture is created before this assertion reads it");
     }
 
@@ -214,7 +214,7 @@ mod tests
         };
         assert!(err.contains("corrupt"), "{err}");
         assert!(err.contains("pid"), "{err}");
-        remove_dir_if_exists(&game_root)
+        remove_directory_if_exists(&game_root)
             .expect("the test fixture is created before this assertion reads it");
     }
 
@@ -227,7 +227,7 @@ mod tests
                 .expect("the test fixture is created before this assertion reads it")
                 .is_none()
         );
-        remove_dir_if_exists(&game_root)
+        remove_directory_if_exists(&game_root)
             .expect("the test fixture is created before this assertion reads it");
     }
 
@@ -255,14 +255,14 @@ mod tests
             std::process::id(),
             unix_now()
         ));
-        remove_dir_if_exists(&root)
+        remove_directory_if_exists(&root)
             .expect("the test fixture is created before this assertion reads it");
         fs::create_dir_all(state_directory(&root).join("journals"))
             .expect("the test fixture is created before this assertion reads it");
         return root;
     }
 
-    fn remove_dir_if_exists(path: &Path) -> Result<(), AppError>
+    fn remove_directory_if_exists(path: &Path) -> Result<(), AppError>
     {
         if path.exists()
         {

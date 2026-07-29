@@ -1,4 +1,4 @@
-
+﻿
     #[test]
     fn materialize_writes_modloader_priorities_from_load_order()
     {
@@ -17,8 +17,8 @@
             .join("mod.json");
         fs::create_dir_all(early_source.join("payload")).expect("the test fixture is created before this assertion reads it");
         fs::create_dir_all(late_source.join("payload")).expect("the test fixture is created before this assertion reads it");
-        fs::write(early_source.join("payload").join("a.dff"), "e").expect("the test fixture is created before this assertion reads it");
-        fs::write(late_source.join("payload").join("b.dff"), "l").expect("the test fixture is created before this assertion reads it");
+        fs::write(early_source.join("payload").join("left.dff"), "e").expect("the test fixture is created before this assertion reads it");
+        fs::write(late_source.join("payload").join("right.dff"), "l").expect("the test fixture is created before this assertion reads it");
 
         ensure_state(&game_root).expect("the test fixture is created before this assertion reads it");
         // Each mod is sandboxed in its own modloader/<folder>; on disk they never
@@ -79,7 +79,7 @@
             journal_text.contains("modloader.ini"),
             "ini write should be journaled for rollback"
         );
-        remove_dir_if_exists(&game_root).expect("the test fixture is created before this assertion reads it");
+        remove_directory_if_exists(&game_root).expect("the test fixture is created before this assertion reads it");
     }
 
     #[test]
@@ -100,8 +100,8 @@
             .join("mod.json");
         fs::create_dir_all(on_source.join("payload")).expect("the test fixture is created before this assertion reads it");
         fs::create_dir_all(off_source.join("payload")).expect("the test fixture is created before this assertion reads it");
-        fs::write(on_source.join("payload").join("a.dff"), "on").expect("the test fixture is created before this assertion reads it");
-        fs::write(off_source.join("payload").join("b.dff"), "off").expect("the test fixture is created before this assertion reads it");
+        fs::write(on_source.join("payload").join("left.dff"), "on").expect("the test fixture is created before this assertion reads it");
+        fs::write(off_source.join("payload").join("right.dff"), "off").expect("the test fixture is created before this assertion reads it");
 
         ensure_state(&game_root).expect("the test fixture is created before this assertion reads it");
         write_test_mod_config(
@@ -144,7 +144,7 @@
         );
         // The disabled mod is never copied into the sandbox.
         assert!(!game_root.join("modloader").join("off_mod").exists());
-        remove_dir_if_exists(&game_root).expect("the test fixture is created before this assertion reads it");
+        remove_directory_if_exists(&game_root).expect("the test fixture is created before this assertion reads it");
     }
 
     #[test]
@@ -181,7 +181,7 @@
         // No modloader mods -> no managed profile written, so nothing to activate.
         assert!(!game_root.join("modloader").join("modloader.ini").exists());
         assert_eq!(modloader_run_profile(&game_root, "default"), None);
-        remove_dir_if_exists(&game_root).expect("the test fixture is created before this assertion reads it");
+        remove_directory_if_exists(&game_root).expect("the test fixture is created before this assertion reads it");
     }
 
     struct TestModConfigRoot<'a>
@@ -290,7 +290,7 @@
             std::process::id(),
             unix_now()
         ));
-        remove_dir_if_exists(&root).expect("the test fixture is created before this assertion reads it"); // error-type: allow included only from cfg(test) harness code
+        remove_directory_if_exists(&root).expect("the test fixture is created before this assertion reads it"); // error-type: allow included only from cfg(test) harness code
         fs::create_dir_all(&root).expect("the test fixture is created before this assertion reads it"); // error-type: allow included only from cfg(test) harness code
         // Materialization now requires a real-looking GTA install; give the
         // temp root the executable ensure_gta_install checks for.
@@ -298,7 +298,7 @@
         return root;
     }
 
-    fn remove_dir_if_exists(path: &Path) -> Result<(), AppError>
+    fn remove_directory_if_exists(path: &Path) -> Result<(), AppError>
     {
         if path.exists()
         {
@@ -306,5 +306,3 @@
         }
         return Ok(());
     }
-
-

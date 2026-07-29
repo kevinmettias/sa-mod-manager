@@ -22,7 +22,7 @@ pub(crate) struct Settings
     /// Launch arguments applied to any profile that sets none of its own.
     default_launch_args: Vec<String>,
     /// Launch environment applied under each profile's own env on launch.
-    default_launch_env: BTreeMap<String, String>,
+    default_launch_environment: BTreeMap<String, String>,
     /// Console log level when no `-v`/`-q` flag is given.
     log_level: crate::logging::Level,
     /// Profile used when no active profile has been selected yet.
@@ -202,9 +202,9 @@ pub(crate) fn default_launch_args() -> &'static [String]
 }
 
 /// Launch environment applied as a base under each profile's own launch env.
-pub(crate) fn default_launch_env() -> &'static BTreeMap<String, String>
+pub(crate) fn default_launch_environment() -> &'static BTreeMap<String, String>
 {
-    return &settings().default_launch_env;
+    return &settings().default_launch_environment;
 }
 
 /// The configured console log level, used when no `-v`/`-q` flag is present.
@@ -246,16 +246,16 @@ pub(crate) fn config_file_path() -> Option<PathBuf>
     {
         return Some(cli.clone());
     }
-    if let Some(explicit) = env_var_nonempty("SA_MOD_MANAGER_CONFIG")
+    if let Some(explicit) = environment_variable_nonempty("SA_MOD_MANAGER_CONFIG")
     {
         return Some(PathBuf::from(explicit));
     }
-    let base = env_var_nonempty("APPDATA")
+    let base = environment_variable_nonempty("APPDATA")
         .map(PathBuf::from)
-        .or_else(|| env_var_nonempty("XDG_CONFIG_HOME").map(PathBuf::from))
-        .or_else(|| env_var_nonempty("HOME").map(|home| PathBuf::from(home).join(".config")))
+        .or_else(|| environment_variable_nonempty("XDG_CONFIG_HOME").map(PathBuf::from))
+        .or_else(|| environment_variable_nonempty("HOME").map(|home| PathBuf::from(home).join(".config")))
         .or_else(|| {
-            env_var_nonempty("USERPROFILE").map(|home| PathBuf::from(home).join(".config"))
+            environment_variable_nonempty("USERPROFILE").map(|home| PathBuf::from(home).join(".config"))
         })?;
     return Some(base.join("sa-mod-manager").join("config.json"));
 }
@@ -293,7 +293,7 @@ pub(crate) fn write_example_config() -> Result<PathBuf, AppError>
             path: "dinput8.dll".to_string(),
         }],
         default_launch_args: vec!["-nointro".to_string()],
-        default_launch_env: BTreeMap::from([("SA_EXAMPLE".to_string(), "1".to_string())]),
+        default_launch_environment: BTreeMap::from([("SA_EXAMPLE".to_string(), "1".to_string())]),
         log_level: Some("info".to_string()),
         default_profile: Some("default".to_string()),
     };
@@ -322,7 +322,7 @@ fn example_mod_roots() -> Vec<String>
 fn settings() -> &'static Settings
 {
     return SETTINGS.get_or_init(|| {
-        let env = env_overrides();
+        let env = environment_overrides();
         let file = read_config_file();
         // Only an *explicitly* configured (env/config) game root is validated here:
         // a wrong path is worth flagging early, while an auto-detected or fallback
@@ -435,7 +435,7 @@ struct SettingsFile
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     default_launch_args: Vec<String>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    default_launch_env: BTreeMap<String, String>,
+    default_launch_environment: BTreeMap<String, String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     log_level: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -469,10 +469,9 @@ struct ContextRuleFile
     hint: String,
 }
 
-struct EnvOverrides
+struct EnvironmentOverrides
 {
     game_root: Option<PathBuf>,
     mod_roots: Option<Vec<PathBuf>>,
     seven_zip: Option<PathBuf>,
 }
-

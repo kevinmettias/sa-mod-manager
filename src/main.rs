@@ -1,4 +1,4 @@
-mod cli;
+﻿mod cli;
 mod constants;
 mod game_launch;
 mod logging;
@@ -18,7 +18,7 @@ mod prelude
         has_cleo_script_extension,
     };
     pub(crate) use crate::game_launch::{
-        ensure_gta_install, game_executable_path, launch_external_tool, launch_game_executable,
+        ensure_gta_install, game_executable_path, launch_external_tool_from_arguments, launch_game_executable_from_arguments,
     };
     pub(crate) use crate::logging::{log_debug, log_error, log_info, log_warn};
     pub(crate) use crate::model::{
@@ -50,7 +50,7 @@ mod prelude
         sort_operations_for_apply, txid_from_journal, write_run_outcome,
     };
     pub(crate) use crate::reporting::{
-        MAX_CONTROL_FILE_BYTES, escape_value, extension_eq, extract_to_staging, file_name,
+        MAX_CONTROL_FILE_BYTES, escape_value, has_extension_equal_to, extract_to_staging, file_name,
         find_seven_zip, human_bytes, human_datetime, is_readme_name, json_escape, list_matching,
         normalize_path, package_id, print_report, read_capped, safe_name, safe_profile_name,
         state_directory, unescape_value, unix_now,

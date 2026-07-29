@@ -1,4 +1,4 @@
-use crate::prelude::*;
+﻿use crate::prelude::*;
 
 /// Highest profile-format version this manager can read. A profile stamped with
 /// a higher version is rejected rather than silently misinterpreted.
@@ -221,7 +221,7 @@ mod tests
 {
     use super::*;
 
-    struct TempProfile<'a>
+    struct TemporaryProfile<'a>
     {
         name: &'a str,
         contents: &'a str,
@@ -230,7 +230,7 @@ mod tests
     #[test]
     fn rejects_profile_with_future_format_version()
     {
-        let path = temp_profile(TempProfile {
+        let path = temporary_profile(TemporaryProfile {
             name: "future",
             contents: "{\"version\": 99, \"name\": \"future\", \"mods\": []}",
         });
@@ -252,13 +252,13 @@ mod tests
     {
         // An explicit game_root overrides the location-derived one, and a mod
         // entry with no config path resolves under it.
-        let path = temp_profile(TempProfile {
+        let path = temporary_profile(TemporaryProfile {
             name: "portable",
             contents: "{\"name\": \"portable\", \"game_root\": \"Z:/Custom Install\", \"custom_note\": \"keep me\", \"mods\": [{\"id\": \"cleo\"}]}",
         });
         let profile = read_profile_json(&path)
             .expect("the test fixture is created before this assertion reads it");
-        // The mod config resolves under the explicit game root (the `Z:/…` prefix
+        // The mod config resolves under the explicit game root (the `Z:/â€¦` prefix
         // is preserved verbatim in the joined path root).
         assert!(
             profile.mods[0]
@@ -287,7 +287,7 @@ mod tests
         .expect("the test fixture is created before this assertion reads it");
     }
 
-    fn temp_profile(profile: TempProfile<'_>) -> PathBuf
+    fn temporary_profile(profile: TemporaryProfile<'_>) -> PathBuf
     {
         let name = profile.name;
         let contents = profile.contents;

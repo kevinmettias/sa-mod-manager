@@ -117,7 +117,7 @@ pub(crate) fn write_priority_section(write: PrioritySectionWrite<'_>) -> String
             out.push(raw.to_string());
             continue;
         }
-        if in_target && replace_pending_priority_line(trimmed, &mut pending, &mut out)
+        if in_target && has_replaced_pending_priority_line(trimmed, &mut pending, &mut out)
         {
             continue;
         }
@@ -174,7 +174,7 @@ pub(crate) struct PrioritySectionWrite<'a>
     pub(crate) overrides: &'a BTreeMap<String, i32>,
 }
 
-fn replace_pending_priority_line(
+fn has_replaced_pending_priority_line(
     trimmed: &str,
     pending: &mut BTreeMap<String, (String, i32)>,
     out: &mut Vec<String>,
@@ -234,7 +234,7 @@ fn ini_value(query: IniQuery<'_>) -> Option<String>
     for raw in ini.lines()
     {
         let line = raw.split(';').next().unwrap_or("").trim();
-        if let Some(header) = line.strip_prefix('[').and_then(|s| s.strip_suffix(']'))
+        if let Some(header) = line.strip_prefix('[').and_then(|section_text| section_text.strip_suffix(']'))
         {
             in_section = header.trim().eq_ignore_ascii_case(section);
             continue;
@@ -325,5 +325,3 @@ HD_Roads=40
         assert!(out.contains("Mod=60"));
     }
 }
-
-

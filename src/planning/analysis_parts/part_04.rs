@@ -1,5 +1,5 @@
-
-fn mentions_game_root(line: &str) -> bool
+﻿
+fn has_game_root_mention(line: &str) -> bool
 {
     return line.contains("game root")
         || line.contains("root folder")
@@ -33,17 +33,17 @@ fn mentions_game_root(line: &str) -> bool
         || line.contains("papka igry");
 }
 
-struct GameDataFolderMention<'a>
+struct GameAssetFolderMention<'a>
 {
     line: &'a str,
     folder: &'a str,
 }
 
-fn mentions_game_data_folder(mention: GameDataFolderMention<'_>) -> bool
+fn has_game_asset_folder_mention(mention: GameAssetFolderMention<'_>) -> bool
 {
     let line = mention.line;
     let folder = mention.folder;
-    return line_contains_token(LineNeedle { line: line, needle: folder })
+    return has_line_token(LineNeedle { line: line, needle: folder })
         && (line.contains("folder") || line.contains("directory") || line.contains("copy"));
 }
 
@@ -53,11 +53,11 @@ struct LineNeedle<'a>
     needle: &'a str,
 }
 
-fn line_contains_path(line_path: LinePath<'_>) -> bool
+fn has_line_path(line_path: LinePath<'_>) -> bool
 {
     let line = line_path.line;
     let path = line_path.path;
-    if line_contains_token(LineNeedle { line: line, needle: path })
+    if has_line_token(LineNeedle { line: line, needle: path })
     {
         return true;
     }
@@ -186,7 +186,7 @@ fn validate_wrap_install_root(
             ".wrap manifest {manifest_path} install_roots[{idx}].target is invalid: {err}"
         ))
     })?;
-    if !wrap_source_exists(report, &source)
+    if !has_wrap_source(report, &source)
     {
         return Err(AppError::Usage(format!(
             ".wrap manifest {manifest_path} install_roots[{idx}].source does not exist in package: {source}"
@@ -216,7 +216,7 @@ fn validate_wrap_relative_path(path_field: WrapRelativePathField<'_>) -> Result<
         )));
     }
     let path = Path::new(value);
-    if path.is_absolute() || value.starts_with('/') || contains_parent_segment(value)
+    if path.is_absolute() || value.starts_with('/') || has_parent_segment(value)
     {
         return Err(AppError::Usage(format!(
             ".wrap manifest {manifest_path} install_roots[{idx}].{field} must be a relative package path: {value}"
@@ -225,7 +225,7 @@ fn validate_wrap_relative_path(path_field: WrapRelativePathField<'_>) -> Result<
     return Ok(());
 }
 
-fn contains_parent_segment(value: &str) -> bool
+fn has_parent_segment(value: &str) -> bool
 {
     return value.split('/').any(|part| part == "..");
 }
@@ -263,7 +263,7 @@ fn validate_wrap_kind(manifest_path: &str, idx: usize, kind: &str) -> Result<(),
     };
 }
 
-fn wrap_source_exists(report: &PackageReport, source: &str) -> bool
+fn has_wrap_source(report: &PackageReport, source: &str) -> bool
 {
     if source == "."
     {
@@ -296,13 +296,13 @@ struct WrapInstallRootFile
     kind: String,
     #[serde(default)]
     optional: bool,
-    #[serde(default = "default_manifest_enabled")]
+    #[serde(default = "is_default_manifest_enabled")]
     enabled: bool,
     #[serde(default)]
     notes: Vec<String>,
 }
 
-fn default_manifest_enabled() -> bool
+fn is_default_manifest_enabled() -> bool
 {
     return true;
 }
@@ -346,7 +346,7 @@ fn classify_entries(report: &mut PackageReport)
     }
 
     report.readmes = state.readmes;
-    report.components = state.components;
+    report.component_paths = state.component_paths;
     report.context_hints = state.context_hints;
     report.risks = state.risks;
     report.install_candidates = roots.into_values().collect();
@@ -369,7 +369,7 @@ fn classify_package_entry(
         state.readmes.push(readme_path);
     }
 
-    classify_component(&lower, &mut state.components);
+    classify_component(&lower, &mut state.component_paths);
     classify_context(&lower, &mut state.context_hints);
     classify_risk(&lower, &mut state.risks);
     classify_install_candidate(entry, &path, roots, state);
@@ -408,15 +408,15 @@ fn merge_install_candidate(
         .and_modify(|existing| {
             existing.file_count += candidate.file_count;
             existing.total_bytes += candidate.total_bytes;
-            let components = candidate.components.clone();
-            existing.components.extend(components);
+            let component_paths = candidate.component_paths.clone();
+            existing.component_paths.extend(component_paths);
             let notes = candidate.notes.clone();
             existing.notes.extend(notes);
         })
         .or_insert(candidate);
 }
 
-fn line_contains_token(needle: LineNeedle<'_>) -> bool
+fn has_line_token(needle: LineNeedle<'_>) -> bool
 {
     let line = needle.line;
     let token = needle.needle;
@@ -480,6 +480,3 @@ mod tests
     include!("part_04_tests_01.rs");
     include!("part_04_tests_02.rs");
 }
-
-
-

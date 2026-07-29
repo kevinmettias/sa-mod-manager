@@ -1,4 +1,4 @@
-
+﻿
 impl SanAndreasModUi
 {
     pub(super) fn mods_panel(&mut self, ui: &mut egui::Ui)
@@ -110,7 +110,7 @@ impl SanAndreasModUi
         {
             // Keep the in-progress edit on failure so a rejected source/target can
             // be corrected instead of silently reverting.
-            if self.save_mod_install_root(&item.path, root_index, updated)
+            if self.should_save_mod_install_root(&item.path, root_index, updated)
             {
                 self.mod_root_edits.remove(&key);
             }
@@ -123,7 +123,7 @@ fn mod_root_edit_key(path: &Path, root_index: usize) -> String
     return format!("{}#{root_index}", path.display());
 }
 
-/// The preset color-label palette for mod annotations (name → swatch), mirroring
+/// The preset color-label palette for mod annotations (name â†’ swatch), mirroring
 /// MO2's color labels. Names are what get persisted.
 const MOD_COLORS: [(&str, egui::Color32); 7] = [
     ("red", egui::Color32::from_rgb(210, 80, 80)),
@@ -163,7 +163,7 @@ fn meta_color(name: &str) -> Option<egui::Color32>
 
 /// An action a separator header row can request.
 #[derive(Clone, Copy)]
-enum SepAction
+enum SeparatorAction
 {
     ToggleCollapse,
     StartEdit,
@@ -174,7 +174,7 @@ enum SepAction
 }
 
 /// Render one separator (group divider) row: collapse toggle, name or rename
-/// field, and move/remove controls. Returns the action the user requested.
+/// field, and move/remove_profile_fixture controls. Returns the action the user requested.
 struct SeparatorHeaderState<'a>
 {
     collapsed: bool,
@@ -252,16 +252,16 @@ fn separator_header(
     ui: &mut egui::Ui,
     separator: &Separator,
     state: SeparatorHeaderState<'_>,
-) -> Option<SepAction>
+) -> Option<SeparatorAction>
 {
     let mut action = None;
     ui.horizontal(|ui| {
         if ui
-            .small_button(if state.collapsed { "▶" } else { "▼" })
+            .small_button(if state.collapsed { "â–¶" } else { "â–¼" })
             .on_hover_text("Collapse or expand this section")
             .clicked()
         {
-            action = Some(SepAction::ToggleCollapse);
+            action = Some(SeparatorAction::ToggleCollapse);
         }
         if state.editing
         {
@@ -269,40 +269,40 @@ fn separator_header(
                 ui.add(egui::TextEdit::singleline(state.buf).desired_width(SEPARATOR_EDIT_WIDTH));
             let committed_with_enter =
                 response.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
-            let save_clicked = ui.small_button("✔").on_hover_text("Save name").clicked();
+            let save_clicked = ui.small_button("âœ”").on_hover_text("Save name").clicked();
             if save_clicked || committed_with_enter
             {
-                action = Some(SepAction::Commit);
+                action = Some(SeparatorAction::Commit);
             }
         }
         else
         {
-            ui.strong(format!("═══  {}  ═══", separator.name));
-            if ui.small_button("✎").on_hover_text("Rename").clicked()
+            ui.strong(format!("â•â•â•  {}  â•â•â•", separator.name));
+            if ui.small_button("âœŽ").on_hover_text("Rename").clicked()
             {
-                action = Some(SepAction::StartEdit);
+                action = Some(SeparatorAction::StartEdit);
             }
         }
         if ui
-            .small_button("▲")
+            .small_button("â–²")
             .on_hover_text("Move divider up")
             .clicked()
         {
-            action = Some(SepAction::MoveUp);
+            action = Some(SeparatorAction::MoveUp);
         }
         if ui
-            .small_button("▼")
+            .small_button("â–¼")
             .on_hover_text("Move divider down")
             .clicked()
         {
-            action = Some(SepAction::MoveDown);
+            action = Some(SeparatorAction::MoveDown);
         }
         if ui
-            .small_button("✕")
+            .small_button("âœ•")
             .on_hover_text("Remove divider")
             .clicked()
         {
-            action = Some(SepAction::Remove);
+            action = Some(SeparatorAction::Remove);
         }
     });
     return action;
@@ -422,7 +422,3 @@ impl SanAndreasModUi
         });
     }
 }
-
-
-
-

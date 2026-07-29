@@ -1,4 +1,4 @@
-use crate::prelude::*;
+﻿use crate::prelude::*;
 
 pub(crate) fn write_package_manifest(
     report: &PackageReport,
@@ -53,7 +53,7 @@ fn write_manifest_lists(
     plan: &InstallPlan,
 ) -> Result<(), AppError>
 {
-    for component in &report.components
+    for component in &report.component_paths
     {
         writeln!(
             manifest,

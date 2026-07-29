@@ -1,4 +1,4 @@
-mod command_options;
+﻿mod command_options;
 mod json;
 mod mod_activation;
 mod mod_entry;

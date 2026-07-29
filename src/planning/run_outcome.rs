@@ -1,10 +1,10 @@
-use crate::prelude::*;
+﻿use crate::prelude::*;
 
-/// Persistent record of a single profile run's launch outcome.
+/// Persistent record_log_message_from_arguments of a single profile run's launch outcome.
 ///
 /// A run journal records *what was materialized*, but not whether the game
-/// actually started, how it exited, or how long it ran — so a launch that never
-/// started and a successful play session look identical on disk. This record,
+/// actually started, how it exited, or how long it ran â€” so a launch that never
+/// started and a successful play session look identical on disk. This record_log_message_from_arguments,
 /// written beside the journals under `outcomes/<txid>.json`, carries that
 /// missing dimension so telemetry can tell runs from failed launches and show
 /// exit status and duration. Serialized with `serde_json`, like the other
@@ -36,7 +36,7 @@ pub(crate) const RUN_RESULT_GAME_ERROR: &str = "game_error";
 pub(crate) const RUN_RESULT_LAUNCH_FAILED: &str = "launch_failed";
 
 /// The transaction id embedded in a run journal's file name (its stem), used to
-/// pair a journal with its outcome record.
+/// pair a journal with its outcome record_log_message_from_arguments.
 pub(crate) fn txid_from_journal(journal: &Path) -> String
 {
     return journal
@@ -61,7 +61,7 @@ pub(crate) fn write_run_outcome(state_root: &Path, outcome: &RunOutcome) -> Resu
 }
 
 /// Read the outcome paired with a run journal, if one was recorded. A missing or
-/// unreadable record yields `None` so telemetry degrades gracefully rather than
+/// unreadable record_log_message_from_arguments yields `None` so telemetry degrades gracefully rather than
 /// failing to load.
 pub(crate) fn read_run_outcome_for_journal(
     state_root: &Path,

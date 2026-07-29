@@ -1,4 +1,4 @@
-const SECONDS_PER_MINUTE: u64 = 60;
+﻿const SECONDS_PER_MINUTE: u64 = 60;
 const SECONDS_PER_HOUR: u64 = 3600;
 const SECONDS_PER_DAY: u64 = 86_400;
 const CIVIL_EPOCH_OFFSET_DAYS: i64 = 719_468;
@@ -46,7 +46,7 @@ pub(crate) fn human_datetime(unix_secs: u64) -> String
 {
     if unix_secs == 0
     {
-        return "—".to_string();
+        return "â€”".to_string();
     }
     let days = (unix_secs / SECONDS_PER_DAY) as i64;
     let seconds_of_day = unix_secs % SECONDS_PER_DAY;
@@ -128,7 +128,7 @@ mod tests
     #[test]
     fn human_datetime_formats_known_timestamps()
     {
-        assert_eq!(human_datetime(0), "—");
+        assert_eq!(human_datetime(0), "â€”");
         assert_eq!(human_datetime(ONE_DAY_UNIX), "1970-01-02 00:00:00 UTC");
         assert_eq!(
             human_datetime(BILLION_SECONDS_UNIX),
