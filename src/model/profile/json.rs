@@ -1,7 +1,8 @@
 use crate::prelude::*;
 
 #[derive(Clone, Default, Debug)]
-pub(crate) struct Json {
+pub(crate) struct Json
+{
     pub(crate) name: String,
     pub(crate) mods: Vec<ProfileModEntry>,
     /// Extra command-line arguments passed to the game executable on launch.

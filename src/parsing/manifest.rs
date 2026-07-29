@@ -3,7 +3,8 @@ use crate::prelude::*;
 pub(crate) fn write_package_manifest(
     report: &PackageReport,
     plan: &InstallPlan,
-) -> Result<(), AppError> {
+) -> Result<(), AppError>
+{
     ensure_state(&plan.game_root)?;
     let root = state_directory(&plan.game_root);
     let manifest_path = root
@@ -13,23 +14,25 @@ pub(crate) fn write_package_manifest(
     write_manifest_file(&manifest_path, report, plan)?;
     write_plan_file(&plan_path, plan)?;
 
-    Ok(())
+    return Ok(());
 }
 
-fn package_plan_path(root: &Path, plan: &InstallPlan) -> PathBuf {
-    root.join("plans").join(format!(
+fn package_plan_path(root: &Path, plan: &InstallPlan) -> PathBuf
+{
+    return root.join("plans").join(format!(
         "{}-{}-{}.plan",
         safe_name(&plan.profile),
         plan.package_id,
         unix_now()
-    ))
+    ));
 }
 
 fn write_manifest_file(
     manifest_path: &Path,
     report: &PackageReport,
     plan: &InstallPlan,
-) -> Result<(), AppError> {
+) -> Result<(), AppError>
+{
     let mut manifest = fs::File::create(manifest_path)?;
     writeln!(manifest, "version=1")?;
     writeln!(manifest, "id={}", escape_value(&plan.package_id))?;
@@ -41,25 +44,29 @@ fn write_manifest_file(
     writeln!(manifest, "kind={}", report.kind)?;
     writeln!(manifest, "entries={}", report.entries.len())?;
     write_manifest_lists(&mut manifest, report, plan)?;
-    Ok(())
+    return Ok(());
 }
 
 fn write_manifest_lists(
     manifest: &mut fs::File,
     report: &PackageReport,
     plan: &InstallPlan,
-) -> Result<(), AppError> {
-    for component in &report.components {
+) -> Result<(), AppError>
+{
+    for component in &report.components
+    {
         writeln!(
             manifest,
             "component={}",
             escape_value(&component.to_string())
         )?;
     }
-    for readme in &report.readmes {
+    for readme in &report.readmes
+    {
         writeln!(manifest, "readme={}", escape_value(readme))?;
     }
-    for document in &report.readme_documents {
+    for document in &report.readme_documents
+    {
         writeln!(
             manifest,
             "readme_text={}|{}",
@@ -67,7 +74,8 @@ fn write_manifest_lists(
             escape_value(&document.text)
         )?;
     }
-    for instruction in &report.readme_instructions {
+    for instruction in &report.readme_instructions
+    {
         writeln!(
             manifest,
             "readme_instruction={}|{}|{}|{}|{}|{}|{}",
@@ -80,7 +88,8 @@ fn write_manifest_lists(
             escape_value(&instruction.text)
         )?;
     }
-    for root in &report.manifest_roots {
+    for root in &report.manifest_roots
+    {
         writeln!(
             manifest,
             "manifest_root={}|{}|{}|{}|{}",
@@ -91,16 +100,19 @@ fn write_manifest_lists(
             root.enabled
         )?;
     }
-    for option in &report.option_groups {
+    for option in &report.option_groups
+    {
         writeln!(manifest, "option={}", escape_value(option))?;
     }
-    for warning in &plan.warnings {
+    for warning in &plan.warnings
+    {
         writeln!(manifest, "warning={}", escape_value(warning))?;
     }
-    Ok(())
+    return Ok(());
 }
 
-fn write_plan_file(plan_path: &Path, plan: &InstallPlan) -> Result<(), AppError> {
+fn write_plan_file(plan_path: &Path, plan: &InstallPlan) -> Result<(), AppError>
+{
     let mut plan_file = fs::File::create(plan_path)?;
     writeln!(plan_file, "version=1")?;
     writeln!(plan_file, "package_id={}", escape_value(&plan.package_id))?;
@@ -112,11 +124,13 @@ fn write_plan_file(plan_path: &Path, plan: &InstallPlan) -> Result<(), AppError>
     writeln!(plan_file, "profile={}", escape_value(&plan.profile))?;
     writeln!(plan_file, "created_unix={}", unix_now())?;
     write_plan_lists(&mut plan_file, plan)?;
-    Ok(())
+    return Ok(());
 }
 
-fn write_plan_lists(plan_file: &mut fs::File, plan: &InstallPlan) -> Result<(), AppError> {
-    for operation in &plan.operations {
+fn write_plan_lists(plan_file: &mut fs::File, plan: &InstallPlan) -> Result<(), AppError>
+{
+    for operation in &plan.operations
+    {
         writeln!(
             plan_file,
             "op={}|{}|{}|{}|{}",
@@ -127,8 +141,9 @@ fn write_plan_lists(plan_file: &mut fs::File, plan: &InstallPlan) -> Result<(), 
             operation.total_bytes
         )?;
     }
-    for option in &plan.skipped_options {
+    for option in &plan.skipped_options
+    {
         writeln!(plan_file, "skipped_option={}", escape_value(option))?;
     }
-    Ok(())
+    return Ok(());
 }

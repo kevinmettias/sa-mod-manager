@@ -7,7 +7,8 @@ use crate::prelude::*;
 /// target is not stored here (it always exists in the UI).
 #[derive(Serialize, Deserialize, Clone, Default)]
 #[serde(default)]
-pub(crate) struct Executable {
+pub(crate) struct Executable
+{
     pub(crate) name: String,
     /// Absolute path to the executable, kept as a string for direct UI editing.
     pub(crate) path: String,
@@ -15,41 +16,42 @@ pub(crate) struct Executable {
     pub(crate) args: String,
 }
 
-impl Executable {
+impl Executable
+{
     /// The arguments as a launch-ready vector (whitespace-split). Quoting is not
     /// interpreted — adequate for the simple flags SA tools take.
-    pub(crate) fn arg_list(&self) -> Vec<String> {
-        self.args.split_whitespace().map(str::to_string).collect()
+    pub(crate) fn arg_list(&self) -> Vec<String>
+    {
+        return self.args.split_whitespace().map(str::to_string).collect();
     }
 }
 
 #[derive(Serialize, Deserialize, Default)]
 #[serde(default)]
-struct ExecutablesFile {
+struct ExecutablesFile
+{
     version: u32,
     executables: Vec<Executable>,
 }
 
-fn executables_path(state_root: &Path) -> PathBuf {
-    state_root.join("executables.json")
-}
-
 /// Read the configured run targets, or an empty list when none are saved or the
 /// file is unreadable — a missing tool list must never break the Play tab.
-pub(crate) fn read_executables(state_root: &Path) -> Vec<Executable> {
+pub(crate) fn read_executables(state_root: &Path) -> Vec<Executable>
+{
     let Ok(text) = read_capped(&executables_path(state_root), MAX_CONTROL_FILE_BYTES) else {
         return Vec::new();
     };
-    serde_json::from_str::<ExecutablesFile>(&text)
+    return serde_json::from_str::<ExecutablesFile>(&text)
         .map(|file| file.executables)
-        .unwrap_or_default()
+        .unwrap_or_default();
 }
 
 /// Persist the run targets under the manager state directory.
 pub(crate) fn write_executables(
     state_root: &Path,
     executables: &[Executable],
-) -> Result<(), AppError> {
+) -> Result<(), AppError>
+{
     fs::create_dir_all(state_root)
         .with_context(|| format!("create state directory {}", state_root.display()))?;
     let file = ExecutablesFile {
@@ -61,28 +63,22 @@ pub(crate) fn write_executables(
     text.push('\n');
     let path = executables_path(state_root);
     fs::write(&path, text).with_context(|| format!("write executables {}", path.display()))?;
-    Ok(())
+    return Ok(());
+}
+
+fn executables_path(state_root: &Path) -> PathBuf
+{
+    return state_root.join("executables.json");
 }
 
 #[cfg(test)]
-mod tests {
+mod tests
+{
     use super::*;
 
-    fn state_root(name: &str) -> PathBuf {
-        let root = env::temp_dir().join(format!(
-            "sa-mod-manager-exe-{name}-{}-{}",
-            std::process::id(),
-            unix_now()
-        ));
-        if root.exists() {
-            fs::remove_dir_all(&root).unwrap();
-        }
-        fs::create_dir_all(&root).unwrap();
-        root
-    }
-
     #[test]
-    fn executables_round_trip_through_disk() {
+    fn executables_round_trip_through_disk()
+    {
         let root = state_root("round_trip");
         let executables = vec![
             Executable {
@@ -96,20 +92,41 @@ mod tests {
                 args: String::new(),
             },
         ];
-        write_executables(&root, &executables).unwrap();
+        write_executables(&root, &executables)
+            .expect("the test fixture is created before this assertion reads it");
         let read = read_executables(&root);
 
         assert_eq!(read.len(), 2); // literal: allow test fixture value is the specimen under judgment
         assert_eq!(read[0].name, "Map editor");
         assert_eq!(read[0].arg_list(), vec!["--fast", "-x"]);
         assert!(read[1].arg_list().is_empty());
-        fs::remove_dir_all(&root).unwrap();
+        fs::remove_dir_all(&root)
+            .expect("the test fixture is created before this assertion reads it");
     }
 
     #[test]
-    fn missing_file_reads_as_empty() {
+    fn missing_file_reads_as_empty()
+    {
         let root = state_root("missing");
         assert!(read_executables(&root).is_empty());
-        fs::remove_dir_all(&root).unwrap();
+        fs::remove_dir_all(&root)
+            .expect("the test fixture is created before this assertion reads it");
+    }
+
+    fn state_root(name: &str) -> PathBuf
+    {
+        let root = env::temp_dir().join(format!(
+            "sa-mod-manager-exe-{name}-{}-{}",
+            std::process::id(),
+            unix_now()
+        ));
+        if root.exists()
+        {
+            fs::remove_dir_all(&root)
+                .expect("the test fixture is created before this assertion reads it");
+        }
+        fs::create_dir_all(&root)
+            .expect("the test fixture is created before this assertion reads it");
+        return root;
     }
 }

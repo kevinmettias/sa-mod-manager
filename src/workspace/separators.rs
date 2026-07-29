@@ -7,7 +7,8 @@ use crate::prelude::*;
 /// per profile under `.sa-mod-manager/separators/<profile>.json`.
 #[derive(Serialize, Deserialize, Clone, Default)]
 #[serde(default)]
-pub(crate) struct Separator {
+pub(crate) struct Separator
+{
     pub(crate) id: String,
     pub(crate) name: String,
     pub(crate) position: usize,
@@ -15,20 +16,16 @@ pub(crate) struct Separator {
 
 #[derive(Serialize, Deserialize, Default)]
 #[serde(default)]
-struct SeparatorsFile {
+struct SeparatorsFile
+{
     version: u32,
     separators: Vec<Separator>,
 }
 
-fn separators_path(state_root: &Path, profile: &str) -> PathBuf {
-    state_root
-        .join("separators")
-        .join(format!("{}.json", safe_name(profile)))
-}
-
 /// Read a profile's separators (sorted by position), or an empty list when none
 /// are saved / the file is unreadable — separators are optional cosmetics.
-pub(crate) fn read_separators(state_root: &Path, profile: &str) -> Vec<Separator> {
+pub(crate) fn read_separators(state_root: &Path, profile: &str) -> Vec<Separator>
+{
     let path = separators_path(state_root, profile);
     let Ok(text) = read_capped(&path, MAX_CONTROL_FILE_BYTES) else {
         return Vec::new();
@@ -37,7 +34,7 @@ pub(crate) fn read_separators(state_root: &Path, profile: &str) -> Vec<Separator
         .map(|file| file.separators)
         .unwrap_or_default();
     separators.sort_by_key(|separator| separator.position);
-    separators
+    return separators;
 }
 
 /// Persist a profile's separators.
@@ -45,9 +42,11 @@ pub(crate) fn write_separators(
     state_root: &Path,
     profile: &str,
     separators: &[Separator],
-) -> Result<(), AppError> {
+) -> Result<(), AppError>
+{
     let path = separators_path(state_root, profile);
-    if let Some(parent) = path.parent() {
+    if let Some(parent) = path.parent()
+    {
         fs::create_dir_all(parent)
             .with_context(|| format!("create separators directory {}", parent.display()))?;
     }
@@ -59,28 +58,24 @@ pub(crate) fn write_separators(
         .map_err(|err| AppError::Usage(format!("serialize separators: {err}")))?;
     text.push('\n');
     fs::write(&path, text).with_context(|| format!("write separators {}", path.display()))?;
-    Ok(())
+    return Ok(());
+}
+
+fn separators_path(state_root: &Path, profile: &str) -> PathBuf
+{
+    return state_root
+        .join("separators")
+        .join(format!("{}.json", safe_name(profile)));
 }
 
 #[cfg(test)]
-mod tests {
+mod tests
+{
     use super::*;
 
-    fn state_root(name: &str) -> PathBuf {
-        let root = env::temp_dir().join(format!(
-            "sa-mod-manager-sep-{name}-{}-{}",
-            std::process::id(),
-            unix_now()
-        ));
-        if root.exists() {
-            fs::remove_dir_all(&root).unwrap();
-        }
-        fs::create_dir_all(&root).unwrap();
-        root
-    }
-
     #[test]
-    fn separators_round_trip_sorted_by_position() {
+    fn separators_round_trip_sorted_by_position()
+    {
         let root = state_root("round_trip");
         let separators = vec![
             Separator {
@@ -94,20 +89,41 @@ mod tests {
                 position: 0,
             },
         ];
-        write_separators(&root, "default", &separators).unwrap();
+        write_separators(&root, "default", &separators)
+            .expect("the test fixture is created before this assertion reads it");
         let read = read_separators(&root, "default");
 
         // Read back sorted by position.
         let names: Vec<&str> = read.iter().map(|sep| sep.name.as_str()).collect();
         assert_eq!(names, vec!["Graphics", "Vehicles"]);
         assert_eq!(read[0].position, 0);
-        fs::remove_dir_all(&root).unwrap();
+        fs::remove_dir_all(&root)
+            .expect("the test fixture is created before this assertion reads it");
     }
 
     #[test]
-    fn missing_file_reads_as_empty() {
+    fn missing_file_reads_as_empty()
+    {
         let root = state_root("missing");
         assert!(read_separators(&root, "default").is_empty());
-        fs::remove_dir_all(&root).unwrap();
+        fs::remove_dir_all(&root)
+            .expect("the test fixture is created before this assertion reads it");
+    }
+
+    fn state_root(name: &str) -> PathBuf
+    {
+        let root = env::temp_dir().join(format!(
+            "sa-mod-manager-sep-{name}-{}-{}",
+            std::process::id(),
+            unix_now()
+        ));
+        if root.exists()
+        {
+            fs::remove_dir_all(&root)
+                .expect("the test fixture is created before this assertion reads it");
+        }
+        fs::create_dir_all(&root)
+            .expect("the test fixture is created before this assertion reads it");
+        return root;
     }
 }

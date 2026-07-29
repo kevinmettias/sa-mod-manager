@@ -5,13 +5,15 @@ const MAX_README_EXCERPT_LINES: usize = 6;
 const MAX_README_INSTRUCTIONS_PRINTED: usize = 20;
 const MAX_STRING_VALUES_PRINTED: usize = 40;
 
-pub(crate) fn print_report(report: &PackageReport) {
+pub(crate) fn print_report(report: &PackageReport)
+{
     print_report_header(report);
     print_report_sections(report);
     print_report_candidates(report);
 }
 
-fn print_report_header(report: &PackageReport) {
+fn print_report_header(report: &PackageReport)
+{
     println!("package : {}", report.package.display());
     println!("kind    : {}", report.kind);
     println!("game    : {}", report.game_root.display());
@@ -19,7 +21,8 @@ fn print_report_header(report: &PackageReport) {
     println!();
 }
 
-fn print_report_sections(report: &PackageReport) {
+fn print_report_sections(report: &PackageReport)
+{
     let components = report.components.iter();
     print_set("components", components);
     print_vec("readmes", &report.readmes);
@@ -33,18 +36,66 @@ fn print_report_sections(report: &PackageReport) {
     print_set("risks", risks);
 }
 
-fn print_readme_documents(documents: &[ReadmeDocument]) {
+fn print_set<'a, T, I>(label: &str, values: I)
+where
+    T: fmt::Display + 'a,
+    I: Iterator<Item = &'a T>,
+{
+    let values: Vec<String> = values.map(ToString::to_string).collect();
+    println!("{label}:");
+    if values.is_empty()
+    {
+        println!("  none");
+    }
+    else
+    {
+        for value in values
+        {
+            println!("  {value}");
+        }
+    }
+    println!();
+}
+
+fn print_vec(label: &str, values: &[String])
+{
+    println!("{label}:");
+    if values.is_empty()
+    {
+        println!("  none");
+    }
+    else
+    {
+        for value in values.iter().take(MAX_STRING_VALUES_PRINTED)
+        {
+            // literal: allow external format or runtime boundary value means itself here
+            println!("  {value}");
+        }
+        if values.len() > MAX_STRING_VALUES_PRINTED
+        {
+            // literal: allow external format or runtime boundary value means itself here
+            println!("  ... {} more", values.len() - MAX_STRING_VALUES_PRINTED); // literal: allow external format or runtime boundary value means itself here
+        }
+    }
+    println!();
+}
+
+fn print_readme_documents(documents: &[ReadmeDocument])
+{
     println!("readme excerpts:");
-    if documents.is_empty() {
+    if documents.is_empty()
+    {
         println!("  none");
         println!();
         return;
     }
-    for document in documents.iter().take(MAX_README_DOCUMENTS_PRINTED) {
+    for document in documents.iter().take(MAX_README_DOCUMENTS_PRINTED)
+    {
         // literal: allow external format or runtime boundary value means itself here
         print_readme_document_excerpt(document);
     }
-    if documents.len() > MAX_README_DOCUMENTS_PRINTED {
+    if documents.len() > MAX_README_DOCUMENTS_PRINTED
+    {
         // literal: allow external format or runtime boundary value means itself here
         println!(
             "  ... {} more",
@@ -54,23 +105,31 @@ fn print_readme_documents(documents: &[ReadmeDocument]) {
     println!();
 }
 
-fn print_readme_document_excerpt(document: &ReadmeDocument) {
+fn print_readme_document_excerpt(document: &ReadmeDocument)
+{
     println!("  {}", document.path);
-    for line in document.text.lines().take(MAX_README_EXCERPT_LINES) {
+    for line in document.text.lines().take(MAX_README_EXCERPT_LINES)
+    {
         // literal: allow external format or runtime boundary value means itself here
         let trimmed = line.trim();
-        if !trimmed.is_empty() {
+        if !trimmed.is_empty()
+        {
             println!("    {trimmed}");
         }
     }
 }
 
-fn print_readme_instructions(instructions: &[ReadmeInstruction]) {
+fn print_readme_instructions(instructions: &[ReadmeInstruction])
+{
     println!("readme instructions:");
-    if instructions.is_empty() {
+    if instructions.is_empty()
+    {
         println!("  none");
-    } else {
-        for instruction in instructions.iter().take(MAX_README_INSTRUCTIONS_PRINTED) {
+    }
+    else
+    {
+        for instruction in instructions.iter().take(MAX_README_INSTRUCTIONS_PRINTED)
+        {
             // literal: allow external format or runtime boundary value means itself here
             println!(
                 "  {} {:.0}% {}:{}",
@@ -79,19 +138,23 @@ fn print_readme_instructions(instructions: &[ReadmeInstruction]) {
                 instruction.source_readme,
                 instruction.line_number
             );
-            if let Some(source) = &instruction.source {
+            if let Some(source) = &instruction.source
+            {
                 println!("    source: {source}");
             }
-            if let Some(target) = &instruction.target {
+            if let Some(target) = &instruction.target
+            {
                 println!("    target: {target}");
             }
             println!("    evidence: {}", instruction.text);
             println!("    normalized: {}", instruction.normalized_text);
-            if !instruction.confidence_reasons.is_empty() {
+            if !instruction.confidence_reasons.is_empty()
+            {
                 println!("    reasons: {}", instruction.confidence_reasons.join("; "));
             }
         }
-        if instructions.len() > MAX_README_INSTRUCTIONS_PRINTED {
+        if instructions.len() > MAX_README_INSTRUCTIONS_PRINTED
+        {
             // literal: allow external format or runtime boundary value means itself here
             println!(
                 "  ... {} more",
@@ -102,17 +165,23 @@ fn print_readme_instructions(instructions: &[ReadmeInstruction]) {
     println!();
 }
 
-fn print_manifest_roots(roots: &[ManifestInstallRoot]) {
+fn print_manifest_roots(roots: &[ManifestInstallRoot])
+{
     println!("manifest install roots:");
-    if roots.is_empty() {
+    if roots.is_empty()
+    {
         println!("  none");
-    } else {
-        for root in roots {
+    }
+    else
+    {
+        for root in roots
+        {
             println!(
                 "  {} -> {} ({}, optional: {}, enabled: {})",
                 root.source, root.target, root.kind, root.optional, root.enabled
             );
-            for note in &root.notes {
+            for note in &root.notes
+            {
                 println!("    note: {note}");
             }
         }
@@ -120,51 +189,21 @@ fn print_manifest_roots(roots: &[ManifestInstallRoot]) {
     println!();
 }
 
-fn print_set<'a, T, I>(label: &str, values: I)
-where
-    T: fmt::Display + 'a,
-    I: Iterator<Item = &'a T>,
+fn print_report_candidates(report: &PackageReport)
 {
-    let values: Vec<String> = values.map(ToString::to_string).collect();
-    println!("{label}:");
-    if values.is_empty() {
-        println!("  none");
-    } else {
-        for value in values {
-            println!("  {value}");
-        }
-    }
-    println!();
-}
-
-fn print_vec(label: &str, values: &[String]) {
-    println!("{label}:");
-    if values.is_empty() {
-        println!("  none");
-    } else {
-        for value in values.iter().take(MAX_STRING_VALUES_PRINTED) {
-            // literal: allow external format or runtime boundary value means itself here
-            println!("  {value}");
-        }
-        if values.len() > MAX_STRING_VALUES_PRINTED {
-            // literal: allow external format or runtime boundary value means itself here
-            println!("  ... {} more", values.len() - MAX_STRING_VALUES_PRINTED); // literal: allow external format or runtime boundary value means itself here
-        }
-    }
-    println!();
-}
-
-fn print_report_candidates(report: &PackageReport) {
     println!("install candidates:");
-    if report.install_candidates.is_empty() {
+    if report.install_candidates.is_empty()
+    {
         println!("  none detected");
     }
-    for candidate in &report.install_candidates {
+    for candidate in &report.install_candidates
+    {
         print_report_candidate(candidate);
     }
 }
 
-fn print_report_candidate(candidate: &InstallCandidate) {
+fn print_report_candidate(candidate: &InstallCandidate)
+{
     println!(
         "  {} -> {}  ({} files, {})",
         candidate.source_root,
@@ -172,7 +211,8 @@ fn print_report_candidate(candidate: &InstallCandidate) {
         candidate.file_count,
         human_bytes(candidate.total_bytes)
     );
-    if !candidate.components.is_empty() {
+    if !candidate.components.is_empty()
+    {
         let items = candidate
             .components
             .iter()
@@ -181,14 +221,17 @@ fn print_report_candidate(candidate: &InstallCandidate) {
             .join(", ");
         println!("    components: {items}");
     }
-    for note in &candidate.notes {
+    for note in &candidate.notes
+    {
         println!("    note: {note}");
     }
 }
 
-pub(crate) fn extract_to_staging(package: &Path, game_root: &Path) -> Result<(), AppError> {
+pub(crate) fn extract_to_staging(package: &Path, game_root: &Path) -> Result<(), AppError>
+{
     ensure_state(game_root)?;
-    if package.is_dir() {
+    if package.is_dir()
+    {
         return Err(usage_error(
             "extract-stage expects an archive, not a folder",
         ));
@@ -199,5 +242,5 @@ pub(crate) fn extract_to_staging(package: &Path, game_root: &Path) -> Result<(),
     extract_archive_to_directory(package, &target)?;
 
     println!("staged: {}", target.display());
-    Ok(())
+    return Ok(());
 }

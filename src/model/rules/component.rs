@@ -1,7 +1,8 @@
 use crate::prelude::*;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
-pub(crate) enum Component {
+pub(crate) enum Component
+{
     ModLoader,
     ModLoaderContent,
     Cleo,
@@ -19,9 +20,11 @@ pub(crate) enum Component {
     Audio,
 }
 
-impl fmt::Display for Component {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
+impl fmt::Display for Component
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result
+    {
+        return match self {
             Component::ModLoader => write!(f, "modloader runtime"),
             Component::ModLoaderContent => write!(f, "modloader content"),
             Component::Cleo => write!(f, "CLEO"),
@@ -37,6 +40,6 @@ impl fmt::Display for Component {
             Component::Text => write!(f, "text/GXT"),
             Component::Anim => write!(f, "animation"),
             Component::Audio => write!(f, "audio"),
-        }
+        };
     }
 }

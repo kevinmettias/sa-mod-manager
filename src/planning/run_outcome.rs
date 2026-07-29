@@ -11,7 +11,8 @@ use crate::prelude::*;
 /// on-disk manifests, so the format survives reformatting.
 #[derive(Serialize, Deserialize, Default, Clone)]
 #[serde(default)]
-pub(crate) struct RunOutcome {
+pub(crate) struct RunOutcome
+{
     pub(crate) version: u32,
     pub(crate) txid: String,
     pub(crate) profile: String,
@@ -34,26 +35,20 @@ pub(crate) const RUN_RESULT_GAME_ERROR: &str = "game_error";
 /// The executable never started (spawn failed); the run was rolled back.
 pub(crate) const RUN_RESULT_LAUNCH_FAILED: &str = "launch_failed";
 
-fn outcomes_directory(state_root: &Path) -> PathBuf {
-    state_root.join("outcomes")
-}
-
 /// The transaction id embedded in a run journal's file name (its stem), used to
 /// pair a journal with its outcome record.
-pub(crate) fn txid_from_journal(journal: &Path) -> String {
-    journal
+pub(crate) fn txid_from_journal(journal: &Path) -> String
+{
+    return journal
         .file_stem()
         .map(|stem| stem.to_string_lossy().into_owned())
-        .unwrap_or_default()
-}
-
-fn outcome_path(state_root: &Path, txid: &str) -> PathBuf {
-    outcomes_directory(state_root).join(format!("{txid}.json"))
+        .unwrap_or_default();
 }
 
 /// Persist a run outcome under the manager state directory. `state_root` is the
 /// game folder's state directory (i.e. `state_directory(game_root)`).
-pub(crate) fn write_run_outcome(state_root: &Path, outcome: &RunOutcome) -> Result<(), AppError> {
+pub(crate) fn write_run_outcome(state_root: &Path, outcome: &RunOutcome) -> Result<(), AppError>
+{
     let dir = outcomes_directory(state_root);
     fs::create_dir_all(&dir)
         .with_context(|| format!("create outcomes directory {}", dir.display()))?;
@@ -62,7 +57,7 @@ pub(crate) fn write_run_outcome(state_root: &Path, outcome: &RunOutcome) -> Resu
         .map_err(|err| AppError::Usage(format!("serialize run outcome: {err}")))?;
     text.push('\n');
     fs::write(&path, text).with_context(|| format!("write run outcome {}", path.display()))?;
-    Ok(())
+    return Ok(());
 }
 
 /// Read the outcome paired with a run journal, if one was recorded. A missing or
@@ -71,35 +66,36 @@ pub(crate) fn write_run_outcome(state_root: &Path, outcome: &RunOutcome) -> Resu
 pub(crate) fn read_run_outcome_for_journal(
     state_root: &Path,
     journal: &Path,
-) -> Option<RunOutcome> {
+) -> Option<RunOutcome>
+{
     let txid = txid_from_journal(journal);
-    if txid.is_empty() {
+    if txid.is_empty()
+    {
         return None;
     }
     let path = outcome_path(state_root, &txid);
     let text = read_capped(&path, MAX_CONTROL_FILE_BYTES).ok()?;
-    serde_json::from_str(&text).ok()
+    return serde_json::from_str(&text).ok();
+}
+
+fn outcomes_directory(state_root: &Path) -> PathBuf
+{
+    return state_root.join("outcomes");
+}
+
+fn outcome_path(state_root: &Path, txid: &str) -> PathBuf
+{
+    return outcomes_directory(state_root).join(format!("{txid}.json"));
 }
 
 #[cfg(test)]
-mod tests {
+mod tests
+{
     use super::*;
 
-    fn test_state_root(name: &str) -> PathBuf {
-        let root = env::temp_dir().join(format!(
-            "sa-mod-manager-outcome-{name}-{}-{}",
-            std::process::id(),
-            unix_now()
-        ));
-        if root.exists() {
-            fs::remove_dir_all(&root).unwrap();
-        }
-        fs::create_dir_all(&root).unwrap();
-        root
-    }
-
     #[test]
-    fn txid_from_journal_uses_the_file_stem() {
+    fn txid_from_journal_uses_the_file_stem()
+    {
         let journal = PathBuf::from("state")
             .join("journals")
             .join("run-default-42.journal");
@@ -107,7 +103,8 @@ mod tests {
     }
 
     #[test]
-    fn outcome_round_trips_through_disk() {
+    fn outcome_round_trips_through_disk()
+    {
         let state_root = test_state_root("round_trip");
         let journal = state_root.join("journals").join("run-default-42.journal");
         let outcome = RunOutcome {
@@ -122,21 +119,43 @@ mod tests {
             finished_unix: 142, // literal: allow test fixture value is the specimen under judgment
         };
 
-        write_run_outcome(&state_root, &outcome).unwrap();
-        let read = read_run_outcome_for_journal(&state_root, &journal).unwrap();
+        write_run_outcome(&state_root, &outcome)
+            .expect("the test fixture is created before this assertion reads it");
+        let read = read_run_outcome_for_journal(&state_root, &journal)
+            .expect("the test fixture is created before this assertion reads it");
 
         assert_eq!(read.result, RUN_RESULT_GAME_ERROR);
         assert_eq!(read.exit_code, Some(3)); // literal: allow test fixture value is the specimen under judgment
         assert_eq!(read.duration_ms, Some(42_000)); // literal: allow test fixture value is the specimen under judgment
         assert_eq!(read.launch_args, vec!["-w".to_string()]);
-        fs::remove_dir_all(&state_root).unwrap();
+        fs::remove_dir_all(&state_root)
+            .expect("the test fixture is created before this assertion reads it");
     }
 
     #[test]
-    fn missing_outcome_reads_as_none() {
+    fn missing_outcome_reads_as_none()
+    {
         let state_root = test_state_root("missing");
         let journal = state_root.join("journals").join("run-none-1.journal");
         assert!(read_run_outcome_for_journal(&state_root, &journal).is_none());
-        fs::remove_dir_all(&state_root).unwrap();
+        fs::remove_dir_all(&state_root)
+            .expect("the test fixture is created before this assertion reads it");
+    }
+
+    fn test_state_root(name: &str) -> PathBuf
+    {
+        let root = env::temp_dir().join(format!(
+            "sa-mod-manager-outcome-{name}-{}-{}",
+            std::process::id(),
+            unix_now()
+        ));
+        if root.exists()
+        {
+            fs::remove_dir_all(&root)
+                .expect("the test fixture is created before this assertion reads it");
+        }
+        fs::create_dir_all(&root)
+            .expect("the test fixture is created before this assertion reads it");
+        return root;
     }
 }

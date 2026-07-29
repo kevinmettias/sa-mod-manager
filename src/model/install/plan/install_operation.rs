@@ -1,6 +1,7 @@
 use crate::prelude::*;
 
-pub(crate) struct InstallOperation {
+pub(crate) struct InstallOperation
+{
     pub(crate) source_root: String,
     pub(crate) target_kind: TargetKind,
     pub(crate) target_root: PathBuf,

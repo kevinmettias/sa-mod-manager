@@ -1,7 +1,8 @@
 use crate::prelude::*;
 
 #[derive(Clone, Serialize)]
-pub(crate) struct ModInstallRootJson {
+pub(crate) struct ModInstallRootJson
+{
     pub(crate) source: String,
     pub(crate) target: String,
     pub(crate) kind: String,

@@ -1,5 +1,6 @@
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub(crate) enum UiTab {
+pub(crate) enum UiTab
+{
     Home,
     Profiles,
     Mods,
@@ -10,10 +11,12 @@ pub(crate) enum UiTab {
     Telemetry,
 }
 
-impl UiTab {
+impl UiTab
+{
     /// Stable identifier used when persisting the last-open tab between sessions.
-    pub(crate) fn as_key(self) -> &'static str {
-        match self {
+    pub(crate) fn as_key(self) -> &'static str
+    {
+        return match self {
             UiTab::Home => "home",
             UiTab::Profiles => "profiles",
             UiTab::Mods => "mods",
@@ -22,12 +25,13 @@ impl UiTab {
             UiTab::Import => "import",
             UiTab::Run => "run",
             UiTab::Telemetry => "telemetry",
-        }
+        };
     }
 
     /// Restore a tab from its persisted key, ignoring anything unrecognized.
-    pub(crate) fn from_key(key: &str) -> Option<Self> {
-        match key {
+    pub(crate) fn from_key(key: &str) -> Option<Self>
+    {
+        return match key {
             "home" => Some(UiTab::Home),
             "profiles" => Some(UiTab::Profiles),
             "mods" => Some(UiTab::Mods),
@@ -37,6 +41,6 @@ impl UiTab {
             "run" => Some(UiTab::Run),
             "telemetry" => Some(UiTab::Telemetry),
             _ => None,
-        }
+        };
     }
 }

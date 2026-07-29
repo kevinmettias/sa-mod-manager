@@ -1,7 +1,8 @@
 use crate::prelude::*;
 
 #[derive(Clone, Copy)]
-pub(crate) enum TargetKind {
+pub(crate) enum TargetKind
+{
     ModLoader,
     /// CLEO scripts (`.cs`/`.cs4`/`.cs3`) that live directly in `CLEO/`.
     Cleo,
@@ -19,9 +20,11 @@ pub(crate) enum TargetKind {
     DirectManaged,
 }
 
-impl fmt::Display for TargetKind {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
+impl fmt::Display for TargetKind
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result
+    {
+        return match self {
             TargetKind::ModLoader => write!(f, "modloader"),
             TargetKind::Cleo => write!(f, "cleo"),
             TargetKind::CleoText => write!(f, "cleo_text"),
@@ -31,6 +34,6 @@ impl fmt::Display for TargetKind {
             TargetKind::Asi => write!(f, "asi"),
             TargetKind::Bootstrap => write!(f, "bootstrap"),
             TargetKind::DirectManaged => write!(f, "direct-managed"),
-        }
+        };
     }
 }

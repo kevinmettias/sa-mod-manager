@@ -3,15 +3,17 @@ use crate::prelude::*;
 pub(crate) fn write_mod_config_json(
     report: &PackageReport,
     plan: &InstallPlan,
-) -> Result<(), AppError> {
-    write_mod_config_json_with_source(report, plan, None)
+) -> Result<(), AppError>
+{
+    return write_mod_config_json_with_source(report, plan, None);
 }
 
 pub(crate) fn write_mod_config_json_with_source(
     report: &PackageReport,
     plan: &InstallPlan,
     source_root: Option<&Path>,
-) -> Result<(), AppError> {
+) -> Result<(), AppError>
+{
     ensure_state(&plan.game_root)?;
     let dir = state_directory(&plan.game_root)
         .join("mods")
@@ -30,14 +32,155 @@ pub(crate) fn write_mod_config_json_with_source(
     writeln!(file, "}}")?;
 
     println!("mod json: {}", config_path.display());
-    Ok(())
+    return Ok(());
+}
+
+fn write_mod_config_header(
+    file: &mut fs::File,
+    report: &PackageReport,
+    plan: &InstallPlan,
+    source_root: Option<&Path>,
+) -> Result<(), AppError>
+{
+    writeln!(file, "{{")?;
+    writeln!(file, "  \"version\": 1,")?;
+    writeln!(file, "  \"id\": \"{}\",", json_escape(&plan.package_id))?;
+    writeln!(
+        file,
+        "  \"name\": \"{}\",",
+        json_escape(&plan.package_id.replace('_', " "))
+    )?;
+    writeln!(
+        file,
+        "  \"package\": \"{}\",",
+        json_escape(&report.package.display().to_string())
+    )?;
+    if let Some(source_root) = source_root
+    {
+        writeln!(
+            file,
+            "  \"source_root\": \"{}\",",
+            json_escape(&source_root.display().to_string())
+        )?;
+    }
+    writeln!(file, "  \"enabled\": true,")?;
+    writeln!(file, "  \"default_load_order\": 100,")?;
+    writeln!(file, "  \"install_roots\": [")?;
+    return Ok(());
+}
+
+fn write_mod_config_install_roots(file: &mut fs::File, plan: &InstallPlan) -> Result<(), AppError>
+{
+    for (idx, op) in plan.operations.iter().enumerate()
+    {
+        write_mod_config_install_root(file, plan, op, idx)?;
+    }
+    return Ok(());
+}
+
+fn write_mod_config_install_root(
+    file: &mut fs::File,
+    plan: &InstallPlan,
+    op: &InstallOperation,
+    idx: usize,
+) -> Result<(), AppError>
+{
+    writeln!(file, "    {{")?;
+    writeln!(
+        file,
+        "      \"source\": \"{}\",",
+        json_escape(&op.source_root)
+    )?;
+    let target = target_template(&op.target_kind, &plan.package_id);
+    writeln!(file, "      \"target\": \"{}\",", json_escape(&target))?;
+    writeln!(file, "      \"kind\": \"{}\",", op.target_kind)?;
+    writeln!(file, "      \"enabled\": true,")?;
+    writeln!(file, "      \"optional\": {}", op.optional)?;
+    write!(file, "    }}")?;
+    let total_operations = plan.operations.len();
+    return write_json_comma_or_newline(file, idx, total_operations);
+}
+
+fn write_json_comma_or_newline(
+    file: &mut fs::File,
+    idx: usize,
+    total: usize,
+) -> Result<(), AppError>
+{
+    if idx + 1 != total
+    {
+        writeln!(file, ",")?;
+    }
+    else
+    {
+        writeln!(file)?;
+    }
+    return Ok(());
+}
+
+fn write_mod_config_options(file: &mut fs::File, report: &PackageReport) -> Result<(), AppError>
+{
+    writeln!(file, "  \"available_options\": [")?;
+    for (idx, option) in report.option_groups.iter().enumerate()
+    {
+        write!(file, "    \"{}\"", json_escape(option))?;
+        if idx + 1 != report.option_groups.len()
+        {
+            writeln!(file, ",")?;
+        }
+        else
+        {
+            writeln!(file)?;
+        }
+    }
+    return Ok(());
+}
+
+fn write_mod_config_notes(file: &mut fs::File, report: &PackageReport) -> Result<(), AppError>
+{
+    writeln!(file, "  \"notes\": [")?;
+    let mut notes = Vec::new();
+    let context_hints = report.context_hints.iter().cloned();
+    notes.extend(context_hints);
+    let risks = report.risks.iter().cloned();
+    notes.extend(risks);
+    let readme_insights = report.readme_insights.iter().map(|insight| {
+        format!(
+            "readme {} {:.0}% [{}] {} ({}:{}): {} | evidence: {}",
+            insight.kind,
+            insight.confidence * 100.0, // literal: allow domain threshold is documented by the surrounding code
+            insight.rule_id,
+            insight.title,
+            insight.source_readme,
+            insight.line_number,
+            insight.detail,
+            insight.evidence
+        )
+    });
+    notes.extend(readme_insights);
+    notes.sort();
+    notes.dedup();
+    for (idx, note) in notes.iter().enumerate()
+    {
+        write!(file, "    \"{}\"", json_escape(note))?;
+        if idx + 1 != notes.len()
+        {
+            writeln!(file, ",")?;
+        }
+        else
+        {
+            writeln!(file)?;
+        }
+    }
+    return Ok(());
 }
 
 pub(crate) fn update_mod_config_install_root(
     config_path: &Path,
     root_index: usize,
     root: &ModInstallRootJson,
-) -> Result<(), AppError> {
+) -> Result<(), AppError>
+{
     let text = read_capped(config_path, MAX_CONTROL_FILE_BYTES)?;
     let mut json: serde_json::Value = serde_json::from_str(&text).map_err(|err| {
         AppError::Usage(format!("invalid mod json {}: {err}", config_path.display()))
@@ -51,7 +194,8 @@ pub(crate) fn update_mod_config_install_root(
                 config_path.display()
             ))
         })?;
-    if root_index >= roots.len() {
+    if root_index >= roots.len()
+    {
         return Err(AppError::Usage(format!(
             "install root index {root_index} out of range for {}",
             config_path.display()
@@ -62,7 +206,7 @@ pub(crate) fn update_mod_config_install_root(
     let formatted = serde_json::to_string_pretty(&json)
         .map_err(|err| AppError::Tool(format!("failed to write mod json: {err}")))?;
     fs::write(config_path, format!("{formatted}\n"))?;
-    Ok(())
+    return Ok(());
 }
 
 /// Append an install root to an existing mod config, preserving every other
@@ -72,7 +216,8 @@ pub(crate) fn update_mod_config_install_root(
 pub(crate) fn append_mod_config_install_root(
     config_path: &Path,
     root: &ModInstallRootJson,
-) -> Result<bool, AppError> {
+) -> Result<bool, AppError>
+{
     let text = read_capped(config_path, MAX_CONTROL_FILE_BYTES)?;
     let mut json: serde_json::Value = serde_json::from_str(&text).map_err(|err| {
         AppError::Usage(format!("invalid mod json {}: {err}", config_path.display()))
@@ -98,143 +243,25 @@ pub(crate) fn append_mod_config_install_root(
     let formatted = serde_json::to_string_pretty(&json)
         .map_err(|err| AppError::Tool(format!("failed to write mod json: {err}")))?;
     fs::write(config_path, format!("{formatted}\n"))?;
-    Ok(true)
+    return Ok(true);
 }
 
-fn install_root_matches(existing: &serde_json::Value, root: &ModInstallRootJson) -> bool {
+fn install_root_matches(existing: &serde_json::Value, root: &ModInstallRootJson) -> bool
+{
     let field = |key: &str| existing.get(key).and_then(serde_json::Value::as_str);
-    field("source") == Some(root.source.as_str())
+    return field("source") == Some(root.source.as_str())
         && field("target") == Some(root.target.as_str())
-        && field("kind") == Some(root.kind.as_str())
-}
-
-fn write_mod_config_header(
-    file: &mut fs::File,
-    report: &PackageReport,
-    plan: &InstallPlan,
-    source_root: Option<&Path>,
-) -> Result<(), AppError> {
-    writeln!(file, "{{")?;
-    writeln!(file, "  \"version\": 1,")?;
-    writeln!(file, "  \"id\": \"{}\",", json_escape(&plan.package_id))?;
-    writeln!(
-        file,
-        "  \"name\": \"{}\",",
-        json_escape(&plan.package_id.replace('_', " "))
-    )?;
-    writeln!(
-        file,
-        "  \"package\": \"{}\",",
-        json_escape(&report.package.display().to_string())
-    )?;
-    if let Some(source_root) = source_root {
-        writeln!(
-            file,
-            "  \"source_root\": \"{}\",",
-            json_escape(&source_root.display().to_string())
-        )?;
-    }
-    writeln!(file, "  \"enabled\": true,")?;
-    writeln!(file, "  \"default_load_order\": 100,")?;
-    writeln!(file, "  \"install_roots\": [")?;
-    Ok(())
-}
-
-fn write_mod_config_install_roots(file: &mut fs::File, plan: &InstallPlan) -> Result<(), AppError> {
-    for (idx, op) in plan.operations.iter().enumerate() {
-        write_mod_config_install_root(file, plan, op, idx)?;
-    }
-    Ok(())
-}
-
-fn write_mod_config_install_root(
-    file: &mut fs::File,
-    plan: &InstallPlan,
-    op: &InstallOperation,
-    idx: usize,
-) -> Result<(), AppError> {
-    writeln!(file, "    {{")?;
-    writeln!(
-        file,
-        "      \"source\": \"{}\",",
-        json_escape(&op.source_root)
-    )?;
-    let target = target_template(&op.target_kind, &plan.package_id);
-    writeln!(file, "      \"target\": \"{}\",", json_escape(&target))?;
-    writeln!(file, "      \"kind\": \"{}\",", op.target_kind)?;
-    writeln!(file, "      \"enabled\": true,")?;
-    writeln!(file, "      \"optional\": {}", op.optional)?;
-    write!(file, "    }}")?;
-    let total_operations = plan.operations.len();
-    write_json_comma_or_newline(file, idx, total_operations)
-}
-
-fn write_json_comma_or_newline(
-    file: &mut fs::File,
-    idx: usize,
-    total: usize,
-) -> Result<(), AppError> {
-    if idx + 1 != total {
-        writeln!(file, ",")?;
-    } else {
-        writeln!(file)?;
-    }
-    Ok(())
-}
-
-fn write_mod_config_options(file: &mut fs::File, report: &PackageReport) -> Result<(), AppError> {
-    writeln!(file, "  \"available_options\": [")?;
-    for (idx, option) in report.option_groups.iter().enumerate() {
-        write!(file, "    \"{}\"", json_escape(option))?;
-        if idx + 1 != report.option_groups.len() {
-            writeln!(file, ",")?;
-        } else {
-            writeln!(file)?;
-        }
-    }
-    Ok(())
-}
-
-fn write_mod_config_notes(file: &mut fs::File, report: &PackageReport) -> Result<(), AppError> {
-    writeln!(file, "  \"notes\": [")?;
-    let mut notes = Vec::new();
-    let context_hints = report.context_hints.iter().cloned();
-    notes.extend(context_hints);
-    let risks = report.risks.iter().cloned();
-    notes.extend(risks);
-    let readme_insights = report.readme_insights.iter().map(|insight| {
-        format!(
-            "readme {} {:.0}% [{}] {} ({}:{}): {} | evidence: {}",
-            insight.kind,
-            insight.confidence * 100.0, // literal: allow domain threshold is documented by the surrounding code
-            insight.rule_id,
-            insight.title,
-            insight.source_readme,
-            insight.line_number,
-            insight.detail,
-            insight.evidence
-        )
-    });
-    notes.extend(readme_insights);
-    notes.sort();
-    notes.dedup();
-    for (idx, note) in notes.iter().enumerate() {
-        write!(file, "    \"{}\"", json_escape(note))?;
-        if idx + 1 != notes.len() {
-            writeln!(file, ",")?;
-        } else {
-            writeln!(file)?;
-        }
-    }
-    Ok(())
+        && field("kind") == Some(root.kind.as_str());
 }
 
 #[cfg(test)]
-mod tests {
+mod tests
+{
     use super::*;
 
     #[test]
-    fn update_mod_config_install_root_preserves_config_and_writes_optional() {
+    fn update_mod_config_install_root_preserves_config_and_writes_optional()
+    {
         let root = test_root("update_mod_config_root");
         let config_path = root.join("mod.json");
         fs::write(
@@ -257,7 +284,7 @@ mod tests {
 }
 "#,
         )
-        .unwrap();
+        .expect("the test fixture is created before this assertion reads it");
         let updated = ModInstallRootJson {
             source: "files/CLEO".to_string(),
             target: "CLEO".to_string(),
@@ -266,21 +293,26 @@ mod tests {
             optional: true,
         };
 
-        update_mod_config_install_root(&config_path, 0, &updated).unwrap();
+        update_mod_config_install_root(&config_path, 0, &updated)
+            .expect("the test fixture is created before this assertion reads it");
 
-        let parsed = read_mod_config_json(&config_path).unwrap();
+        let parsed = read_mod_config_json(&config_path)
+            .expect("the test fixture is created before this assertion reads it");
         assert_eq!(parsed.install_roots[0].source, "files/CLEO");
         assert_eq!(parsed.install_roots[0].target, "CLEO");
         assert_eq!(parsed.install_roots[0].kind, "cleo");
         assert!(!parsed.install_roots[0].enabled);
         assert!(parsed.install_roots[0].optional);
-        let text = fs::read_to_string(&config_path).unwrap();
+        let text = fs::read_to_string(&config_path)
+            .expect("the test fixture is created before this assertion reads it");
         assert!(text.contains("keep me"));
-        remove_dir_if_exists(&root).unwrap();
+        remove_dir_if_exists(&root)
+            .expect("the test fixture is created before this assertion reads it");
     }
 
     #[test]
-    fn append_install_root_adds_once_and_dedups() {
+    fn append_install_root_adds_once_and_dedups()
+    {
         let root = test_root("append_mod_config_root");
         let config_path = root.join("mod.json");
         fs::write(
@@ -303,7 +335,7 @@ mod tests {
 }
 "#,
         )
-        .unwrap();
+        .expect("the test fixture is created before this assertion reads it");
         let added = ModInstallRootJson {
             source: "files/CLEO".to_string(),
             target: "CLEO".to_string(),
@@ -313,40 +345,54 @@ mod tests {
         };
 
         // First append writes and reports it added.
-        assert!(append_mod_config_install_root(&config_path, &added).unwrap());
-        let parsed = read_mod_config_json(&config_path).unwrap();
+        assert!(
+            append_mod_config_install_root(&config_path, &added)
+                .expect("the test fixture is created before this assertion reads it")
+        );
+        let parsed = read_mod_config_json(&config_path)
+            .expect("the test fixture is created before this assertion reads it");
         assert_eq!(parsed.install_roots.len(), 2); // literal: allow test fixture value is the specimen under judgment
         assert_eq!(parsed.install_roots[1].source, "files/CLEO");
         // Other fields and the original root survive.
         assert_eq!(parsed.install_roots[0].source, "old");
         assert!(
             fs::read_to_string(&config_path)
-                .unwrap()
+                .expect("the test fixture is created before this assertion reads it")
                 .contains("keep me")
         );
 
         // Re-appending the same source/target/kind is a no-op.
-        assert!(!append_mod_config_install_root(&config_path, &added).unwrap());
-        let reparsed = read_mod_config_json(&config_path).unwrap();
+        assert!(
+            !append_mod_config_install_root(&config_path, &added)
+                .expect("the test fixture is created before this assertion reads it")
+        );
+        let reparsed = read_mod_config_json(&config_path)
+            .expect("the test fixture is created before this assertion reads it");
         assert_eq!(reparsed.install_roots.len(), 2); // literal: allow test fixture value is the specimen under judgment
-        remove_dir_if_exists(&root).unwrap();
+        remove_dir_if_exists(&root)
+            .expect("the test fixture is created before this assertion reads it");
     }
 
-    fn test_root(name: &str) -> PathBuf {
+    fn test_root(name: &str) -> PathBuf
+    {
         let root = env::temp_dir().join(format!(
             "sa-mod-manager-{name}-{}-{}",
             std::process::id(),
             unix_now()
         ));
-        remove_dir_if_exists(&root).unwrap();
-        fs::create_dir_all(&root).unwrap();
-        root
+        remove_dir_if_exists(&root)
+            .expect("the test fixture is created before this assertion reads it");
+        fs::create_dir_all(&root)
+            .expect("the test fixture is created before this assertion reads it");
+        return root;
     }
 
-    fn remove_dir_if_exists(path: &Path) -> Result<(), AppError> {
-        if path.exists() {
+    fn remove_dir_if_exists(path: &Path) -> Result<(), AppError>
+    {
+        if path.exists()
+        {
             fs::remove_dir_all(path)?;
         }
-        Ok(())
+        return Ok(());
     }
 }

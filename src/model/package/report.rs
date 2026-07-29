@@ -1,6 +1,7 @@
 use crate::prelude::*;
 
-pub(crate) struct Report {
+pub(crate) struct Report
+{
     pub(crate) package: PathBuf,
     pub(crate) game_root: PathBuf,
     pub(crate) kind: PackageKind,

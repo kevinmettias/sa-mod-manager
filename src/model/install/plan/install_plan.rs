@@ -1,6 +1,7 @@
 use crate::prelude::*;
 
-pub(crate) struct InstallPlan {
+pub(crate) struct InstallPlan
+{
     pub(crate) package_id: String,
     pub(crate) package: PathBuf,
     pub(crate) game_root: PathBuf,
